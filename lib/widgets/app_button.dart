@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../core/app_colors.dart';
 import '../core/app_sizes.dart';
 import '../core/app_text_styles.dart';
 
@@ -47,7 +46,7 @@ class AppButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          backgroundColor: backgroundColor ?? AppColors.primary,
+          backgroundColor: backgroundColor ?? Theme.of(context).colorScheme.primary,
           foregroundColor: foregroundColor ?? Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius:

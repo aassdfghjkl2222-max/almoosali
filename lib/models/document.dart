@@ -1,15 +1,35 @@
 class Document {
-  final String id;
-  final String title;
-  final String number;
-  final DateTime expiryDate;
-  final bool expired;
-
+  final int? id;
+  final int? hotelId;
+  final String name;
+  final String expiryDate;
+  final String createdAt;
+  
   const Document({
-    required this.id,
-    required this.title,
-    required this.number,
+    this.id,
+    this.hotelId,
+    required this.name,
     required this.expiryDate,
-    required this.expired,
+    required this.createdAt,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'hotel_id': hotelId,
+      'name': name,
+      'expiry_date': expiryDate,
+      'created_at': createdAt,
+    };
+  }
+
+  factory Document.fromMap(Map<String, dynamic> map) {
+    return Document(
+      id: map['id'] as int?,
+      hotelId: map['hotel_id'] as int?,
+      name: map['name'] as String,
+      expiryDate: map['expiry_date'] as String,
+      createdAt: map['created_at'] as String,
+    );
+  }
 }

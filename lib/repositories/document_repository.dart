@@ -1,51 +1,26 @@
+import '../core/database/database_service.dart';
 import '../models/document.dart';
 
 class DocumentRepository {
+  final DatabaseService _databaseService = DatabaseService();
 
-  final List<Document> documents = [
+  Future<List<Document>> getAllDocuments(int? hotelId) async {
+    if (hotelId == null) return [];
+    final List<Map<String, dynamic>> maps = await _databaseService.getDocuments(hotelId);
+    return maps.map((map) => Document.fromMap(map)).toList();
+  }
 
-    Document(
+  Future<void> addDocument(Document document) async {
+    await _databaseService.insertDocument(document.toMap());
+  }
 
-      id: "1",
+  Future<void> updateDocument(Document document) async {
+    if (document.id != null) {
+      await _databaseService.updateById('documents', document.toMap(), document.id!);
+    }
+  }
 
-      title: "السجل التجاري",
-
-      number: "CR-1001",
-
-      expiryDate: DateTime(2027,1,10),
-
-      expired: false,
-
-    ),
-
-    Document(
-
-      id: "2",
-
-      title: "رخصة البلدية",
-
-      number: "BL-202",
-
-      expiryDate: DateTime(2026,8,5),
-
-      expired: false,
-
-    ),
-
-    Document(
-
-      id: "3",
-
-      title: "شهادة الدفاع المدني",
-
-      number: "CD-501",
-
-      expiryDate: DateTime(2026,7,25),
-
-      expired: true,
-
-    ),
-
-  ];
-
+  Future<void> deleteDocument(int id) async {
+    await _databaseService.deleteById('documents', id);
+  }
 }

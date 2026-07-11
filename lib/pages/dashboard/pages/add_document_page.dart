@@ -1,21 +1,41 @@
 import 'package:flutter/material.dart';
+import '../../../models/document.dart';
+import '../../../repositories/document_repository.dart';
+import '../../../widgets/common/app_dialog.dart';
 
 class AddDocumentPage extends StatefulWidget {
-  const AddDocumentPage({super.key});
+  final int hotelId;
+  const AddDocumentPage({super.key, required this.hotelId});
 
   @override
   State<AddDocumentPage> createState() => _AddDocumentPageState();
 }
 
 class _AddDocumentPageState extends State<AddDocumentPage> {
-  final titleController = TextEditingController();
-  final numberController = TextEditingController();
+  final nameController = TextEditingController();
+  final expiryDateController = TextEditingController();
+  DateTime? selectedDate;
 
   @override
   void dispose() {
-    titleController.dispose();
-    numberController.dispose();
+    nameController.dispose();
+    expiryDateController.dispose();
     super.dispose();
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() {
+        selectedDate = picked;
+        expiryDateController.text = picked.toString().split(' ')[0];
+      });
+    }
   }
 
   @override
@@ -29,24 +49,55 @@ class _AddDocumentPageState extends State<AddDocumentPage> {
         child: Column(
           children: [
             TextField(
-              controller: titleController,
+              controller: nameController,
               decoration: const InputDecoration(
                 labelText: "اسم المستند",
               ),
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: numberController,
+              controller: expiryDateController,
+              readOnly: true,
+              onTap: () => _selectDate(context),
               decoration: const InputDecoration(
-                labelText: "رقم المستند",
+                labelText: "تاريخ الانتهاء",
+                suffixIcon: Icon(Icons.calendar_today),
               ),
             ),
             const Spacer(),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
+                onPressed: () async {
+                  final name = nameController.text.trim();
+                  if (name.isNotEmpty && selectedDate != null) {
+                    await AppDialog.confirmAction(
+                      context: context,
+                      title: "تأكيد إضافة المستند",
+                      message: "هل تريد إضافة هذا المستند؟",
+                      onConfirm: () async {
+                        final repository = DocumentRepository();
+                        final newDocument = Document(
+                          hotelId: widget.hotelId,
+                          name: name,
+                          expiryDate: selectedDate!.toString().split(' ')[0],
+                          createdAt: DateTime.now().toString().split(' ')[0],
+                        );
+                        await repository.addDocument(newDocument);
+                        if (context.mounted) {
+                          Navigator.pop(context, true);
+                        }
+                      },
+                    );
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("يرجى ملء جميع الحقول"),
+                        ),
+                      );
+                    }
+                  }
                 },
                 child: const Text("حفظ"),
               ),

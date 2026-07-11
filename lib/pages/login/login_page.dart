@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_config.dart';
 import '../../core/app_text_styles.dart';
-import '../../pages/dashboard/dashboard_page.dart';
+import '../../pages/dashboard/pages/hotels_page.dart';
 import '../../repositories/user_repository.dart';
 import '../../services/session_service.dart';
 
@@ -53,15 +53,10 @@ class _LoginPageState extends State<LoginPage> {
     SessionService.instance.login(user);
 
     Navigator.pushReplacement(
-
       context,
-
       MaterialPageRoute(
-
-        builder: (_) => const DashboardPage(),
-
+        builder: (_) => const HotelsPage(),
       ),
-
     );
 
   }

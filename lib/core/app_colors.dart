@@ -4,11 +4,12 @@ class AppColors {
   AppColors._();
 
   // ===========================
-  // الهوية الرئيسية
+  // الهوية الافتراضية (Default Identity)
+  // تستخدم عند عدم وجود فندق محدد أو كقيم افتراضية
   // ===========================
 
-  static const primary = Color(0xff7A1E2C);
-  static const secondary = Color(0xffB8913F);
+  static const primary = Color(0xff7A1E2C); // العنابي (الافتراضي)
+  static const secondary = Color(0xffB8913F); // الذهبي (الافتراضي)
 
   // ===========================
   // الخلفيات

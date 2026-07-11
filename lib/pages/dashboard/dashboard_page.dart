@@ -1,140 +1,174 @@
 import 'package:flutter/material.dart';
-
-import '../home/home_page.dart';
-import 'pages/hotels_page.dart';
+import '../../core/app_theme.dart';
+import '../../core/hotel_visual_identity.dart';
+import '../../core/hotel_identity.dart';
+import '../../models/hotel.dart';
+import '../../repositories/expense_repository.dart';
+import '../../widgets/common/app_drawer.dart';
+import '../../widgets/common/hotel_identity_title.dart';
+import '../expenses/pending_expenses_list_page.dart';
+import '../vault/vault_dashboard_page.dart';
 import 'pages/documents_page.dart';
+import 'pages/more_modules_page.dart';
+import '../employees/employees_page.dart';
+import '../financial/financial_summary_page.dart';
+import 'widgets/module_card.dart';
 
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  final Hotel hotel;
+  const DashboardPage({super.key, required this.hotel});
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  int selectedIndex = 0;
+  final _expenseRepository = ExpenseRepository();
+  int _pendingCount = 0;
 
-  final List<String> titles = const [
-    "الرئيسية",
-    "الفنادق",
-    "المستندات",
-    "المديونية",
-    "الملاحظات",
-    "التقارير",
-    "المستخدمون",
-    "الإعدادات",
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadPendingCount();
+  }
+
+  Future<void> _loadPendingCount() async {
+    final expenses = await _expenseRepository.getPendingExpenses(
+      hotelId: widget.hotel.id!,
+      isTransferred: false,
+    );
+    if (mounted) {
+      setState(() {
+        _pendingCount = expenses.length;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(titles[selectedIndex]),
-      ),
-      drawer: Drawer(
-        child: ListView(
-          children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(
-                color: Colors.blue,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  CircleAvatar(
-                    radius: 28,
-                    child: Icon(Icons.person),
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    "مدير النظام",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                    ),
-                  ),
-                  Text(
-                    "admin",
-                    style: TextStyle(
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
+    final identity = HotelVisualIdentity.identityForHotel(widget.hotel);
+    
+    return Theme(
+      data: AppTheme.createTheme(identity),
+      child: Scaffold(
+        appBar: AppBar(
+          title: HotelIdentityTitle(title: "لوحة التحكم", hotel: widget.hotel),
+          centerTitle: true,
+          iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            TextButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.swap_horiz, color: Colors.white),
+              label: const Text(
+                "تغيير الفندق",
+                style: TextStyle(color: Colors.white),
               ),
             ),
-            _drawerItem(0, Icons.home, "الرئيسية"),
-            _drawerItem(1, Icons.hotel, "الفنادق"),
-            _drawerItem(2, Icons.description, "المستندات"),
-            _drawerItem(3, Icons.account_balance_wallet, "المديونية"),
-            _drawerItem(4, Icons.note_alt, "الملاحظات"),
-            _drawerItem(5, Icons.bar_chart, "التقارير"),
-            _drawerItem(6, Icons.people, "المستخدمون"),
-            _drawerItem(7, Icons.settings, "الإعدادات"),
+          ],
+        ),
+        drawer: AppDrawer(hotel: widget.hotel),
+        body: GridView.count(
+          padding: const EdgeInsets.all(16),
+          crossAxisCount: 2,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
+          children: [
+            ModuleCard(
+              title: "التقرير المالي",
+              icon: Icons.account_balance,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FinancialSummaryPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "المصروفات المعلقة",
+              icon: Icons.pending_actions,
+              badgeCount: _pendingCount,
+              backgroundColor: _pendingCount > 0 ? identity.warning : null,
+              iconColor: _pendingCount > 0 ? Colors.white : null,
+              onTap: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PendingExpensesListPage(hotel: widget.hotel),
+                  ),
+                );
+                if (result == true) {
+                  _loadPendingCount();
+                }
+              },
+            ),
+            ModuleCard(
+              title: "المركز المالي",
+              icon: Icons.account_balance_wallet,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VaultDashboardPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "المستندات",
+              icon: Icons.description,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DocumentsPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "الموظفون",
+              icon: Icons.people,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EmployeesPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "الموردون",
+              icon: Icons.local_shipping,
+              iconColor: identity.primary,
+              onTap: () {},
+            ),
+            ModuleCard(
+              title: "الحركة السنوية",
+              icon: Icons.analytics,
+              iconColor: identity.primary,
+              onTap: () {},
+            ),
+            ModuleCard(
+              title: "➕ المزيد",
+              icon: Icons.add_circle_outline,
+              iconColor: Colors.grey,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MoreModulesPage()),
+                );
+              },
+            ),
           ],
         ),
       ),
-      body: _buildPage(),
     );
-  }
-
-  Widget _drawerItem(
-      int index,
-      IconData icon,
-      String title,
-      ) {
-    return ListTile(
-      selected: selectedIndex == index,
-      leading: Icon(icon),
-      title: Text(title),
-      onTap: () {
-        Navigator.pop(context);
-
-        setState(() {
-          selectedIndex = index;
-        });
-      },
-    );
-  }
-
-  Widget _buildPage() {
-    switch (selectedIndex) {
-      case 0:
-        return const HomePage();
-
-      case 1:
-        return const HotelsPage();
-
-      case 2:
-        return const DocumentsPage();
-
-      case 3:
-        return const Center(
-          child: Text("المديونية"),
-        );
-
-      case 4:
-        return const Center(
-          child: Text("الملاحظات"),
-        );
-
-      case 5:
-        return const Center(
-          child: Text("التقارير"),
-        );
-
-      case 6:
-        return const Center(
-          child: Text("المستخدمون"),
-        );
-
-      case 7:
-        return const Center(
-          child: Text("الإعدادات"),
-        );
-
-      default:
-        return const HomePage();
-    }
   }
 }
