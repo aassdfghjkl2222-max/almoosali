@@ -70,6 +70,13 @@ class _HotelsPageState extends State<HotelsPage> {
       appBar: AppBar(
         title: const Text(
           "قائمة المنشآت",
+
+
+
+
+
+
+
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.2),
         ),
         centerTitle: true,

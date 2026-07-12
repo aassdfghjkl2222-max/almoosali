@@ -126,6 +126,11 @@ class _LedgerPageState extends State<LedgerPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_referenceTypeLabel(entry['reference_type']) != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(_referenceTypeLabel(entry['reference_type'])!, style: AppTextStyles.caption.copyWith(color: identityColor, fontWeight: FontWeight.bold)),
+                  ),
                 Text(entry['description'], style: AppTextStyles.bodyBold),
                 Text("${entry['date']} • ${entry['time']}", style: AppTextStyles.caption),
               ],
@@ -151,6 +156,18 @@ class _LedgerPageState extends State<LedgerPage> {
         ],
       ),
     );
+  }
+
+  String? _referenceTypeLabel(dynamic refType) {
+    switch (refType) {
+      case 'daily_report': return "مصروف يومي";
+      case 'employee_advance': return "سلفة موظف";
+      case 'debt_settlement': return "سداد دين";
+      case 'inter_entity': return "تحويل بين المنشآت";
+      case 'personal_action': return "حركة شخصية";
+      case 'entity_loan': return "قرض على المنشأة";
+      default: return null;
+    }
   }
 
   Widget _miniInfo(String label, String val) {

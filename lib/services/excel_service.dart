@@ -9,6 +9,54 @@ import '../models/invoice.dart';
 import '../models/supplier.dart';
 
 class ExcelService {
+  /// تصدير قائمة تقارير مفلترة (قد تشمل عدة فنادق) من قسم "التقارير" داخل
+  /// مركز التحليل — سطر واحد لكل تقرير مع اسم الفندق، بخلاف
+  /// [exportFinancialReport] المخصص لفندق واحد فقط.
+  static Future<void> exportReportsList({
+    required List<FinancialReport> reports,
+    required Map<int, String> hotelNames,
+  }) async {
+    final excel = Excel.createExcel();
+    final sheet = excel['تقارير مركز التحليل'];
+
+    final headers = ["الفندق", "التاريخ", "الحالة", "النوع", "الإيرادات", "المصروفات", "الصافي"];
+    sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    double totalIncome = 0, totalExpenses = 0;
+    for (final r in reports) {
+      totalIncome += r.income;
+      totalExpenses += r.expenses;
+      sheet.appendRow([
+        TextCellValue(hotelNames[r.hotelId] ?? 'فندق #${r.hotelId}'),
+        TextCellValue(r.date),
+        TextCellValue(r.isPosted ? 'معتمد' : 'معلّق'),
+        TextCellValue(r.reportType == 'main' ? 'رئيسي' : 'إضافي'),
+        DoubleCellValue(r.income),
+        DoubleCellValue(r.expenses),
+        DoubleCellValue(r.income - r.expenses),
+      ]);
+    }
+
+    sheet.appendRow([
+      TextCellValue('الإجمالي'),
+      TextCellValue(''),
+      TextCellValue(''),
+      TextCellValue(''),
+      DoubleCellValue(totalIncome),
+      DoubleCellValue(totalExpenses),
+      DoubleCellValue(totalIncome - totalExpenses),
+    ]);
+
+    final bytes = excel.save();
+    if (bytes != null) {
+      final directory = await getTemporaryDirectory();
+      final fileName = "تقارير_مركز_التحليل_${DateTime.now().millisecondsSinceEpoch}.xlsx";
+      final file = File("${directory.path}/$fileName");
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: "تقارير مركز التحليل (${reports.length} تقرير)");
+    }
+  }
+
   static Future<void> exportFinancialReport({
     required Hotel hotel,
     required List<FinancialReport> reports,

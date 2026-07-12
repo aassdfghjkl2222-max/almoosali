@@ -4,184 +4,136 @@ import '../../core/app_config.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
+import '../../core/hotel_visual_identity.dart';
 import '../../models/hotel.dart';
-import '../../pages/dashboard/dashboard_page.dart';
+import '../../repositories/hotel_repository.dart';
 import '../../pages/notes/notes_page.dart';
-import '../../pages/alerts/alerts_page.dart';
+import '../../pages/settings/about_page.dart';
 import '../../pages/settings/backup_page.dart';
-import '../../pages/users/users_page.dart';
-import '../../pages/dashboard/pages/hotels_page.dart';
-import '../../pages/settlements/settlements_hub_page.dart';
-import '../../pages/vault/vault_dashboard_page.dart';
-import '../../pages/invoices/invoices_page.dart';
-import '../../pages/contracts/contracts_page.dart';
 import '../../pages/settings/settings_page.dart';
+import '../../pages/settings/support_page.dart';
+import '../../pages/settlements/pages/supplier_debts_page.dart';
+import '../../pages/dashboard/pages/hotels_page.dart';
+import '../../pages/contracts/contracts_page.dart';
 import '../../pages/login/pin_login_page.dart';
+
+/// القائمة الرئيسية — مخصصة للأنظمة العامة الخاصة بالتطبيق فقط. أي نظام
+/// تشغيلي خاص بفندق معيّن (التقرير اليومي، مركز التحليل، المركز المالي،
+/// الموظفون، المستندات، المصروفات...) يبقى داخل لوحة تحكم ذلك الفندق ولا
+/// يظهر هنا، تماماً كما هو مطبَّق فعلاً في dashboard_page.dart.
+///
+/// "إدارة المستخدمين والصلاحيات" غير معروضة حالياً لأن التطبيق يعمل فعلياً
+/// بنظام دخول واحد مشترك (رمز PIN) بلا نظام مستخدمين متعددين حقيقي — العلم
+/// أدناه هو نقطة التبديل الوحيدة المطلوبة لإظهارها متى صار للتطبيق نظام
+/// مستخدمين متعدد فعلي.
+const bool kAppHasMultipleUsers = false;
 
 class AppDrawer extends StatelessWidget {
   final Hotel? hotel;
   const AppDrawer({super.key, this.hotel});
 
+  Color _identityColor(BuildContext context) {
+    return hotel != null ? HotelVisualIdentity.colorForHotel(hotel) : AppColors.primary;
+  }
+
+  /// يفتح صفحة خاصة بفندق: مباشرة إن كان هناك فندق في السياق الحالي، وإلا
+  /// يعرض قائمة اختيار فندق أولاً (بلا تحميل أي بيانات إلا عند الحاجة فعلاً).
+  Future<void> _openHotelScoped(BuildContext context, String pickerTitle, Widget Function(Hotel) builder) async {
+    if (hotel != null) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => builder(hotel!)));
+      return;
+    }
+    final hotels = await HotelRepository().getAllHotels();
+    if (!context.mounted) return;
+    final chosen = await showModalBottomSheet<Hotel>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (ctx) => _HotelPickerSheet(title: pickerTitle, hotels: hotels),
+    );
+    if (chosen != null && context.mounted) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => builder(chosen)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // محاولة الحصول على اسم الصفحة الحالية لتمييزها
-    final currentRoute = ModalRoute.of(context)?.settings.name;
-
+    final color = _identityColor(context);
     return Drawer(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.background,
       child: Column(
         children: [
-          _buildHeader(context),
+          _buildHeader(color),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: AppSizes.sm),
+              padding: const EdgeInsets.symmetric(vertical: AppSizes.md, horizontal: AppSizes.sm),
               children: [
                 _drawerItem(
                   context: context,
                   icon: Icons.home_work_rounded,
                   title: "الصفحة الرئيسية",
-                  isActive: currentRoute == '/hotels' || currentRoute == null,
-                  onTap: () {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HotelsPage()),
-                      (route) => false,
-                    );
-                  },
+                  subtitle: "قائمة الفنادق",
+                  color: color,
+                  onTap: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const HotelsPage()), (route) => false),
                 ),
-                if (hotel != null) ...[
+                _drawerItem(
+                  context: context,
+                  icon: Icons.assignment_outlined,
+                  title: "العقود",
+                  color: color,
+                  onTap: () => _openHotelScoped(context, "اختر الفندق لعرض عقوده", (h) => ContractsPage(hotel: h)),
+                ),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.local_shipping_outlined,
+                  title: "الموردون",
+                  color: color,
+                  onTap: () => _openHotelScoped(context, "اختر الفندق لعرض مورديه", (h) => SupplierDebtsPage(hotel: h)),
+                ),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.note_alt_outlined,
+                  title: "الملاحظات",
+                  color: color,
+                  onTap: () => _openHotelScoped(context, "اختر الفندق لعرض ملاحظاته", (h) => NotesPage(hotel: h)),
+                ),
+                if (kAppHasMultipleUsers)
                   _drawerItem(
                     context: context,
-                    icon: Icons.dashboard_outlined,
-                    title: "لوحة التحكم",
-                    isActive: false,
-                    onTap: () {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (_) => DashboardPage(hotel: hotel!)),
-                        (route) => false,
-                      );
-                    },
+                    icon: Icons.manage_accounts_outlined,
+                    title: "إدارة المستخدمين والصلاحيات",
+                    color: color,
+                    onTap: () {},
                   ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.receipt_long_rounded,
-                    title: "الفواتير الإلكترونية",
-                    isActive: currentRoute == '/invoices',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => InvoicesPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.account_balance_rounded,
-                    title: "المركز المالي",
-                    isActive: currentRoute == '/vault',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => VaultDashboardPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.note_alt_outlined,
-                    title: "المذكرات",
-                    isActive: currentRoute == '/notes',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => NotesPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.assignment_outlined,
-                    title: "العقود",
-                    isActive: currentRoute == '/contracts',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => ContractsPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: "التسويات المالية",
-                    isActive: currentRoute == '/settlements',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => SettlementsHubPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.notifications_none_rounded,
-                    title: "التنبيهات",
-                    isActive: currentRoute == '/alerts',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => AlertsPage(hotel: hotel!)),
-                      );
-                    },
-                  ),
-                ],
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: AppSizes.md),
-                  child: Divider(height: AppSizes.xl),
+                const _DrawerDivider(),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.cloud_sync_outlined,
+                  title: "النسخ الاحتياطي والمزامنة",
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupPage())),
                 ),
                 _drawerItem(
                   context: context,
                   icon: Icons.settings_outlined,
                   title: "الإعدادات",
-                  isActive: currentRoute == '/settings',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsPage()),
-                    );
-                  },
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
                 ),
                 _drawerItem(
                   context: context,
-                  icon: Icons.cloud_upload_outlined,
-                  title: "النسخ الاحتياطي",
-                  isActive: currentRoute == '/backup',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const BackupPage()),
-                    );
-                  },
+                  icon: Icons.help_outline_rounded,
+                  title: "الدعم والمساعدة",
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportPage())),
                 ),
                 _drawerItem(
                   context: context,
-                  icon: Icons.sync_rounded,
-                  title: "المزامنة",
-                  isActive: currentRoute == '/sync',
-                  onTap: () {},
-                ),
-                _drawerItem(
-                  context: context,
-                  icon: Icons.people_outline_rounded,
-                  title: "المستخدمون",
-                  isActive: currentRoute == '/users',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const UsersPage()),
-                    );
-                  },
+                  icon: Icons.info_outline_rounded,
+                  title: "حول التطبيق",
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage())),
                 ),
               ],
             ),
@@ -191,99 +143,39 @@ class AppDrawer extends StatelessWidget {
             context: context,
             icon: Icons.logout_rounded,
             title: "تسجيل الخروج",
-            iconColor: AppColors.danger,
-            textColor: AppColors.danger,
+            color: AppColors.danger,
             onTap: () => _showLogoutDialog(context),
           ),
-          const SizedBox(height: AppSizes.md),
+          const SizedBox(height: AppSizes.sm),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
-    final theme = Theme.of(context);
+  Widget _buildHeader(Color color) {
     return Container(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + AppSizes.md,
-        bottom: AppSizes.lg,
-        left: AppSizes.md,
-        right: AppSizes.md,
-      ),
+      padding: EdgeInsets.only(top: 48, bottom: AppSizes.lg, left: AppSizes.md, right: AppSizes.md),
       decoration: BoxDecoration(
-        color: theme.primaryColor,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(AppRadius.lg),
-          bottomRight: Radius.circular(AppRadius.lg),
-        ),
+        color: color,
+        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(AppRadius.lg), bottomRight: Radius.circular(AppRadius.lg)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(AppSizes.sm),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(
-                  Icons.apartment,
-                  color: theme.colorScheme.secondary,
-                  size: AppSizes.iconLarge,
-                ),
-              ),
-              const SizedBox(width: AppSizes.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppConfig.appName,
-                      style: AppTextStyles.title.copyWith(color: Colors.white),
-                    ),
-                    Text(
-                      AppConfig.companyNameAr,
-                      style: AppTextStyles.caption.copyWith(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          Container(
+            padding: const EdgeInsets.all(AppSizes.sm),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(AppRadius.md)),
+            child: const Icon(Icons.apartment, color: Colors.white, size: AppSizes.iconLarge),
           ),
-          const SizedBox(height: AppSizes.lg),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: theme.colorScheme.secondary,
-                child: Text(
-                  "م", // أول حرف من مدير
-                  style: AppTextStyles.bodyBold.copyWith(color: theme.primaryColor),
-                ),
-              ),
-              const SizedBox(width: AppSizes.sm),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "مدير النظام",
-                    style: AppTextStyles.bodyBold.copyWith(color: Colors.white),
-                  ),
-                  Text(
-                    "admin@manazel.com",
-                    style: AppTextStyles.caption.copyWith(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          const SizedBox(width: AppSizes.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hotel?.arabicName ?? AppConfig.appName, style: AppTextStyles.title.copyWith(color: Colors.white, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(hotel != null ? AppConfig.companyNameAr : "نظام إدارة الفنادق", style: AppTextStyles.caption.copyWith(color: Colors.white.withOpacity(0.75), fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
           ),
         ],
       ),
@@ -294,40 +186,48 @@ class AppDrawer extends StatelessWidget {
     required BuildContext context,
     required IconData icon,
     required String title,
+    required Color color,
     required VoidCallback onTap,
-    bool isActive = false,
-    Color? iconColor,
-    Color? textColor,
+    String? subtitle,
   }) {
-    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSizes.sm, vertical: 2),
-      child: ListTile(
-        leading: Icon(
-          icon,
-          color: isActive
-              ? theme.primaryColor
-              : (iconColor ?? AppColors.textSecondary),
-          size: 24,
-        ),
-        title: Text(
-          title,
-          style: AppTextStyles.body.copyWith(
-            color: isActive
-                ? theme.primaryColor
-                : (textColor ?? AppColors.textPrimary),
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          onTap: () {
+            Navigator.pop(context);
+            onTap();
+          },
+          child: Container(
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: AppSizes.sm),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm)),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(width: AppSizes.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title, style: AppTextStyles.bodyBold.copyWith(fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      if (subtitle != null) Text(subtitle, style: AppTextStyles.caption.copyWith(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, size: 13, color: Colors.grey),
+              ],
+            ),
           ),
         ),
-        selected: isActive,
-        selectedTileColor: theme.primaryColor.withOpacity(0.08),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        onTap: () {
-          Navigator.pop(context);
-          onTap();
-        },
       ),
     );
   }
@@ -336,30 +236,69 @@ class AppDrawer extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
         title: const Text("تسجيل الخروج", style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text("هل أنت متأكد من رغبتك في تسجيل الخروج؟"),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary))),
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (_) => const PinLoginPage()),
-                (route) => false,
-              );
-            },
-            child: const Text(
-              "تسجيل الخروج",
-              style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold),
-            ),
+            onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const PinLoginPage()), (route) => false),
+            child: const Text("تسجيل الخروج", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DrawerDivider extends StatelessWidget {
+  const _DrawerDivider();
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: AppSizes.sm),
+      child: Divider(height: AppSizes.lg),
+    );
+  }
+}
+
+class _HotelPickerSheet extends StatelessWidget {
+  final String title;
+  final List<Hotel> hotels;
+  const _HotelPickerSheet({required this.title, required this.hotels});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        padding: const EdgeInsets.all(AppSizes.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(title, style: AppTextStyles.title.copyWith(fontSize: 17)),
+            const SizedBox(height: AppSizes.sm),
+            const Divider(height: 1),
+            Flexible(
+              child: hotels.isEmpty
+                  ? const Padding(padding: EdgeInsets.all(24), child: Center(child: Text("لا توجد فنادق مسجَّلة", style: AppTextStyles.caption)))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: hotels.length,
+                      itemBuilder: (_, i) {
+                        final h = hotels[i];
+                        return ListTile(
+                          leading: CircleAvatar(radius: 10, backgroundColor: HotelVisualIdentity.colorForHotel(h)),
+                          title: Text(h.arabicName, style: AppTextStyles.bodyBold),
+                          onTap: () => Navigator.pop(context, h),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

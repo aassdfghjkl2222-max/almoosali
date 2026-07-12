@@ -66,6 +66,13 @@ class EmployeeRepository {
     return await _dbService.insertEmployeeEvent(event.toMap());
   }
 
+  /// كل حركات السجل الوظيفي لكل موظفي فندق معيّن (وليس موظفاً واحداً) — تُستخدم
+  /// في مركز التحليل لعرض "النقل بين المنشآت"/"الإيقاف" على مستوى الفندق كاملاً.
+  Future<List<Map<String, dynamic>>> getEventsForHotel(int? hotelId, {String? eventType}) async {
+    if (hotelId == null) return [];
+    return await _dbService.getEmployeeEventsByHotel(hotelId, eventType: eventType);
+  }
+
   // --- المستندات ---
   Future<List<EmployeeDocument>> getDocuments(int employeeId) async {
     final data = await _dbService.getEmployeeDocuments(employeeId);

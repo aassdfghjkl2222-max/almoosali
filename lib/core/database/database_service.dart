@@ -301,6 +301,7 @@ class DatabaseService {
 
   // --- سجل حركة الموظف (Event Log) ---
   Future<List<Map<String, dynamic>>> getEmployeeEvents(int employeeId) async { final db = await database; return await db.query('employee_events', where: 'employee_id = ?', whereArgs: [employeeId], orderBy: 'event_date DESC, id DESC'); }
+  Future<List<Map<String, dynamic>>> getEmployeeEventsByHotel(int hotelId, {String? eventType}) async { final db = await database; final where = <String>['ev.hotel_id = ?']; final args = <dynamic>[hotelId]; if (eventType != null) { where.add('ev.event_type = ?'); args.add(eventType); } return await db.rawQuery('SELECT ev.*, e.name as employee_name FROM employee_events ev JOIN employees e ON ev.employee_id = e.id WHERE ${where.join(' AND ')} ORDER BY ev.event_date DESC, ev.id DESC', args); }
   Future<int> insertEmployeeEvent(Map<String, dynamic> data) async { final db = await database; return await db.insert('employee_events', data); }
 
   /// نقل الموظف بين الفنادق: يحدّث الفندق الحالي للموظف ويسجّل حركة "نقل" ضمن معاملة واحدة.

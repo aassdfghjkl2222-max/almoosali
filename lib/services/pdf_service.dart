@@ -2,12 +2,123 @@ import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../models/financial_report.dart';
 import '../models/settlement.dart';
 import '../models/settlement_account.dart';
 
 class PdfService {
+  /// تصدير قائمة تقارير مفلترة (قسم "التقارير" داخل مركز التحليل) — يتّبع نمط
+  /// [ContractReportService] (خطوط Cairo عربية + جدول RTL) بخلاف بقية دوال هذا
+  /// الملف التي لا تحمّل خطاً عربياً.
+  static Future<pw.Document> _buildReportsListPdf({
+    required List<FinancialReport> reports,
+    required Map<int, String> hotelNames,
+    required String filtersSummary,
+  }) async {
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.cairoMedium();
+    final boldFont = await PdfGoogleFonts.cairoBold();
+    final currency = NumberFormat("#,##0.##");
+
+    double totalIncome = 0, totalExpenses = 0;
+    for (final r in reports) {
+      totalIncome += r.income;
+      totalExpenses += r.expenses;
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        textDirection: pw.TextDirection.rtl,
+        theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text("تقارير مركز التحليل", style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                pw.Text(DateTime.now().toString().split(' ')[0], style: const pw.TextStyle(fontSize: 12)),
+              ],
+            ),
+          ),
+          if (filtersSummary.isNotEmpty) ...[
+            pw.SizedBox(height: 6),
+            pw.Text("الفلاتر المطبقة: $filtersSummary", style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+          ],
+          pw.SizedBox(height: 16),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              _summaryBox("عدد التقارير", "${reports.length}"),
+              _summaryBox("إجمالي الإيرادات", "${currency.format(totalIncome)} ر.س"),
+              _summaryBox("إجمالي المصروفات", "${currency.format(totalExpenses)} ر.س"),
+              _summaryBox("الصافي", "${currency.format(totalIncome - totalExpenses)} ر.س"),
+            ],
+          ),
+          pw.SizedBox(height: 16),
+          pw.TableHelper.fromTextArray(
+            headers: ["الفندق", "التاريخ", "الحالة", "الإيرادات", "المصروفات", "الصافي"],
+            data: reports.map((r) => [
+              hotelNames[r.hotelId] ?? 'فندق #${r.hotelId}',
+              r.date,
+              r.isPosted ? 'معتمد' : 'معلّق',
+              currency.format(r.income),
+              currency.format(r.expenses),
+              currency.format(r.income - r.expenses),
+            ]).toList(),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, font: boldFont),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey),
+            cellAlignment: pw.Alignment.center,
+          ),
+        ],
+      ),
+    );
+    return pdf;
+  }
+
+  static pw.Widget _summaryBox(String label, String value) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        border: pw.Border.all(color: PdfColors.grey300),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+      ),
+      child: pw.Column(
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 9)),
+          pw.SizedBox(height: 2),
+          pw.Text(value, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  static Future<void> shareReportsListPdf({
+    required List<FinancialReport> reports,
+    required Map<int, String> hotelNames,
+    String filtersSummary = '',
+  }) async {
+    final pdf = await _buildReportsListPdf(reports: reports, hotelNames: hotelNames, filtersSummary: filtersSummary);
+    final bytes = await pdf.save();
+    final directory = await getTemporaryDirectory();
+    final file = File("${directory.path}/تقارير_مركز_التحليل_${DateTime.now().millisecondsSinceEpoch}.pdf");
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: "تقارير مركز التحليل (${reports.length} تقرير)");
+  }
+
+  static Future<void> printReportsListPdf({
+    required List<FinancialReport> reports,
+    required Map<int, String> hotelNames,
+    String filtersSummary = '',
+  }) async {
+    final pdf = await _buildReportsListPdf(reports: reports, hotelNames: hotelNames, filtersSummary: filtersSummary);
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+  }
+
   static Future<void> shareSettlementPdf({
     required Settlement settlement,
     required String creditorName,

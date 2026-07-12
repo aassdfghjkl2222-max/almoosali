@@ -7,11 +7,14 @@ import '../../repositories/expense_repository.dart';
 import '../../widgets/common/app_drawer.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../expenses/pending_expenses_list_page.dart';
+import '../invoices/invoices_page.dart';
+import '../settlements/settlements_hub_page.dart';
 import '../vault/vault_dashboard_page.dart';
 import 'pages/documents_page.dart';
 import 'pages/more_modules_page.dart';
 import '../employees/employees_page.dart';
 import '../financial/financial_summary_page.dart';
+import '../analysis/analysis_center_page.dart';
 import 'widgets/module_card.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -150,10 +153,43 @@ class _DashboardPageState extends State<DashboardPage> {
               onTap: () {},
             ),
             ModuleCard(
-              title: "الحركة السنوية",
+              title: "مركز التحليل",
               icon: Icons.analytics,
               iconColor: identity.primary,
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnalysisCenterPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "الفواتير الإلكترونية",
+              icon: Icons.receipt_long,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InvoicesPage(hotel: widget.hotel),
+                  ),
+                );
+              },
+            ),
+            ModuleCard(
+              title: "التسويات المالية",
+              icon: Icons.account_balance_wallet_outlined,
+              iconColor: identity.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettlementsHubPage(hotel: widget.hotel),
+                  ),
+                );
+              },
             ),
             ModuleCard(
               title: "➕ المزيد",

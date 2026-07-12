@@ -53,6 +53,17 @@ class SecurityService {
     }
   }
 
+  /// أنواع المصادقة البيومترية المتاحة فعلياً على هذا الجهاز (بصمة/وجه/غيرها) —
+  /// تُستخدم لعرض تسمية دقيقة في شاشة الإعدادات ("تسجيل الدخول بالوجه" فقط
+  /// إن كان الجهاز يدعمه فعلاً) دون إضافة مفتاح تخزين منفصل لكل نوع.
+  Future<List<BiometricType>> getAvailableBiometricTypes() async {
+    try {
+      return await _localAuth.getAvailableBiometrics();
+    } catch (e) {
+      return [];
+    }
+  }
+
   Future<bool> authenticateWithBiometrics() async {
     try {
       final availableBiometrics = await _localAuth.getAvailableBiometrics();

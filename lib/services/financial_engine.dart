@@ -59,6 +59,17 @@ class FinancialEngine {
     return results.map((e) => FinancialAccount.fromMap(e)).toList();
   }
 
+  /// يستخرج معرف المنشأة الأخرى من فئة ديناميكية مثل entity_12 أو receivable_entity_12.
+  int? _parseEntityOtherId(String category) {
+    if (category.startsWith('receivable_entity_')) {
+      return int.tryParse(category.substring('receivable_entity_'.length));
+    }
+    if (category.startsWith('entity_')) {
+      return int.tryParse(category.substring('entity_'.length));
+    }
+    return null;
+  }
+
   Future<void> postReport(FinancialReport report) async {
     if (report.isPosted) return;
     final db = await _dbService.database;
@@ -99,8 +110,16 @@ class FinancialEngine {
           // حساب المالك (أصل هنا لأنه مدين للفندق)
           await _updateAccount(txn, report.hotelId, 'person_owner_debt', amt, 'income', "مديونية مصروف خاص: ${exp['name']}", report.id, 'daily_report');
         } else {
-          // فندق آخر (دين على هذه المنشأة لمنشأة أخرى)
-          await _updateAccount(txn, report.hotelId, 'entity', amt, 'expense', "مصروف (عن طريق فندق زميل): ${exp['name']}", report.id, 'daily_report');
+          // فندق آخر (دين على هذه المنشأة لمنشأة أخرى) — يُربط تلقائياً بالمنشأة المحددة
+          final otherHotelRows = await txn.query('hotels', where: 'arabic_name = ?', whereArgs: [method], limit: 1);
+          if (otherHotelRows.isNotEmpty) {
+            final otherHotelId = otherHotelRows.first['id'] as int;
+            await _updateAccount(txn, report.hotelId, 'entity_$otherHotelId', amt, 'expense', "مصروف (عن طريق $method): ${exp['name']}", report.id, 'daily_report');
+            await _updateAccount(txn, otherHotelId, 'receivable_entity_${report.hotelId}', amt, 'income', "مستحقات (دفع مصروف عن فندق آخر): ${exp['name']}", report.id, 'inter_entity');
+          } else {
+            // احتياطي فقط في حال تعذر تحديد المنشأة (نادر) — يُسجَّل كدين غير مصنف بدلاً من فقدان البيانات
+            await _updateAccount(txn, report.hotelId, 'entity', amt, 'expense', "مصروف (عن طريق فندق زميل): ${exp['name']}", report.id, 'daily_report');
+          }
         }
       }
 
@@ -219,8 +238,11 @@ class FinancialEngine {
     final db = await _dbService.database;
     await db.transaction((txn) async {
       await _updateAccount(txn, hotelId, sourceCategory, amount, type == 'income' ? 'income' : 'expense', description, referenceId, referenceType);
-      if (sourceCategory == 'entity' && otherHotelId != null) {
-        await _updateAccount(txn, otherHotelId, 'receivable_entity', amount, 'income', 'مستحقات (دفع مصروف عن فندق آخر): $description', referenceId, 'inter_entity');
+      if (sourceCategory.startsWith('entity_')) {
+        final resolvedOtherId = otherHotelId ?? _parseEntityOtherId(sourceCategory);
+        if (resolvedOtherId != null) {
+          await _updateAccount(txn, resolvedOtherId, 'receivable_entity_$hotelId', amount, 'income', 'مستحقات (دفع مصروف عن فندق آخر): $description', referenceId, 'inter_entity');
+        }
       }
     });
   }
@@ -237,8 +259,11 @@ class FinancialEngine {
     await db.transaction((txn) async {
       await _updateAccount(txn, hotelId, paymentSource, amount, 'expense', 'سداد مديونية: $description', null, 'debt_settlement');
       await _updateAccount(txn, hotelId, debtCategory, amount, 'income', 'تخفيض دين: $description', null, 'debt_settlement');
-      if (debtCategory == 'entity' && otherHotelId != null) {
-        await _updateAccount(txn, otherHotelId, 'receivable_entity', amount, 'expense', 'استلام سداد مستحقات: $description', null, 'debt_settlement');
+      if (debtCategory.startsWith('entity_')) {
+        final resolvedOtherId = otherHotelId ?? _parseEntityOtherId(debtCategory);
+        if (resolvedOtherId != null) {
+          await _updateAccount(txn, resolvedOtherId, 'receivable_entity_$hotelId', amount, 'expense', 'استلام سداد مستحقات: $description', null, 'debt_settlement');
+        }
       }
     });
   }
@@ -277,6 +302,8 @@ class FinancialEngine {
   }
 
   String _getAccountName(String category) {
+    if (category.startsWith('entity_')) return 'دين لمنشأة أخرى';
+    if (category.startsWith('receivable_entity_')) return 'مستحق من منشأة أخرى';
     switch (category) {
       case 'cash': return 'الخزنة (نقد)';
       case 'bank': return 'الحساب البنكي';
@@ -288,6 +315,8 @@ class FinancialEngine {
   }
 
   String _getAccountType(String category) {
+    if (category.startsWith('receivable_entity_')) return 'asset';
+    if (category.startsWith('entity_')) return 'liability';
     if (category == 'cash' || category == 'bank' || category == 'receivable_entity' || category == 'client') return 'asset';
     if (category.startsWith('person_')) return 'asset';
     if (category == 'personal' || category == 'entity' || category == 'supplier') return 'liability';

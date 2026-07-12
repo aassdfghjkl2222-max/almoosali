@@ -629,7 +629,7 @@ class PayrollService {
     }
     if (entity > 0) {
       await _financialEngine.recordTransaction(
-        hotelId: employee.hotelId!, sourceCategory: 'entity', amount: entity,
+        hotelId: employee.hotelId!, sourceCategory: 'entity_$entityHotelId', amount: entity,
         type: 'expense', description: description, referenceType: 'employee_advance',
         otherHotelId: entityHotelId,
       );
