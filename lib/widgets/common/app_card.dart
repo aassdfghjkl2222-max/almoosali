@@ -35,12 +35,16 @@ class AppCard extends StatelessWidget {
     );
 
     if (identityAccent != null) {
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(width: 4, color: identityAccent),
-          Expanded(child: content),
-        ],
+      // IntrinsicHeight يحوّل ارتفاع الصف من "غير محدود" (كما هو الحال داخل Column/ListView)
+      // إلى ارتفاع محدود يساوي أطول عنصر فيه، حتى يعمل stretch بلا كسر في التخطيط (Layout).
+      content = IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 4, color: identityAccent),
+            Expanded(child: content),
+          ],
+        ),
       );
     }
 
