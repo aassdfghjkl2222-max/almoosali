@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+/// ألوان الهوية والحالات الثابتة فقط (لا تتغير بين الوضع الفاتح والداكن).
+/// خلفيات الشاشات والبطاقات والنصوص والحدود أصبحت جميعها تتبع الثيم عبر
+/// Theme.of(context) (راجع core/app_theme.dart) بدل قيم ثابتة هنا، حتى
+/// يتحول التطبيق بأكمله فعلياً عند تبديل الوضع الداكن من الإعدادات.
 class AppColors {
   AppColors._();
 
@@ -12,20 +16,6 @@ class AppColors {
   static const secondary = Color(0xffB8913F); // الذهبي (الافتراضي)
 
   // ===========================
-  // الخلفيات
-  // ===========================
-
-  static const background = Color(0xffF8F6F2);
-  static const card = Colors.white;
-
-  // ===========================
-  // النصوص
-  // ===========================
-
-  static const textPrimary = Color(0xff222222);
-  static const textSecondary = Color(0xff777777);
-
-  // ===========================
   // الحالات
   // ===========================
 
@@ -33,12 +23,6 @@ class AppColors {
   static const warning = Color(0xffD18B00);
   static const danger = Color(0xffD32F2F);
   static const info = Color(0xff1565C0);
-
-  // ===========================
-  // الحدود
-  // ===========================
-
-  static const border = Color(0xffE5E5E5);
 
   // ===========================
   // الظلال

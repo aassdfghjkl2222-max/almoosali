@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -50,9 +49,9 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: Column(
         children: [
@@ -124,7 +123,11 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
           },
         ),
         title: Text(exp.statement, style: AppTextStyles.bodyBold),
-        subtitle: Text("${exp.categoryName} • ${exp.paymentMethod} • ${exp.amount}"),
+        subtitle: Text(
+          exp.isDeferredDebt && exp.supplierName != null
+              ? "${exp.categoryName} • ${exp.paymentMethod} (${exp.supplierName}) • ${exp.amount}"
+              : "${exp.categoryName} • ${exp.paymentMethod} • ${exp.amount}",
+        ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

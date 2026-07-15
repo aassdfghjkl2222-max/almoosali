@@ -72,7 +72,7 @@ class _VaultDashboardPageState extends State<VaultDashboardPage> {
     final trueNet = (_cash + _bank + _receivable) - _payable;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "المركز المالي", hotel: widget.hotel),
         centerTitle: true,

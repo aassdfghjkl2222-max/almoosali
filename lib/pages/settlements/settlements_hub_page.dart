@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../widgets/common/app_card.dart';
@@ -20,7 +19,7 @@ class SettlementsHubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "التسويات المالية", hotel: hotel),
         centerTitle: true,
@@ -110,14 +109,14 @@ class SettlementsHubPage extends StatelessWidget {
                 const SizedBox(height: AppSizes.xs),
                 Text(
                   subtitle,
-                  style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+                  style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
           ),
-          const Icon(
+          Icon(
             Icons.arrow_forward_ios,
-            color: AppColors.textSecondary,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             size: 16,
           ),
         ],

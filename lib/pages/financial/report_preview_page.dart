@@ -30,7 +30,7 @@ class ReportPreviewPage extends StatelessWidget {
     bool isAdditional = report.reportType == 'additional';
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("معاينة التقرير النهائي"),
         centerTitle: true,
@@ -203,7 +203,7 @@ class ReportPreviewPage extends StatelessWidget {
   Widget _buildActionButtons(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(AppSizes.md),
-      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.background))),
+      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Theme.of(context).scaffoldBackgroundColor))),
       child: Row(
         children: [
           Expanded(child: AppButton(text: "✏️ تعديل", onPressed: () => Navigator.pop(context), backgroundColor: Colors.grey[200], foregroundColor: Colors.black87)),

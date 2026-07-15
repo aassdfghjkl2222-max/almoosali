@@ -126,7 +126,7 @@ class _SecuritySetupPageState extends State<SecuritySetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -195,7 +195,7 @@ class _SecuritySetupPageState extends State<SecuritySetupPage> {
           margin: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: hasValue ? AppColors.primary : AppColors.border,
+            color: hasValue ? AppColors.primary : Theme.of(context).dividerColor,
           ),
         );
       }),
@@ -254,13 +254,13 @@ class _SecuritySetupPageState extends State<SecuritySetupPage> {
           ),
           child: Center(
             child: icon != null
-                ? Icon(icon, color: AppColors.textPrimary)
+                ? Icon(icon, color: Theme.of(context).colorScheme.onSurface)
                 : Text(
                     value,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
           ),

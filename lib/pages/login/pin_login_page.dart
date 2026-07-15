@@ -111,7 +111,7 @@ class _PinLoginPageState extends State<PinLoginPage> with SingleTickerProviderSt
     }
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -153,7 +153,7 @@ class _PinLoginPageState extends State<PinLoginPage> with SingleTickerProviderSt
           margin: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: hasValue ? AppColors.primary : AppColors.border,
+            color: hasValue ? AppColors.primary : Theme.of(context).dividerColor,
           ),
         );
       }),
@@ -217,13 +217,13 @@ class _PinLoginPageState extends State<PinLoginPage> with SingleTickerProviderSt
           ),
           child: Center(
             child: icon != null
-                ? Icon(icon, color: icon == Icons.fingerprint ? AppColors.primary : AppColors.textPrimary)
+                ? Icon(icon, color: icon == Icons.fingerprint ? AppColors.primary : Theme.of(context).colorScheme.onSurface)
                 : Text(
                     value,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
           ),

@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'dart:io';
-import '../../../core/app_colors.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../core/formatters/thousands_separator_formatter.dart';
@@ -174,7 +173,7 @@ class _AddInterEntityDebtPageState extends State<AddInterEntityDebtPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(widget.settlement == null ? "إضافة مديونية" : "تعديل مديونية", 
                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),

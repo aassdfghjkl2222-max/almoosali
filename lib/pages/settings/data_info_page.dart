@@ -88,7 +88,7 @@ class _DataInfoPageState extends State<DataInfoPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text("البيانات"), centerTitle: true),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -117,7 +117,7 @@ class _DataInfoPageState extends State<DataInfoPage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
+      decoration: BoxDecoration(color: Theme.of(this.context).cardColor, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
       child: Column(children: children),
     );
   }

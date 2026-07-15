@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
@@ -47,7 +46,7 @@ class RevenueDrilldownPage extends StatelessWidget {
     final total = reports.fold(0.0, (s, r) => s + _amount(r));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: title, hotel: hotel),
         centerTitle: true,

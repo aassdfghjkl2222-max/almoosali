@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 // ignore_for_file: non_const_argument_for_const_parameter
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -79,7 +78,7 @@ class _ExpenseReportsPageState extends State<ExpenseReportsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "تقارير وإحصائيات المصروفات", hotel: widget.hotel),
         centerTitle: true,
@@ -157,7 +156,7 @@ class _ExpenseReportsPageState extends State<ExpenseReportsPage> {
           }
         },
         selectedColor: HotelVisualIdentity.colorForHotel(widget.hotel),
-        labelStyle: TextStyle(color: isSelected ? Colors.white : AppColors.textPrimary),
+        labelStyle: TextStyle(color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface),
       ),
     );
   }

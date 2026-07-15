@@ -27,6 +27,10 @@ class AppTextField extends StatelessWidget {
   /// (كالرقم الضريبي أو الجوال أو رمز PIN).
   final bool formatThousands;
 
+  /// منسّقات إدخال مخصّصة (مثل قصر الإدخال على أرقام فقط بطول ثابت لحقل
+  /// الرقم الضريبي) — تُتجاهَل إن كان formatThousands مفعَّلاً.
+  final List<TextInputFormatter>? inputFormatters;
+
   const AppTextField({
     super.key,
     required this.controller,
@@ -44,6 +48,7 @@ class AppTextField extends StatelessWidget {
     this.onTap,
     this.maxLines = 1,
     this.formatThousands = false,
+    this.inputFormatters,
   });
 
   @override
@@ -59,7 +64,7 @@ class AppTextField extends StatelessWidget {
           controller: controller,
           obscureText: isPassword,
           keyboardType: formatThousands ? const TextInputType.numberWithOptions(decimal: true) : keyboardType,
-          inputFormatters: formatThousands ? const [ThousandsSeparatorInputFormatter()] : null,
+          inputFormatters: formatThousands ? const [ThousandsSeparatorInputFormatter()] : inputFormatters,
           textInputAction: textInputAction,
           onSubmitted: onSubmitted,
           focusNode: focusNode,
@@ -72,10 +77,10 @@ class AppTextField extends StatelessWidget {
             errorText: errorText,
             prefixIcon: icon == null ? null : Icon(icon),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Theme.of(context).cardColor,
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(AppRadius.md),
-              borderSide: const BorderSide(color: AppColors.border),
+              borderSide: BorderSide(color: Theme.of(context).dividerColor),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(AppRadius.md),

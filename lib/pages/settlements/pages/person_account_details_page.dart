@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'dart:io';
 import 'package:share_plus/share_plus.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../models/settlement.dart';
@@ -159,7 +158,7 @@ class _PersonAccountDetailsPageState extends State<PersonAccountDetailsPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("$label: ", style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary)),
+          Text("$label: ", style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           Expanded(child: Text(value, style: AppTextStyles.body)),
         ],
       ),
@@ -170,7 +169,7 @@ class _PersonAccountDetailsPageState extends State<PersonAccountDetailsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: widget.account.name, hotel: widget.hotel),
         centerTitle: true,

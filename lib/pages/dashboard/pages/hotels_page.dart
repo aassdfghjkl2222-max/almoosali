@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_colors.dart';
+import '../../../core/document_status.dart';
 import '../../../core/hotel_session.dart';
 import '../../../core/hotel_visual_identity.dart';
 import '../../../core/app_radius.dart';
@@ -46,19 +47,9 @@ class _HotelsPageState extends State<HotelsPage> {
   }
 
   Future<void> _loadAllAlerts(List<Hotel> hotels) async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
     for (var hotel in hotels) {
-      final docs = await docRepository.getAllDocuments(hotel.id!);
-      int count = 0;
-
-      for (var doc in docs) {
-        final expiry = DateTime.tryParse(doc.expiryDate);
-        if (expiry == null) continue;
-        final days = expiry.difference(today).inDays;
-        if (days <= 30) count++;
-      }
+      final docs = await docRepository.getDocumentsForHotel(hotel.id!);
+      final count = docs.where((doc) => DocumentStatus.fromExpiryDate(doc.expiryDate).needsAttention).length;
       _hotelAlertCounts[hotel.id!] = count;
     }
   }
@@ -66,7 +57,7 @@ class _HotelsPageState extends State<HotelsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
           "قائمة المنشآت",
@@ -189,8 +180,8 @@ class _HotelsPageState extends State<HotelsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xff222222))),
+                Text(label, style: const TextStyle(fontSize: 11, color: Color(0xff777777))),
               ],
             ),
           ),

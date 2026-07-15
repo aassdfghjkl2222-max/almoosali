@@ -203,7 +203,7 @@ class _RelationshipsCenterPageState extends State<RelationshipsCenterPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: identityColor,

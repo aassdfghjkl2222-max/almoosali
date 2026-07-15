@@ -49,7 +49,7 @@ class _EmployeesPageState extends State<EmployeesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "الموظفون", hotel: widget.hotel),
         centerTitle: true,
@@ -98,11 +98,11 @@ class _EmployeesPageState extends State<EmployeesPage> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.people_outline, size: 64, color: AppColors.textSecondary),
+                        Icon(Icons.people_outline, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         const SizedBox(height: AppSizes.md),
                         Text(
                           _query.trim().isEmpty ? "لا يوجد موظفون مضافون" : "لا توجد نتائج مطابقة",
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 16),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 16),
                         ),
                       ],
                     ),
@@ -182,7 +182,7 @@ class _EmployeesPageState extends State<EmployeesPage> {
                 Text(employee.name, style: AppTextStyles.bodyBold),
                 Text(employee.position, style: AppTextStyles.caption),
                 if (employee.employeeNumber != null)
-                  Text(employee.employeeNumber!, style: AppTextStyles.caption.copyWith(fontSize: 10, color: AppColors.textSecondary)),
+                  Text(employee.employeeNumber!, style: AppTextStyles.caption.copyWith(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 const SizedBox(height: 4),
                 _buildStatusBadge(employee.status),
               ],

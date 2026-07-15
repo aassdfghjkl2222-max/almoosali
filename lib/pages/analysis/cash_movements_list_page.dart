@@ -113,7 +113,7 @@ class _CashMovementsListPageState extends State<CashMovementsListPage> {
     final total = filtered.fold(0.0, (s, e) => s + (e['type'] == 'debit' ? (e['amount'] as num) : -(e['amount'] as num)));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: widget.title, hotel: widget.hotel),
         centerTitle: true,

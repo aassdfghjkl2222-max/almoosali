@@ -18,6 +18,18 @@ class AppPreferences {
   static const keyCriticalNotifications = 'pref_critical_notifications';
   static const keySilentNotifications = 'pref_silent_notifications';
 
+  // النسخ الاحتياطي والمزامنة
+  static const keyLastBackupAt = 'pref_last_backup_at';
+  static const keyBackupLog = 'pref_backup_log';
+  static const keyAutoBackupEnabled = 'pref_auto_backup_enabled';
+  static const keyAutoBackupFrequency = 'pref_auto_backup_frequency'; // 'daily' | 'weekly' | 'monthly'
+  static const keyLastSyncAt = 'pref_last_sync_at';
+  static const keySyncLog = 'pref_sync_log';
+
+  // لغة التطبيق — القيمة الوحيدة المتاحة حالياً 'ar' (لا تبديل لغة فعلي
+  // بعد)، محفوظة وجاهزة ليقرأها main.dart فور توفر ملفات ترجمة إضافية.
+  static const keyAppLocale = 'pref_app_locale';
+
   static Future<bool> getBool(String key, {bool defaultValue = false}) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(key) ?? defaultValue;

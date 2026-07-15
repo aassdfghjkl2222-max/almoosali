@@ -143,7 +143,7 @@ class _InterEntityDebtDetailsPageState extends State<InterEntityDebtDetailsPage>
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary))),
+              TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
               TextButton(
                 onPressed: () async {
                   final amount = ThousandsSeparatorInputFormatter.parse(amountController.text);
@@ -239,7 +239,7 @@ class _InterEntityDebtDetailsPageState extends State<InterEntityDebtDetailsPage>
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("تفاصيل المديونية", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,

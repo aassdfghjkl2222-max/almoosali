@@ -1,21 +1,34 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
-import '../../core/hotel_visual_identity.dart';
+
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
+import '../../core/hotel_visual_identity.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
+import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
-import '../../services/excel_service.dart';
-import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_drawer.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../expenses/manage_categories_page.dart';
 import 'add_invoice_page.dart';
 import 'invoice_details_page.dart';
+import 'invoice_reports_page.dart';
 import 'supplier_report_page.dart';
+import 'supplier_statement_page.dart';
 
+enum _HotelScope { current, all, custom }
+
+enum _PeriodPreset { today, thisWeek, lastWeek, thisMonth, lastMonth, custom }
+
+/// مركز "الفواتير الضريبية" لكل فندق — الهيكل العام فقط في هذه المرحلة:
+/// بطاقات ملخص، اختيار فندق واحد/الكل/عدة، فترات جاهزة وفترة مخصصة، بحث
+/// فوري، فلاتر (مورد/تصنيف/مصدر تمويل)، قائمة مُحمَّلة تدريجياً. يُعاد
+/// استخدام AddInvoicePage/InvoiceDetailsPage الموجودتين فعلياً بلا أي
+/// تعديل — لا منطق مالي جديد ولا شاشات موردين/تقارير أُنشئت هنا.
 class InvoicesPage extends StatefulWidget {
   final Hotel hotel;
   const InvoicesPage({super.key, required this.hotel});
@@ -25,437 +38,792 @@ class InvoicesPage extends StatefulWidget {
 }
 
 class _InvoicesPageState extends State<InvoicesPage> {
-  final _repository = InvoiceRepository();
+  static const _pageSize = 20;
+
+  final _invoiceRepo = InvoiceRepository();
+  final _hotelRepo = HotelRepository();
   final _searchController = TextEditingController();
-  late Future<List<Invoice>> _invoicesFuture;
-  
-  DateTime? _startDate;
-  DateTime? _endDate;
+  final _scrollController = ScrollController();
+  Timer? _searchDebounce;
 
   Color get _identityColor => HotelVisualIdentity.colorForHotel(widget.hotel);
+
+  List<Hotel> _hotels = [];
+  _HotelScope _hotelScope = _HotelScope.current;
+  late Set<int> _customHotelIds;
+
+  _PeriodPreset? _periodPreset;
+  DateTime? _customStart;
+  DateTime? _customEnd;
+
+  String _searchQuery = '';
+  String? _supplierFilter;
+  String? _categoryFilter;
+  String? _amountSourceFilter;
+
+  List<String> _availableSuppliers = [];
+  List<String> _availableCategories = [];
+  List<String> _availableAmountSources = [];
+
+  String _sortKey = 'date_desc';
+
+  InvoicesSummary? _summary;
+  final List<Invoice> _invoices = [];
+  bool _isLoadingFirstPage = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
 
   @override
   void initState() {
     super.initState();
-    _loadInvoices();
-  }
-
-  void _loadInvoices() {
-    setState(() {
-      if (_startDate == null && _endDate == null) {
-        _invoicesFuture = _repository.getAllInvoices(widget.hotel.id!);
-      } else {
-        String? startStr = _startDate != null 
-            ? "${_startDate!.year}-${_startDate!.month.toString().padLeft(2, '0')}-${_startDate!.day.toString().padLeft(2, '0')}" 
-            : null;
-        String? endStr = _endDate != null 
-            ? "${_endDate!.year}-${_endDate!.month.toString().padLeft(2, '0')}-${_endDate!.day.toString().padLeft(2, '0')}" 
-            : null;
-            
-        _invoicesFuture = _repository.getFilteredInvoices(
-          hotelId: widget.hotel.id!,
-          startDate: startStr,
-          endDate: endStr,
-        );
-      }
-    });
+    _customHotelIds = {widget.hotel.id!};
+    _scrollController.addListener(_onScroll);
+    _bootstrap();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final identityColor = _identityColor;
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: HotelIdentityTitle(title: "الفواتير الإلكترونية", hotel: widget.hotel),
-        centerTitle: true,
-        backgroundColor: identityColor,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.file_download_outlined),
-            onPressed: () async {
-              final invoices = await _invoicesFuture;
-              await ExcelService.exportGeneralInvoicesReport(
-                hotelName: widget.hotel.arabicName,
-                invoices: invoices,
-                fromDate: _startDate,
-                toDate: _endDate,
-              );
-            },
-            tooltip: "تقرير Excel",
-          ),
-        ],
-      ),
-      drawer: AppDrawer(hotel: widget.hotel),
-      body: Column(
+  List<int>? get _effectiveHotelIds {
+    switch (_hotelScope) {
+      case _HotelScope.current:
+        return [widget.hotel.id!];
+      case _HotelScope.all:
+        return null;
+      case _HotelScope.custom:
+        return _customHotelIds.toList();
+    }
+  }
+
+  (String?, String?) get _effectiveDateRange {
+    final now = DateTime.now();
+    String fmt(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+    switch (_periodPreset) {
+      case null:
+        return (null, null);
+      case _PeriodPreset.today:
+        return (fmt(now), fmt(now));
+      case _PeriodPreset.thisWeek:
+        return (fmt(now.subtract(Duration(days: now.weekday - 1))), fmt(now));
+      case _PeriodPreset.lastWeek:
+        final thisWeekStart = now.subtract(Duration(days: now.weekday - 1));
+        final lastWeekStart = thisWeekStart.subtract(const Duration(days: 7));
+        final lastWeekEnd = thisWeekStart.subtract(const Duration(days: 1));
+        return (fmt(lastWeekStart), fmt(lastWeekEnd));
+      case _PeriodPreset.thisMonth:
+        return (fmt(DateTime(now.year, now.month, 1)), fmt(now));
+      case _PeriodPreset.lastMonth:
+        final lastMonthEnd = DateTime(now.year, now.month, 1).subtract(const Duration(days: 1));
+        return (fmt(DateTime(lastMonthEnd.year, lastMonthEnd.month, 1)), fmt(lastMonthEnd));
+      case _PeriodPreset.custom:
+        return (_customStart != null ? fmt(_customStart!) : null, _customEnd != null ? fmt(_customEnd!) : null);
+    }
+  }
+
+  Future<void> _bootstrap() async {
+    final hotels = await _hotelRepo.getAllHotels();
+    if (!mounted) return;
+    setState(() => _hotels = hotels);
+    await _reloadFilterOptions();
+    await _reload();
+  }
+
+  Future<void> _reloadFilterOptions() async {
+    final hotelIds = _effectiveHotelIds;
+    final suppliers = await _invoiceRepo.getDistinctSuppliers(hotelIds);
+    final categories = await _invoiceRepo.getDistinctCategories(hotelIds);
+    final amountSources = await _invoiceRepo.getDistinctAmountSources(hotelIds);
+    if (!mounted) return;
+    setState(() {
+      _availableSuppliers = suppliers;
+      _availableCategories = categories;
+      _availableAmountSources = amountSources;
+      if (_supplierFilter != null && !_availableSuppliers.contains(_supplierFilter)) _supplierFilter = null;
+      if (_categoryFilter != null && _categoryFilter != kUnclassifiedInvoiceCategory && !_availableCategories.contains(_categoryFilter)) _categoryFilter = null;
+      if (_amountSourceFilter != null && !_availableAmountSources.contains(_amountSourceFilter)) _amountSourceFilter = null;
+    });
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _isLoadingFirstPage = true;
+      _invoices.clear();
+      _hasMore = true;
+    });
+    final hotelIds = _effectiveHotelIds;
+    final (start, end) = _effectiveDateRange;
+
+    final summary = await _invoiceRepo.getInvoicesSummary(
+      hotelIds: hotelIds,
+      startDate: start,
+      endDate: end,
+      supplierName: _supplierFilter,
+      category: _categoryFilter,
+      amountSource: _amountSourceFilter,
+      searchQuery: _searchQuery,
+    );
+    final firstPage = await _invoiceRepo.getInvoicesPagedFiltered(
+      hotelIds: hotelIds,
+      startDate: start,
+      endDate: end,
+      supplierName: _supplierFilter,
+      category: _categoryFilter,
+      amountSource: _amountSourceFilter,
+      searchQuery: _searchQuery,
+      sortKey: _sortKey,
+      limit: _pageSize,
+      offset: 0,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _summary = summary;
+      _invoices.addAll(firstPage);
+      _hasMore = firstPage.length >= _pageSize;
+      _isLoadingFirstPage = false;
+    });
+  }
+
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore) return;
+    setState(() => _isLoadingMore = true);
+    final hotelIds = _effectiveHotelIds;
+    final (start, end) = _effectiveDateRange;
+    final next = await _invoiceRepo.getInvoicesPagedFiltered(
+      hotelIds: hotelIds,
+      startDate: start,
+      endDate: end,
+      supplierName: _supplierFilter,
+      category: _categoryFilter,
+      amountSource: _amountSourceFilter,
+      searchQuery: _searchQuery,
+      sortKey: _sortKey,
+      limit: _pageSize,
+      offset: _invoices.length,
+    );
+    if (!mounted) return;
+    setState(() {
+      _invoices.addAll(next);
+      _hasMore = next.length >= _pageSize;
+      _isLoadingMore = false;
+    });
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 300) {
+      _loadMore();
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      _searchQuery = value.trim();
+      _reload();
+    });
+  }
+
+  Future<void> _openHotelScopeSheet() async {
+    var scope = _hotelScope;
+    var custom = {..._customHotelIds};
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: AppSizes.md,
+                right: AppSizes.md,
+                top: AppSizes.md,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + AppSizes.md,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("اختيار الفندق", style: AppTextStyles.title.copyWith(fontSize: 18)),
+                  const SizedBox(height: AppSizes.sm),
+                  RadioListTile<_HotelScope>(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text("هذا الفندق فقط (${widget.hotel.arabicName})"),
+                    value: _HotelScope.current,
+                    groupValue: scope,
+                    onChanged: (v) => setSheetState(() => scope = v!),
+                  ),
+                  RadioListTile<_HotelScope>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("جميع الفنادق"),
+                    value: _HotelScope.all,
+                    groupValue: scope,
+                    onChanged: (v) => setSheetState(() => scope = v!),
+                  ),
+                  RadioListTile<_HotelScope>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("تحديد عدة فنادق"),
+                    value: _HotelScope.custom,
+                    groupValue: scope,
+                    onChanged: (v) => setSheetState(() => scope = v!),
+                  ),
+                  if (scope == _HotelScope.custom)
+                    ..._hotels.map((h) => CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(h.arabicName),
+                          value: custom.contains(h.id),
+                          onChanged: (checked) => setSheetState(() {
+                            if (checked == true) {
+                              custom.add(h.id!);
+                            } else {
+                              custom.remove(h.id!);
+                            }
+                          }),
+                        )),
+                  const SizedBox(height: AppSizes.md),
+                  SizedBox(
+                    width: double.infinity,
+                    height: AppSizes.buttonHeight,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(sheetContext, true),
+                      child: const Text("تطبيق"),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true) return;
+    setState(() {
+      _hotelScope = scope;
+      _customHotelIds = custom.isEmpty ? {widget.hotel.id!} : custom;
+    });
+    await _reloadFilterOptions();
+    await _reload();
+  }
+
+  Future<void> _pickCustomRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDateRange: _customStart != null && _customEnd != null ? DateTimeRange(start: _customStart!, end: _customEnd!) : null,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(colorScheme: Theme.of(context).colorScheme.copyWith(primary: _identityColor)),
+          child: child!,
+        );
+      },
+    );
+    if (range == null) return;
+    setState(() {
+      _periodPreset = _PeriodPreset.custom;
+      _customStart = range.start;
+      _customEnd = range.end;
+    });
+    _reload();
+  }
+
+  void _selectPeriod(_PeriodPreset preset) {
+    setState(() {
+      if (_periodPreset == preset) {
+        _periodPreset = null;
+      } else {
+        _periodPreset = preset;
+      }
+    });
+    _reload();
+  }
+
+  String get _hotelScopeLabel {
+    switch (_hotelScope) {
+      case _HotelScope.current:
+        return widget.hotel.arabicName;
+      case _HotelScope.all:
+        return "جميع الفنادق";
+      case _HotelScope.custom:
+        return "${_customHotelIds.length} فنادق مختارة";
+    }
+  }
+
+  void _openReportsPage() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceReportsPage(hotel: widget.hotel)));
+  }
+
+  PopupMenuItem<String> _sortMenuItem(String key, String label) {
+    final isSelected = _sortKey == key;
+    return PopupMenuItem(
+      value: key,
+      child: Row(
         children: [
-          _buildFilterSection(),
-          Expanded(
-            child: FutureBuilder<List<Invoice>>(
-              future: _invoicesFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final invoices = snapshot.data ?? [];
-
-                if (invoices.isEmpty) {
-                  return const Center(
-                    child: Text("لا توجد فواتير مضافة حالياً"),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(AppSizes.md),
-                  itemCount: invoices.length,
-                  itemBuilder: (context, index) {
-                    final invoice = invoices[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: AppSizes.md),
-                      child: _buildInvoiceCard(invoice),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
+          if (isSelected) Icon(Icons.check, size: 16, color: _identityColor) else const SizedBox(width: 16),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : null)),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel)),
-          );
-          if (result == true) {
-            _loadInvoices();
-          }
-        },
-        backgroundColor: identityColor,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
       ),
     );
   }
 
-  Widget _buildInvoiceCard(Invoice invoice) {
-    final identityColor = _identityColor;
-    return AppCard(
-      onTap: () async {
-        final result = await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => InvoiceDetailsPage(invoice: invoice, hotel: widget.hotel),
-          ),
-        );
-        if (result == true) {
-          _loadInvoices();
-        }
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  void _openSettingsSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSizes.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "رقم الفاتورة: ${invoice.invoiceNumber}",
-                style: AppTextStyles.bodyBold.copyWith(color: identityColor),
+              Text("إعدادات الفواتير الضريبية", style: AppTextStyles.title.copyWith(fontSize: 18)),
+              const SizedBox(height: AppSizes.sm),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.category_outlined, color: _identityColor),
+                title: const Text("إدارة تصنيفات المصروفات"),
+                subtitle: const Text("قاعدة تصنيفات موحدة تُستخدم في كل الفنادق"),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ManageCategoriesPage(hotel: widget.hotel)));
+                },
               ),
-              Text(
-                invoice.date,
+              const SizedBox(height: AppSizes.sm),
+              const Text(
+                "بقية إعدادات هذا القسم (ترقيم الفواتير، ربط الموردين) ستتوفر في مرحلة قادمة.",
                 style: AppTextStyles.caption,
               ),
             ],
           ),
-          const Divider(height: AppSizes.md),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  invoice.companyName,
-                  style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold),
-                ),
-              ),
-              IconButton(
-                icon: const Text("📊", style: TextStyle(fontSize: 20)),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SupplierReportPage(
-                        hotel: widget.hotel,
-                        companyName: invoice.companyName,
-                        startDate: _startDate,
-                        endDate: _endDate,
-                      ),
-                    ),
-                  );
-                },
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: "تقرير المورد",
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSizes.xs),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
-                style: AppTextStyles.bodyBold.copyWith(color: Theme.of(context).colorScheme.secondary),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: identityColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  invoice.facilityName,
-                  style: AppTextStyles.caption.copyWith(color: identityColor),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildFilterSection() {
-    final identityColor = _identityColor;
-    return Container(
-      padding: const EdgeInsets.all(AppSizes.md),
-      decoration: BoxDecoration(
-        color: identityColor,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(AppRadius.lg),
-          bottomRight: Radius.circular(AppRadius.lg),
-        ),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _buildDatePicker(
-                  label: "من تاريخ",
-                  value: _startDate,
-                  onSelect: (date) => setState(() => _startDate = date),
-                ),
-              ),
-              const SizedBox(width: AppSizes.md),
-              Expanded(
-                child: _buildDatePicker(
-                  label: "إلى تاريخ",
-                  value: _endDate,
-                  onSelect: (date) => setState(() => _endDate = date),
-                ),
-              ),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: HotelIdentityTitle(title: "الفواتير الضريبية", hotel: widget.hotel),
+        centerTitle: true,
+        backgroundColor: _identityColor,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.sort),
+            tooltip: "الفرز والترتيب",
+            onSelected: (key) {
+              setState(() => _sortKey = key);
+              _reload();
+            },
+            itemBuilder: (context) => [
+              _sortMenuItem('date_desc', "التاريخ (الأحدث أولاً)"),
+              _sortMenuItem('date_asc', "التاريخ (الأقدم أولاً)"),
+              _sortMenuItem('amount_desc', "المبلغ (الأعلى أولاً)"),
+              _sortMenuItem('amount_asc', "المبلغ (الأقل أولاً)"),
+              _sortMenuItem('invoice_number_desc', "رقم الفاتورة (تنازلي)"),
+              _sortMenuItem('invoice_number_asc', "رقم الفاتورة (تصاعدي)"),
             ],
           ),
-          const SizedBox(height: AppSizes.md),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 45,
-                  child: ElevatedButton(
-                    onPressed: _loadInvoices,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                      ),
-                    ),
-                    child: const Text(
-                      "عرض التقرير",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSizes.md),
-              Expanded(
-                child: SizedBox(
-                  height: 45,
-                  child: ElevatedButton(
-                    onPressed: _showSummaryDialog,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: identityColor,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.analytics_outlined, size: 18),
-                        SizedBox(width: 4),
-                        Text(
-                          "الإجمالي",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.bar_chart_outlined),
+            tooltip: "التقارير",
+            onPressed: _openReportsPage,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: "الإعدادات",
+            onPressed: _openSettingsSheet,
           ),
         ],
       ),
+      drawer: AppDrawer(hotel: widget.hotel),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel)));
+          if (result == true) {
+            await _reloadFilterOptions();
+            await _reload();
+          }
+        },
+        backgroundColor: _identityColor,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text("إضافة فاتورة"),
+      ),
+      body: _isLoadingFirstPage && _hotels.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async {
+                await _reloadFilterOptions();
+                await _reload();
+              },
+              child: CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  SliverToBoxAdapter(child: _buildSummarySection()),
+                  SliverToBoxAdapter(child: _buildControlsSection()),
+                  SliverToBoxAdapter(child: _buildSearchAndFilters()),
+                  _isLoadingFirstPage
+                      ? const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
+                      : _invoices.isEmpty
+                          ? SliverFillRemaining(child: _buildEmptyState())
+                          : SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(AppSizes.md, 0, AppSizes.md, 96),
+                              sliver: SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    if (index == _invoices.length) {
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: AppSizes.md),
+                                        child: Center(child: _isLoadingMore ? const CircularProgressIndicator() : const SizedBox.shrink()),
+                                      );
+                                    }
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: AppSizes.sm),
+                                      child: _buildInvoiceRow(_invoices[index]),
+                                    );
+                                  },
+                                  childCount: _invoices.length + (_hasMore ? 1 : 0),
+                                ),
+                              ),
+                            ),
+                ],
+              ),
+            ),
     );
   }
 
-  void _showSummaryDialog() async {
-    final invoices = await _invoicesFuture;
-    
-    double totalBeforeTax = 0;
-    double totalVat = 0;
-    double totalAmount = 0;
-    
-    for (var inv in invoices) {
-      totalBeforeTax += inv.amountBeforeTax;
-      totalVat += inv.vat;
-      totalAmount += inv.totalAmount;
-    }
-
-    double avgValue = invoices.isEmpty ? 0 : totalAmount / invoices.length;
-    String firstInvoice = invoices.isEmpty ? "-" : invoices.last.date;
-    String lastInvoice = invoices.isEmpty ? "-" : invoices.first.date;
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-        title: Column(
-          children: [
-            Text(
-              "ملخص التقرير",
-              style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              widget.hotel.arabicName,
-              style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.secondary),
-            ),
-          ],
-        ),
-        content: Column(
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSizes.xl),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildSummaryRow("عدد الفواتير", "${invoices.length}"),
-            const Divider(),
-            _buildSummaryRow("إجمالي قبل الضريبة", "${NumberFormat("#,##0.00").format(totalBeforeTax)} ريال"),
-            _buildSummaryRow("إجمالي الضريبة", "${NumberFormat("#,##0.00").format(totalVat)} ريال"),
-            _buildSummaryRow("إجمالي بعد الضريبة", "${NumberFormat("#,##0.00").format(totalAmount)} ريال", isBold: true),
-            const Divider(),
-            _buildSummaryRow("متوسط قيمة الفاتورة", "${NumberFormat("#,##0.00").format(avgValue)} ريال"),
-            _buildSummaryRow("أول فاتورة", firstInvoice),
-            _buildSummaryRow("آخر فاتورة", lastInvoice),
+            Icon(Icons.receipt_long_outlined, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6)),
+            const SizedBox(height: AppSizes.md),
+            const Text("لا توجد فواتير مطابقة", style: AppTextStyles.bodyBold),
+            const SizedBox(height: AppSizes.xs),
+            const Text("جرّب تغيير الفترة أو الفلاتر، أو أضِف أول فاتورة", style: AppTextStyles.caption, textAlign: TextAlign.center),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("إغلاق", style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+      ),
+    );
+  }
+
+  // ---------------- بطاقات الملخص ----------------
+
+  Widget _buildSummarySection() {
+    final summary = _summary;
+    final fmt = NumberFormat("#,##0.00");
+    final cards = <_SummaryCardData>[
+      _SummaryCardData("عدد الفواتير", summary == null ? "-" : "${summary.invoiceCount}", Icons.receipt_long),
+      _SummaryCardData("إجمالي قيمة الفواتير", summary == null ? "-" : "${fmt.format(summary.totalAmount)} ريال", Icons.payments_outlined),
+      _SummaryCardData("إجمالي ضريبة القيمة المضافة", summary == null ? "-" : "${fmt.format(summary.totalVat)} ريال", Icons.percent),
+      _SummaryCardData("الإجمالي قبل الضريبة", summary == null ? "-" : "${fmt.format(summary.totalBeforeTax)} ريال", Icons.request_quote_outlined),
+      _SummaryCardData("عدد الموردين", summary == null ? "-" : "${summary.supplierCount}", Icons.local_shipping_outlined),
+      _SummaryCardData("آخر فاتورة مضافة", summary?.lastInvoice == null ? "لا توجد" : "${summary!.lastInvoice!.invoiceNumber} — ${summary.lastInvoice!.date}", Icons.history),
+    ];
+
+    return SizedBox(
+      height: 108,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
+        itemCount: cards.length,
+        separatorBuilder: (_, __) => const SizedBox(width: AppSizes.sm),
+        itemBuilder: (context, index) => _buildSummaryCard(cards[index]),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard(_SummaryCardData data) {
+    return Container(
+      width: 168,
+      padding: const EdgeInsets.all(AppSizes.sm),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(data.icon, color: _identityColor, size: 20),
+          const Spacer(),
+          Text(
+            data.value,
+            style: AppTextStyles.bodyBold.copyWith(fontSize: 14),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
+          const SizedBox(height: 2),
+          Text(data.label, style: AppTextStyles.caption.copyWith(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
         ],
       ),
     );
   }
 
-  Widget _buildSummaryRow(String label, String value, {bool isBold = false}) {
+  // ---------------- أدوات التحكم (الفندق + الفترة) ----------------
+
+  Widget _buildControlsSection() {
+    final periods = <(_PeriodPreset, String)>[
+      (_PeriodPreset.today, "اليوم"),
+      (_PeriodPreset.thisWeek, "الأسبوع الحالي"),
+      (_PeriodPreset.lastWeek, "الأسبوع الماضي"),
+      (_PeriodPreset.thisMonth, "هذا الشهر"),
+      (_PeriodPreset.lastMonth, "الشهر الماضي"),
+    ];
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 13)),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-              color: isBold ? Theme.of(context).colorScheme.secondary : AppColors.textPrimary,
+          InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            onTap: _openHotelScopeSheet,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.sm),
+              decoration: BoxDecoration(
+                color: _identityColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: _identityColor.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.apartment, color: _identityColor, size: 18),
+                  const SizedBox(width: AppSizes.sm),
+                  Expanded(child: Text(_hotelScopeLabel, style: AppTextStyles.bodyBold.copyWith(fontSize: 13))),
+                  Icon(Icons.expand_more, color: _identityColor),
+                ],
+              ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDatePicker({
-    required String label,
-    required DateTime? value,
-    required Function(DateTime) onSelect,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        InkWell(
-          onTap: () async {
-            final date = await showDatePicker(
-              context: context,
-              initialDate: value ?? DateTime.now(),
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2030),
-              builder: (context, child) {
-                return Theme(
-                  data: Theme.of(context).copyWith(
-                    colorScheme: ColorScheme.light(
-                      primary: _identityColor,
-                      onPrimary: Colors.white,
-                      onSurface: _identityColor,
-                    ),
-                  ),
-                  child: child!,
+          const SizedBox(height: AppSizes.sm),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: periods.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                if (index == periods.length) {
+                  return ChoiceChip(
+                    label: const Text("فترة مخصصة"),
+                    selected: _periodPreset == _PeriodPreset.custom,
+                    onSelected: (_) => _pickCustomRange(),
+                  );
+                }
+                final (preset, label) = periods[index];
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: _periodPreset == preset,
+                  onSelected: (_) => _selectPeriod(preset),
                 );
               },
-            );
-            if (date != null) onSelect(date);
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: AppSizes.sm, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(color: Colors.white24),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------- البحث والفلاتر ----------------
+
+  Widget _buildSearchAndFilters() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SearchBar(
+            controller: _searchController,
+            hintText: "بحث برقم الفاتورة أو اسم الشركة...",
+            leading: const Icon(Icons.search),
+            trailing: _searchController.text.isEmpty
+                ? null
+                : [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _searchController.clear();
+                        _onSearchChanged('');
+                      },
+                    ),
+                  ],
+            onChanged: _onSearchChanged,
+          ),
+          const SizedBox(height: AppSizes.sm),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _buildFilterDropdown(
+                label: "المورد",
+                value: _supplierFilter,
+                options: _availableSuppliers,
+                onChanged: (v) {
+                  setState(() => _supplierFilter = v);
+                  _reload();
+                },
+              ),
+              _buildFilterDropdown(
+                label: "تصنيف المصروف",
+                value: _categoryFilter,
+                options: _availableCategories,
+                includeUnclassified: true,
+                onChanged: (v) {
+                  setState(() => _categoryFilter = v);
+                  _reload();
+                },
+              ),
+              _buildFilterDropdown(
+                label: "مصدر التمويل",
+                value: _amountSourceFilter,
+                options: _availableAmountSources,
+                onChanged: (v) {
+                  setState(() => _amountSourceFilter = v);
+                  _reload();
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterDropdown({
+    required String label,
+    required String? value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+    bool includeUnclassified = false,
+  }) {
+    final hasValue = value != null;
+    return InputChip(
+      label: Text(
+        hasValue ? (value == kUnclassifiedInvoiceCategory ? "غير مصنَّف" : value) : label,
+        style: const TextStyle(fontSize: 12),
+      ),
+      selected: hasValue,
+      onPressed: () async {
+        final chosen = await showModalBottomSheet<String?>(
+          context: context,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+          builder: (sheetContext) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
               children: [
-                Text(
-                  value == null ? "اختر التاريخ" : "${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}",
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ListTile(title: Text(label, style: AppTextStyles.bodyBold)),
+                ListTile(
+                  title: const Text("الكل"),
+                  trailing: value == null ? const Icon(Icons.check) : null,
+                  onTap: () => Navigator.pop(sheetContext, ''),
                 ),
-                const Icon(Icons.calendar_today, size: 14, color: Colors.white70),
+                if (includeUnclassified)
+                  ListTile(
+                    title: const Text("غير مصنَّف"),
+                    trailing: value == kUnclassifiedInvoiceCategory ? const Icon(Icons.check) : null,
+                    onTap: () => Navigator.pop(sheetContext, kUnclassifiedInvoiceCategory),
+                  ),
+                ...options.map((o) => ListTile(
+                      title: Text(o),
+                      trailing: value == o ? const Icon(Icons.check) : null,
+                      onTap: () => Navigator.pop(sheetContext, o),
+                    )),
               ],
             ),
           ),
-        ),
-      ],
+        );
+        if (chosen == null) return;
+        onChanged(chosen.isEmpty ? null : chosen);
+      },
+      onDeleted: hasValue ? () => onChanged(null) : null,
+      deleteIcon: hasValue ? const Icon(Icons.close, size: 16) : null,
     );
   }
+
+  // ---------------- قائمة الفواتير ----------------
+
+  Widget _buildInvoiceRow(Invoice invoice) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.xs),
+        onTap: () async {
+          final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceDetailsPage(invoice: invoice, hotel: widget.hotel)));
+          if (result == true) {
+            await _reloadFilterOptions();
+            await _reload();
+          }
+        },
+        leading: CircleAvatar(
+          backgroundColor: _identityColor.withOpacity(0.1),
+          child: Icon(Icons.receipt_outlined, color: _identityColor, size: 20),
+        ),
+        title: Text(invoice.companyName, style: AppTextStyles.bodyBold.copyWith(fontSize: 14)),
+        subtitle: Text(
+          "#${invoice.invoiceNumber} · ${invoice.date} · ${invoice.expenseCategory ?? 'غير مصنَّف'} · ${invoice.amountSource}\n${invoice.facilityName}",
+          style: AppTextStyles.caption,
+        ),
+        isThreeLine: true,
+        trailing: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
+              style: AppTextStyles.bodyBold.copyWith(color: _identityColor, fontSize: 13),
+            ),
+            PopupMenuButton<String>(
+              padding: EdgeInsets.zero,
+              icon: Icon(Icons.more_vert, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              onSelected: (value) {
+                if (value == 'supplier_report') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SupplierReportPage(hotel: widget.hotel, companyName: invoice.companyName)),
+                  );
+                } else if (value == 'supplier_statement') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SupplierStatementPage(hotel: widget.hotel, companyName: invoice.companyName)),
+                  );
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'supplier_statement', child: Text("كشف حساب المورد")),
+                PopupMenuItem(value: 'supplier_report', child: Text("تقرير هذا المورد")),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryCardData {
+  final String label;
+  final String value;
+  final IconData icon;
+  const _SummaryCardData(this.label, this.value, this.icon);
 }

@@ -64,7 +64,7 @@ class _RelationshipTxnDetailPageState extends State<RelationshipTxnDetailPage> {
     final statusColor = t.status == 'مُنفَّذة' || t.status == 'مسدَّدة' ? AppColors.success : AppColors.warning;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "تفاصيل العملية #${t.id}", hotel: widget.contextHotel),
         centerTitle: true,

@@ -29,7 +29,7 @@ class RelationshipTxnListPage extends StatelessWidget {
     final total = txns.fold(0.0, (s, t) => s + (t.isReceivable ? t.amount : -t.amount));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: title, hotel: contextHotel),
         centerTitle: true,

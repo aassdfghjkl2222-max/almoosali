@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/app_theme.dart';
+import 'core/app_theme_controller.dart';
 import 'core/hotel_session.dart';
 import 'core/hotel_visual_identity.dart';
 import 'models/hotel.dart';
@@ -13,6 +14,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final hasPin = await SecurityService.instance.hasPin();
+  await AppThemeController.bootstrap();
 
   runApp(ManazelApp(hasPin: hasPin));
 }
@@ -23,28 +25,53 @@ class ManazelApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ثيم التطبيق بأكمله يتبع الفندق الحالي (HotelSession.current) —
-    // هذا هو المصدر الوحيد للحقيقة لكل ألوان التطبيق: أي شاشة أو Dialog
-    // أو BottomSheet أو SnackBar تُبنى من هذه اللحظة فصاعداً سترث هذا
-    // الثيم تلقائياً، بلا حاجة لأي تعديل داخل تلك الشاشة نفسها.
+    // ثيم التطبيق بأكمله يتبع الفندق الحالي (HotelSession.current) والوضع
+    // الداكن/حجم الخط/اللغة (AppThemeController) معاً — المصدر الوحيد
+    // للحقيقة لكل مظهر التطبيق: أي شاشة أو Dialog أو BottomSheet أو
+    // SnackBar تُبنى من هذه اللحظة فصاعداً تتبع هذا فوراً دون إعادة تشغيل
+    // التطبيق ودون أي تعديل داخل تلك الشاشة نفسها.
     return ValueListenableBuilder<Hotel?>(
       valueListenable: HotelSession.current,
       builder: (context, currentHotel, _) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'Manazel',
-          theme: AppTheme.createTheme(HotelVisualIdentity.identityForHotel(currentHotel)),
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          supportedLocales: const [
-            Locale('ar', 'SA'),
-            Locale('en', 'US'),
-          ],
-          locale: const Locale('ar', 'SA'),
-          home: hasPin ? const PinLoginPage() : const SecuritySetupPage(),
+        final identity = HotelVisualIdentity.identityForHotel(currentHotel);
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: AppThemeController.themeMode,
+          builder: (context, mode, _) {
+            return ValueListenableBuilder<double>(
+              valueListenable: AppThemeController.fontScale,
+              builder: (context, fontScale, _) {
+                return ValueListenableBuilder<Locale>(
+                  valueListenable: AppThemeController.locale,
+                  builder: (context, locale, _) {
+                    return MaterialApp(
+                      debugShowCheckedModeBanner: false,
+                      title: 'Manazel',
+                      theme: AppTheme.createTheme(identity),
+                      darkTheme: AppTheme.createTheme(identity, brightness: Brightness.dark),
+                      themeMode: mode,
+                      builder: (context, child) {
+                        return MediaQuery(
+                          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(fontScale)),
+                          child: child!,
+                        );
+                      },
+                      localizationsDelegates: const [
+                        GlobalMaterialLocalizations.delegate,
+                        GlobalWidgetsLocalizations.delegate,
+                        GlobalCupertinoLocalizations.delegate,
+                      ],
+                      supportedLocales: const [
+                        Locale('ar', 'SA'),
+                        Locale('en', 'US'),
+                      ],
+                      locale: locale,
+                      home: hasPin ? const PinLoginPage() : const SecuritySetupPage(),
+                    );
+                  },
+                );
+              },
+            );
+          },
         );
       },
     );

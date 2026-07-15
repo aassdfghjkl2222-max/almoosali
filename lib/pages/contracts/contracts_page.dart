@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -106,7 +105,7 @@ class _ContractsPageState extends State<ContractsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "إدارة العقود", hotel: widget.hotel),
         centerTitle: true,
@@ -297,7 +296,7 @@ class _ContractsPageState extends State<ContractsPage> {
       case 'يقترب من الانتهاء': statusColor = Colors.orange; break;
       case 'منتهي': statusColor = Colors.red; break;
       case 'مكتمل': statusColor = Colors.blue; break;
-      default: statusColor = AppColors.textSecondary;
+      default: statusColor = Theme.of(context).colorScheme.onSurfaceVariant;
     }
 
     return Padding(
@@ -328,7 +327,7 @@ class _ContractsPageState extends State<ContractsPage> {
             const SizedBox(height: AppSizes.xs),
             Text(
               "المتعاقد: ${contract.contractorName}",
-              style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+              style: AppTextStyles.body.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const Divider(height: AppSizes.lg),
             Row(

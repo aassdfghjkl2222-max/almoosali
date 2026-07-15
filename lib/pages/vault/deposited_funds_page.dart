@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
@@ -51,7 +50,7 @@ class _DepositedFundsPageState extends State<DepositedFundsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(
           title: widget.isArchive ? "أرشيف الأموال المرحلة" : "الأموال المودعة",

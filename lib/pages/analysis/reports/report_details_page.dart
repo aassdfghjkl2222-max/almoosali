@@ -99,7 +99,7 @@ class ReportDetailsPage extends StatelessWidget {
     final adjustments = _adjustmentItems;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "تفاصيل التقرير #${report.id}", hotel: hotel),
         centerTitle: true,

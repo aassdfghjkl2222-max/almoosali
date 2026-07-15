@@ -70,7 +70,7 @@ class AppDialog {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary)),
+            child: Text("إلغاء", style: TextStyle(color: Theme.of(dialogContext).colorScheme.onSurfaceVariant)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
@@ -109,7 +108,7 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(_isEdit ? "تعديل بيانات الموظف" : "إضافة موظف جديد"),
         centerTitle: true,
@@ -138,7 +137,7 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
             const SizedBox(height: AppSizes.xs),
             Text(
               "لتعديل الراتب أو الوظيفة استخدم إجراءات صفحة الموظف (تُسجَّل القيمة القديمة والجديدة تلقائياً في سجل الحركة).",
-              style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+              style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ] else ...[
             AppTextField(controller: _positionController, hint: "الوظيفة", icon: Icons.badge_outlined),
@@ -172,11 +171,11 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
       decoration: BoxDecoration(
         color: Colors.grey[100],
         borderRadius: BorderRadius.circular(AppSizes.radiusMedium),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Row(
         children: [
-          Icon(icon, color: AppColors.textSecondary, size: 20),
+          Icon(icon, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 20),
           const SizedBox(width: AppSizes.sm),
           Expanded(
             child: Column(
@@ -208,7 +207,7 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(AppSizes.radiusMedium),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Row(
           children: [

@@ -27,7 +27,7 @@ class _NotesPageState extends State<NotesPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "المذكرات", hotel: widget.hotel),
         centerTitle: true,
@@ -46,15 +46,15 @@ class _NotesPageState extends State<NotesPage> {
           final notes = snapshot.data ?? [];
 
           if (notes.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.note_alt_outlined, size: 64, color: AppColors.textSecondary),
+                  Icon(Icons.note_alt_outlined, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   SizedBox(height: AppSizes.md),
                   Text(
                     "لا توجد مذكرات حتى الآن",
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 16),
                   ),
                 ],
               ),
@@ -101,7 +101,7 @@ class _NotesPageState extends State<NotesPage> {
               ),
               Text(
                 note.createdAt,
-                style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+                style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -110,7 +110,7 @@ class _NotesPageState extends State<NotesPage> {
             note.content,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+            style: AppTextStyles.body.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ],
       ),

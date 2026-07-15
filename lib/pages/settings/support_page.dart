@@ -24,7 +24,7 @@ class SupportPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("الدعم والمساعدة"),
         centerTitle: true,
@@ -34,7 +34,7 @@ class SupportPage extends StatelessWidget {
         children: [
           Text("الأسئلة الشائعة ودليل الاستخدام", style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold, fontSize: 15)),
           const SizedBox(height: AppSizes.sm),
-          ..._faqs.map((f) => _buildFaqCard(f.$1, f.$2)),
+          ..._faqs.map((f) => _buildFaqCard(context, f.$1, f.$2)),
           const SizedBox(height: AppSizes.lg),
           Text("الإبلاغ عن مشكلة", style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold, fontSize: 15)),
           const SizedBox(height: AppSizes.sm),
@@ -50,6 +50,7 @@ class SupportPage extends StatelessWidget {
           ),
           const SizedBox(height: AppSizes.lg),
           _buildInfoCard(
+            context,
             "إرسال اقتراح والتواصل مع الدعم الفني",
             "لا توجد حالياً قناة دعم فني مُهيَّأة داخل التطبيق (بريد أو رقم تواصل) — سيتم تفعيلها في مرحلة قادمة.",
           ),
@@ -60,7 +61,7 @@ class SupportPage extends StatelessWidget {
 
   Widget _buildActionCard(BuildContext context, {required IconData icon, required String title, required String subtitle, required VoidCallback onTap}) {
     return Container(
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
         leading: Icon(icon, color: AppColors.primary),
@@ -71,10 +72,10 @@ class SupportPage extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoCard(String title, String body) {
+  Widget _buildInfoCard(BuildContext context, String title, String body) {
     return Container(
       padding: const EdgeInsets.all(AppSizes.md),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -86,10 +87,10 @@ class SupportPage extends StatelessWidget {
     );
   }
 
-  Widget _buildFaqCard(String question, String answer) {
+  Widget _buildFaqCard(BuildContext context, String question, String answer) {
     return Container(
       margin: const EdgeInsets.only(bottom: AppSizes.sm),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
       child: Theme(
         data: ThemeData(dividerColor: Colors.transparent),
         child: ExpansionTile(

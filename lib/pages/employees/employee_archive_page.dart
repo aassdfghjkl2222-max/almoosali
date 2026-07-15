@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -41,7 +40,7 @@ class _EmployeeArchivePageState extends State<EmployeeArchivePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "أرشيف الموظفين", hotel: widget.hotel),
         centerTitle: true,
@@ -60,9 +59,9 @@ class _EmployeeArchivePageState extends State<EmployeeArchivePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.archive_outlined, size: 64, color: AppColors.textSecondary),
+                  Icon(Icons.archive_outlined, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   const SizedBox(height: AppSizes.md),
-                  const Text("الأرشيف فارغ", style: TextStyle(color: AppColors.textSecondary, fontSize: 16)),
+                  Text("الأرشيف فارغ", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 16)),
                 ],
               ),
             );
@@ -83,8 +82,8 @@ class _EmployeeArchivePageState extends State<EmployeeArchivePage> {
                   child: Row(
                     children: [
                       CircleAvatar(
-                        backgroundColor: AppColors.textSecondary.withOpacity(0.1),
-                        child: const Icon(Icons.person_off_outlined, color: AppColors.textSecondary),
+                        backgroundColor: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.1),
+                        child: Icon(Icons.person_off_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                       const SizedBox(width: AppSizes.md),
                       Expanded(
@@ -94,7 +93,7 @@ class _EmployeeArchivePageState extends State<EmployeeArchivePage> {
                             Text(employee.name, style: AppTextStyles.bodyBold),
                             Text(employee.position, style: AppTextStyles.caption),
                             if (employee.employeeNumber != null)
-                              Text(employee.employeeNumber!, style: AppTextStyles.caption.copyWith(fontSize: 10, color: AppColors.textSecondary)),
+                              Text(employee.employeeNumber!, style: AppTextStyles.caption.copyWith(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           ],
                         ),
                       ),

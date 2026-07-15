@@ -3,16 +3,18 @@ import 'package:intl/intl.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
+import '../../core/document_status.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
 import '../../core/hotel_visual_identity.dart';
+import '../../models/document.dart';
 import '../../models/employee.dart';
 import '../../models/employee_advance.dart';
 import '../../models/employee_allowance.dart';
 import '../../models/employee_deduction.dart';
-import '../../models/employee_document.dart';
 import '../../models/employee_event.dart';
 import '../../models/hotel.dart';
 import '../../models/payroll_record.dart';
+import '../../repositories/document_repository.dart';
 import '../../repositories/employee_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../services/payroll_service.dart';
@@ -21,7 +23,9 @@ import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/app_loading.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/documents/add_owned_document_dialog.dart';
 import '../common/transaction_review_page.dart';
+import '../dashboard/pages/hotel_document_edit_page.dart';
 import 'add_employee_page.dart';
 
 class EmployeeDetailsPage extends StatefulWidget {
@@ -40,7 +44,7 @@ class _EmployeeDetailsData {
   final List<EmployeeAllowance> allowances;
   final List<EmployeeDeduction> deductions;
   final List<EmployeeAdvance> advances;
-  final List<EmployeeDocument> documents;
+  final List<Document> documents;
   final List<EmployeeEvent> events;
   final List<PayrollRecord> payrollHistory;
   final List<Hotel> allHotels;
@@ -107,7 +111,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
     final allowances = await _repository.getAllowances(employee.id!);
     final deductions = await _repository.getDeductions(employee.id!);
     final advances = await _repository.getAdvances(employee.id!);
-    final documents = await _repository.getDocuments(employee.id!);
+    final documents = await DocumentRepository().getDocumentsForOwner(Document.ownerTypeEmployee, employee.id!);
     final events = await _repository.getEvents(employee.id!);
     final payrollHistory = await _repository.getPayrollRecordsForEmployee(employee.id!);
     final allHotels = await _hotelRepository.getAllHotels();
@@ -142,7 +146,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: _employee.name, hotel: widget.hotel),
         centerTitle: true,
@@ -252,7 +256,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
                   children: [
                     Text(e.position, style: AppTextStyles.bodyBold.copyWith(color: _identityColor)),
                     if (e.employeeNumber != null)
-                      Text(e.employeeNumber!, style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                      Text(e.employeeNumber!, style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -298,7 +302,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: AppColors.textSecondary),
+        Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
         const SizedBox(width: AppSizes.sm),
         Text("$label: ", style: AppTextStyles.caption),
         Expanded(child: Text(value, style: AppTextStyles.body)),
@@ -377,7 +381,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
           ] else if (payroll != null && payroll.status == PayrollRecord.statusPaid) ...[
             Row(
               children: [
-                const Icon(Icons.history, color: AppColors.textSecondary, size: 18),
+                Icon(Icons.history, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
                 const SizedBox(width: 6),
                 Expanded(child: Text("آخر صرف: ${payroll.period} عبر ${payroll.paymentSource ?? ''} بتاريخ ${(payroll.paidAt ?? '').split('T').first}", style: AppTextStyles.caption)),
               ],
@@ -592,7 +596,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
       selected: isSelected,
       onSelected: (_) => onSelect(value),
       selectedColor: _identityColor,
-      labelStyle: TextStyle(color: isSelected ? Colors.white : AppColors.textPrimary),
+      labelStyle: TextStyle(color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface),
     );
   }
 
@@ -621,9 +625,9 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
     );
   }
 
-  // ------------------------- المستندات -------------------------
+  // ------------------------- المستندات (محرك المستندات الموحّد) -------------------------
 
-  Widget _buildDocumentsSection(List<EmployeeDocument> documents) {
+  Widget _buildDocumentsSection(List<Document> documents) {
     return _buildListSection(
       title: "المستندات",
       icon: Icons.description_outlined,
@@ -634,112 +638,56 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
     );
   }
 
-  Widget _buildDocumentItem(EmployeeDocument d) {
-    Color statusColor = AppColors.textSecondary;
-    String? statusText;
-    if (d.expiryDate != null) {
-      final expiry = DateTime.tryParse(d.expiryDate!);
-      if (expiry != null) {
-        final days = expiry.difference(DateTime.now()).inDays;
-        if (days < 0) { statusColor = Colors.black; statusText = "منتهي"; }
-        else if (days <= 30) { statusColor = AppColors.warning; statusText = "ينتهي قريباً"; }
-        else { statusColor = AppColors.success; statusText = "ساري"; }
-      }
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(Icons.insert_drive_file_outlined, size: 18, color: _identityColor),
-          const SizedBox(width: AppSizes.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("${d.type} — ${d.name}", style: AppTextStyles.body),
-                if (d.expiryDate != null) Text("ينتهي: ${d.expiryDate}", style: AppTextStyles.caption),
-              ],
+  Widget _buildDocumentItem(Document d) {
+    final status = DocumentStatus.fromExpiryDate(d.expiryDate);
+    return InkWell(
+      onTap: () => _openDocument(d),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.insert_drive_file_outlined, size: 18, color: _identityColor),
+            const SizedBox(width: AppSizes.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(d.name, style: AppTextStyles.body),
+                  if (status.level != DocumentStatusLevel.noDate) Text(status.label, style: AppTextStyles.caption),
+                ],
+              ),
             ),
-          ),
-          if (statusText != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
-              child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _showAddDocumentDialog() {
-    final nameController = TextEditingController();
-    final notesController = TextEditingController();
-    String type = EmployeeDocument.types.first;
-    DateTime? expiry;
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text("إضافة مستند"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: type,
-                  items: EmployeeDocument.types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (v) => setDialogState(() => type = v ?? type),
-                  decoration: const InputDecoration(labelText: "نوع المستند"),
-                ),
-                const SizedBox(height: AppSizes.md),
-                TextField(controller: nameController, decoration: const InputDecoration(hintText: "اسم/رقم المستند")),
-                const SizedBox(height: AppSizes.md),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(context: dialogContext, initialDate: DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100));
-                    if (picked != null) setDialogState(() => expiry = picked);
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: "تاريخ الانتهاء (اختياري)", border: OutlineInputBorder()),
-                    child: Text(expiry == null ? "بدون تاريخ" : "${expiry!.year}-${expiry!.month.toString().padLeft(2, '0')}-${expiry!.day.toString().padLeft(2, '0')}"),
-                  ),
-                ),
-                const SizedBox(height: AppSizes.md),
-                TextField(controller: notesController, decoration: const InputDecoration(hintText: "ملاحظات (اختياري)")),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("إلغاء")),
-            TextButton(
-              onPressed: () {
-                if (nameController.text.trim().isEmpty) return;
-                Navigator.pop(dialogContext);
-                AppDialog.confirmAction(
-                  context: context,
-                  title: "تأكيد إضافة المستند",
-                  message: "هل تريد إضافة هذا المستند؟",
-                  onConfirm: () async {
-                    final expiryStr = expiry == null ? null : "${expiry!.year}-${expiry!.month.toString().padLeft(2, '0')}-${expiry!.day.toString().padLeft(2, '0')}";
-                    await _repository.addDocument(EmployeeDocument(
-                      employeeId: _employee.id!,
-                      type: type,
-                      name: nameController.text.trim(),
-                      expiryDate: expiryStr,
-                      notes: notesController.text.trim().isEmpty ? null : notesController.text.trim(),
-                      createdAt: DateTime.now().toIso8601String(),
-                    ));
-                    _load();
-                  },
-                );
-              },
-              child: const Text("حفظ"),
+              decoration: BoxDecoration(color: status.color.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+              child: Text(status.level == DocumentStatusLevel.noDate ? "بلا تاريخ" : status.label, style: TextStyle(color: status.color, fontSize: 10, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _openDocument(Document document) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => HotelDocumentEditPage(hotel: widget.hotel, document: document)),
+    );
+    if (result == true) _load();
+  }
+
+  Future<void> _showAddDocumentDialog() async {
+    final created = await showAddOwnedDocumentDialog(
+      context: context,
+      hotelId: widget.hotel.id!,
+      ownerType: Document.ownerTypeEmployee,
+      ownerId: _employee.id!,
+      title: "إضافة مستند للموظف",
+      nameHint: "اسم/نوع المستند (مثال: الهوية، عقد العمل)",
+    );
+    if (created == null) return;
+    _load();
+    if (mounted) _openDocument(created);
   }
 
   // ------------------------- البدلات -------------------------
@@ -1126,7 +1074,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
                 if (event.oldValue != null) ...[
                   Text(event.oldValue!, style: AppTextStyles.caption.copyWith(decoration: TextDecoration.lineThrough)),
                   const SizedBox(width: 6),
-                  const Icon(Icons.arrow_back, size: 12, color: AppColors.textSecondary),
+                  Icon(Icons.arrow_back, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   const SizedBox(width: 6),
                 ],
                 if (event.newValue != null) Text(event.newValue!, style: AppTextStyles.bodyBold.copyWith(fontSize: 13)),
@@ -1247,7 +1195,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
   Widget _emptyHint(String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSizes.sm),
-      child: Text(text, style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
+      child: Text(text, style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
     );
   }
 
@@ -1283,7 +1231,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
           ],
           if (onDelete != null)
             IconButton(
-              icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
+              icon: Icon(Icons.close, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
               onPressed: onDelete,
               constraints: const BoxConstraints(),
               padding: const EdgeInsets.only(right: 4),

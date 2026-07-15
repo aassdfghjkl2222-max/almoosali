@@ -82,7 +82,7 @@ class _SettleDebtPageState extends State<SettleDebtPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "سداد مديونية", hotel: widget.hotel),
         centerTitle: true,

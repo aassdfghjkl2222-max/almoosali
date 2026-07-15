@@ -121,7 +121,7 @@ class _DashboardPageState extends State<DashboardPage> {
               },
             ),
             ModuleCard(
-              title: "المستندات",
+              title: "مستندات الفندق",
               icon: Icons.description,
               iconColor: identity.primary,
               onTap: () {
@@ -166,7 +166,7 @@ class _DashboardPageState extends State<DashboardPage> {
               },
             ),
             ModuleCard(
-              title: "الفواتير الإلكترونية",
+              title: "الفواتير الضريبية",
               icon: Icons.receipt_long,
               iconColor: identity.primary,
               onTap: () {

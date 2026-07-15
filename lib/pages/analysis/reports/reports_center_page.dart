@@ -336,10 +336,10 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                       children: _periods.map((p) {
                         final selected = period == p;
                         return ChoiceChip(
-                          label: Text(p, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppColors.textPrimary)),
+                          label: Text(p, style: TextStyle(fontSize: 12, color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                           selected: selected,
                           selectedColor: _identityColor,
-                          backgroundColor: AppColors.background,
+                          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                           onSelected: (_) async {
                             if (p == "فترة مخصصة") {
                               final range = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDateRange: customRange);
@@ -358,8 +358,8 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                       spacing: 8,
                       children: [
                         ChoiceChip(label: const Text("الكل", style: TextStyle(fontSize: 12)), selected: status == null, selectedColor: _identityColor, onSelected: (_) => setSheetState(() => status = null)),
-                        ChoiceChip(label: Text("معتمد", style: TextStyle(fontSize: 12, color: status == true ? Colors.white : AppColors.textPrimary)), selected: status == true, selectedColor: AppColors.success, onSelected: (_) => setSheetState(() => status = true)),
-                        ChoiceChip(label: Text("معلّق", style: TextStyle(fontSize: 12, color: status == false ? Colors.white : AppColors.textPrimary)), selected: status == false, selectedColor: AppColors.warning, onSelected: (_) => setSheetState(() => status = false)),
+                        ChoiceChip(label: Text("معتمد", style: TextStyle(fontSize: 12, color: status == true ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == true, selectedColor: AppColors.success, onSelected: (_) => setSheetState(() => status = true)),
+                        ChoiceChip(label: Text("معلّق", style: TextStyle(fontSize: 12, color: status == false ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == false, selectedColor: AppColors.warning, onSelected: (_) => setSheetState(() => status = false)),
                       ],
                     ),
                     const SizedBox(height: AppSizes.md),
@@ -369,8 +369,8 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                       spacing: 8,
                       children: [
                         ChoiceChip(label: const Text("الكل", style: TextStyle(fontSize: 12)), selected: type == null, selectedColor: _identityColor, onSelected: (_) => setSheetState(() => type = null)),
-                        ChoiceChip(label: Text("رئيسي", style: TextStyle(fontSize: 12, color: type == 'main' ? Colors.white : AppColors.textPrimary)), selected: type == 'main', selectedColor: _identityColor, onSelected: (_) => setSheetState(() => type = 'main')),
-                        ChoiceChip(label: Text("إضافي", style: TextStyle(fontSize: 12, color: type == 'additional' ? Colors.white : AppColors.textPrimary)), selected: type == 'additional', selectedColor: _identityColor, onSelected: (_) => setSheetState(() => type = 'additional')),
+                        ChoiceChip(label: Text("رئيسي", style: TextStyle(fontSize: 12, color: type == 'main' ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: type == 'main', selectedColor: _identityColor, onSelected: (_) => setSheetState(() => type = 'main')),
+                        ChoiceChip(label: Text("إضافي", style: TextStyle(fontSize: 12, color: type == 'additional' ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: type == 'additional', selectedColor: _identityColor, onSelected: (_) => setSheetState(() => type = 'additional')),
                       ],
                     ),
                     const SizedBox(height: AppSizes.md),
@@ -388,7 +388,7 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                         children: [
                           ChoiceChip(label: const Text("الكل", style: TextStyle(fontSize: 12)), selected: employee == null, selectedColor: _identityColor, onSelected: (_) => setSheetState(() => employee = null)),
                           ..._employeeOptions.map((e) => ChoiceChip(
-                                label: Text(e, style: TextStyle(fontSize: 12, color: employee == e ? Colors.white : AppColors.textPrimary)),
+                                label: Text(e, style: TextStyle(fontSize: 12, color: employee == e ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                                 selected: employee == e,
                                 selectedColor: _identityColor,
                                 onSelected: (_) => setSheetState(() => employee = e),
@@ -510,7 +510,7 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
   Widget build(BuildContext context) {
     final color = _identityColor;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: color,

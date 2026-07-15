@@ -29,9 +29,9 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void login() {
+  void login() async {
 
-    final user = repository.login(
+    final user = await repository.login(
       usernameController.text.trim(),
       passwordController.text,
     );
@@ -66,7 +66,7 @@ class _LoginPageState extends State<LoginPage> {
 
     return Scaffold(
 
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
 
       body: SafeArea(
 

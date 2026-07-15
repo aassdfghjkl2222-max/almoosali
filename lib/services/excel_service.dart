@@ -413,20 +413,22 @@ class ExcelService {
     }
   }
 
-  static Future<void> exportGeneralInvoicesReport({
-    required String hotelName,
+  /// تصدير تقرير الفواتير الضريبية المفصَّل (قسم "التقارير" داخل الفواتير
+  /// الضريبية) — بالأعمدة العشرة المطلوبة بالضبط، وفق أي فلاتر اختارها
+  /// المستخدم مسبقاً (تُمرَّر [invoices] مُصفّاة فعلياً من المستدعي).
+  static Future<void> exportInvoicesDetailedReport({
+    required String scopeLabel,
     required List<Invoice> invoices,
     DateTime? fromDate,
     DateTime? toDate,
   }) async {
     final excel = Excel.createExcel();
-    excel.rename('Sheet1', 'تقرير الفواتير الإلكترونية');
-    final sheet = excel['تقرير الفواتير الإلكترونية'];
+    excel.rename('Sheet1', 'تقرير الفواتير الضريبية');
+    final sheet = excel['تقرير الفواتير الضريبية'];
 
-    // Header
-    sheet.cell(CellIndex.indexByString("A1")).value = TextCellValue("تقرير الفواتير الإلكترونية");
-    sheet.cell(CellIndex.indexByString("A2")).value = TextCellValue("الفندق / المنشأة:");
-    sheet.cell(CellIndex.indexByString("B2")).value = TextCellValue(hotelName);
+    sheet.cell(CellIndex.indexByString("A1")).value = TextCellValue("تقرير الفواتير الضريبية");
+    sheet.cell(CellIndex.indexByString("A2")).value = TextCellValue("النطاق:");
+    sheet.cell(CellIndex.indexByString("B2")).value = TextCellValue(scopeLabel);
 
     if (fromDate != null || toDate != null) {
       sheet.cell(CellIndex.indexByString("A3")).value = TextCellValue("الفترة:");
@@ -436,19 +438,21 @@ class ExcelService {
       sheet.cell(CellIndex.indexByString("B3")).value = TextCellValue(period);
     }
 
-    // Table Headers
-    List<String> headers = [
+    final headers = [
       "رقم الفاتورة",
+      "التاريخ",
       "اسم الشركة",
       "الرقم الضريبي",
       "المبلغ قبل الضريبة",
-      "قيمة الضريبة",
-      "إجمالي الفاتورة",
+      "الضريبة",
+      "المبلغ الإجمالي",
+      "تصنيف المصروف",
+      "مصدر التمويل",
       "الفندق",
     ];
 
     for (int i = 0; i < headers.length; i++) {
-      var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 5));
+      final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 5));
       cell.value = TextCellValue(headers[i]);
       cell.cellStyle = CellStyle(
         bold: true,
@@ -458,28 +462,29 @@ class ExcelService {
       );
     }
 
-    // Data
     double totalBeforeTax = 0;
     double totalVat = 0;
     double totalAmount = 0;
 
     for (int i = 0; i < invoices.length; i++) {
       final inv = invoices[i];
-      int rowIndex = 6 + i;
-      
+      final rowIndex = 6 + i;
+
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex)).value = TextCellValue(inv.invoiceNumber);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex)).value = TextCellValue(inv.companyName);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex)).value = TextCellValue(inv.taxNumber);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex)).value = DoubleCellValue(inv.amountBeforeTax);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: rowIndex)).value = DoubleCellValue(inv.vat);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: rowIndex)).value = DoubleCellValue(inv.totalAmount);
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: rowIndex)).value = TextCellValue(inv.facilityName);
-      
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex)).value = TextCellValue(inv.date);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex)).value = TextCellValue(inv.companyName);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex)).value = TextCellValue(inv.taxNumber);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: rowIndex)).value = DoubleCellValue(inv.amountBeforeTax);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: rowIndex)).value = DoubleCellValue(inv.vat);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: rowIndex)).value = DoubleCellValue(inv.totalAmount);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex)).value = TextCellValue(inv.expenseCategory ?? "غير مصنَّف");
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex)).value = TextCellValue(inv.amountSource);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: rowIndex)).value = TextCellValue(inv.facilityName);
+
       totalBeforeTax += inv.amountBeforeTax;
       totalVat += inv.vat;
       totalAmount += inv.totalAmount;
 
-      // Formatting
       for (int j = 0; j < headers.length; j++) {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: j, rowIndex: rowIndex)).cellStyle = CellStyle(
           horizontalAlign: HorizontalAlign.Center,
@@ -491,39 +496,30 @@ class ExcelService {
       }
     }
 
-    // Totals Row
-    int totalsRow = 6 + invoices.length;
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: totalsRow)).value = TextCellValue("الإجماليات:");
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: totalsRow)).value = DoubleCellValue(totalBeforeTax);
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: totalsRow)).value = DoubleCellValue(totalVat);
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalsRow)).value = DoubleCellValue(totalAmount);
-
-    for (int j = 2; j <= 5; j++) {
+    final totalsRow = 6 + invoices.length;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: totalsRow)).value = TextCellValue("الإجماليات:");
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: totalsRow)).value = DoubleCellValue(totalBeforeTax);
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalsRow)).value = DoubleCellValue(totalVat);
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: totalsRow)).value = DoubleCellValue(totalAmount);
+    for (int j = 3; j <= 6; j++) {
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: j, rowIndex: totalsRow)).cellStyle = CellStyle(
         bold: true,
         backgroundColorHex: ExcelColor.fromHexString("#F5F5F5"),
         horizontalAlign: HorizontalAlign.Center,
-        leftBorder: Border(borderStyle: BorderStyle.Thin),
-        rightBorder: Border(borderStyle: BorderStyle.Thin),
-        topBorder: Border(borderStyle: BorderStyle.Thin),
-        bottomBorder: Border(borderStyle: BorderStyle.Thin),
       );
     }
 
-    // Column widths
     for (int i = 0; i < headers.length; i++) {
       sheet.setColumnWidth(i, 20);
     }
 
-    // Save and share
     final bytes = excel.save();
     if (bytes != null) {
       final directory = await getTemporaryDirectory();
-      final fileName = "تقرير_الفواتير_${hotelName.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.xlsx";
+      final fileName = "تقرير_الفواتير_الضريبية_${DateTime.now().millisecondsSinceEpoch}.xlsx";
       final file = File("${directory.path}/$fileName");
       await file.writeAsBytes(bytes);
-      
-      await Share.shareXFiles([XFile(file.path)], text: "تقرير الفواتير الإلكترونية - $hotelName");
+      await Share.shareXFiles([XFile(file.path)], text: "تقرير الفواتير الضريبية - $scopeLabel");
     }
   }
 

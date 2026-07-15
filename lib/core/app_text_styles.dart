@@ -1,48 +1,45 @@
 import 'package:flutter/material.dart';
 
-import 'app_colors.dart';
-
+/// أنماط النص المشتركة. الأحجام والأوزان فقط هنا — الألوان مقصودة الحذف
+/// عمداً (بلا `color:`) لتُستمَد تلقائياً من Theme.of(context) عبر
+/// DefaultTextStyle عند البناء، فتتبع الوضع الفاتح/الداكن دون أي تعديل في
+/// أي شاشة تستخدم هذه الأنماط. استخدم `.copyWith(color: ...)` فقط عند
+/// الحاجة الفعلية للون هوية الفندق (Theme.of(context).colorScheme.primary)
+/// أو لون حالة (AppColors.success/danger/...).
 class AppTextStyles {
   AppTextStyles._();
 
   static const display = TextStyle(
     fontSize: 32,
     fontWeight: FontWeight.bold,
-    color: AppColors.primary,
   );
 
   static const headline = TextStyle(
     fontSize: 26,
     fontWeight: FontWeight.bold,
-    color: AppColors.primary,
   );
 
   static const title = TextStyle(
     fontSize: 22,
     fontWeight: FontWeight.bold,
-    color: AppColors.primary,
   );
 
   static const subtitle = TextStyle(
     fontSize: 18,
     fontWeight: FontWeight.w600,
-    color: AppColors.secondary,
   );
 
   static const body = TextStyle(
     fontSize: 16,
-    color: AppColors.textPrimary,
   );
 
   static const bodyBold = TextStyle(
     fontSize: 16,
     fontWeight: FontWeight.bold,
-    color: AppColors.textPrimary,
   );
 
   static const caption = TextStyle(
     fontSize: 14,
-    color: AppColors.textSecondary,
   );
 
   static const button = TextStyle(

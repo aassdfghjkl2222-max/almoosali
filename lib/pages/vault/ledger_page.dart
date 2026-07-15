@@ -52,7 +52,7 @@ class _LedgerPageState extends State<LedgerPage> {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: widget.title, hotel: widget.hotel),
         centerTitle: true,

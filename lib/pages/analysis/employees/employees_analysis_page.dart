@@ -194,7 +194,7 @@ class _EmployeesAnalysisPageState extends State<EmployeesAnalysisPage> {
     final suspendedCount = _employees.where((e) => e.status == Employee.statusSuspended).length;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: color,
@@ -316,7 +316,7 @@ class _EmployeeListSubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: Text(title, style: const TextStyle(color: Colors.white)), centerTitle: true, backgroundColor: identityColor, elevation: 0),
       body: employees.isEmpty
           ? const Center(child: Text("لا يوجد موظفون", style: TextStyle(color: Colors.grey)))

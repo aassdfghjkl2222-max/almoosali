@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/hotel_visual_identity.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
@@ -51,7 +50,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "ديون المنشآت", hotel: widget.hotel),
         centerTitle: true,

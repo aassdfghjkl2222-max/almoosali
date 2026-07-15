@@ -87,7 +87,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("الديون بين المنشآت", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,

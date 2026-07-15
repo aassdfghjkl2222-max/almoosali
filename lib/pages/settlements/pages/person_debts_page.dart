@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../models/settlement_account.dart';
@@ -73,7 +72,7 @@ class _PersonDebtsPageState extends State<PersonDebtsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("ديون الأشخاص", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,

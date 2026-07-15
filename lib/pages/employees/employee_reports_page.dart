@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/hotel_visual_identity.dart';
@@ -118,7 +117,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "تقارير الموظفين", hotel: widget.hotel),
         centerTitle: true,
@@ -169,7 +168,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
                 selected: selected,
                 onSelected: (_) => setState(() => _type = e.key),
                 selectedColor: _identityColor,
-                labelStyle: TextStyle(color: selected ? Colors.white : AppColors.textPrimary),
+                labelStyle: TextStyle(color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface),
               ),
             );
           }).toList(),
@@ -203,7 +202,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
                   }
                 },
                 selectedColor: _identityColor,
-                labelStyle: TextStyle(color: selected ? Colors.white : AppColors.textPrimary),
+                labelStyle: TextStyle(color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface),
               ),
             );
           }).toList(),
@@ -230,7 +229,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
                 selected: selected,
                 onSelected: (_) => setState(() => _selectedYear = y),
                 selectedColor: _identityColor,
-                labelStyle: TextStyle(color: selected ? Colors.white : AppColors.textPrimary),
+                labelStyle: TextStyle(color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface),
               ),
             );
           }).toList(),
@@ -381,7 +380,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(monthNames[i], style: AppTextStyles.body),
-                    Text(_fmt.format(amount), style: AppTextStyles.bodyBold.copyWith(color: amount > 0 ? _identityColor : AppColors.textSecondary)),
+                    Text(_fmt.format(amount), style: AppTextStyles.bodyBold.copyWith(color: amount > 0 ? _identityColor : Theme.of(context).colorScheme.onSurfaceVariant)),
                   ],
                 ),
               );
@@ -413,7 +412,7 @@ class _EmployeeReportsPageState extends State<EmployeeReportsPage> {
   Widget _emptyState(String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 40),
-      child: Center(child: Text(text, style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary))),
+      child: Center(child: Text(text, style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
     );
   }
 

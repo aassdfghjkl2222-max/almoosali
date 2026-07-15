@@ -4,6 +4,7 @@ import '../../../core/app_colors.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
+import '../../../core/document_status.dart';
 import '../../../core/hotel_visual_identity.dart';
 import '../../../models/document.dart';
 import '../../../models/hotel.dart';
@@ -50,7 +51,7 @@ class _DocumentsAnalysisPageState extends State<DocumentsAnalysisPage> {
     _allHotels = await HotelRepository().getAllHotels();
     final docs = <Document>[];
     for (final id in _selectedHotelIds) {
-      docs.addAll(await DocumentRepository().getAllDocuments(id));
+      docs.addAll(await DocumentRepository().getDocumentsForHotel(id));
     }
     if (!mounted) return;
     setState(() {
@@ -156,7 +157,7 @@ class _DocumentsAnalysisPageState extends State<DocumentsAnalysisPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(d.name, style: AppTextStyles.title.copyWith(fontSize: 17)),
+            Text(d.typeName ?? d.name, style: AppTextStyles.title.copyWith(fontSize: 17)),
             const SizedBox(height: AppSizes.md),
             _infoLine("الفندق", _hotelFor(d.hotelId).arabicName),
             _infoLine("تاريخ الانتهاء", d.expiryDate),
@@ -179,7 +180,7 @@ class _DocumentsAnalysisPageState extends State<DocumentsAnalysisPage> {
   Widget build(BuildContext context) {
     final color = _identityColor;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: color,
@@ -220,7 +221,7 @@ class _DocumentsAnalysisPageState extends State<DocumentsAnalysisPage> {
                   children: ["الفندق", "التاريخ"].map((g) {
                     final selected = _groupBy == g;
                     return ChoiceChip(
-                      label: Text("تجميع حسب $g", style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppColors.textPrimary)),
+                      label: Text("تجميع حسب $g", style: TextStyle(fontSize: 12, color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                       selected: selected,
                       selectedColor: color,
                       onSelected: (_) => setState(() => _groupBy = g),
@@ -264,19 +265,18 @@ class _DocumentsAnalysisPageState extends State<DocumentsAnalysisPage> {
   }
 
   Widget _buildDocRow(Document d, Color color) {
-    final expiry = DateTime.tryParse(d.expiryDate);
-    final isExpired = expiry != null && expiry.isBefore(DateTime.now());
+    final status = DocumentStatus.fromExpiryDate(d.expiryDate);
     return Card(
       margin: const EdgeInsets.only(bottom: AppSizes.sm),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
       child: ListTile(
         leading: Container(
           padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: (isExpired ? AppColors.danger : color).withOpacity(0.1), shape: BoxShape.circle),
-          child: Icon(Icons.description_outlined, color: isExpired ? AppColors.danger : color, size: 18),
+          decoration: BoxDecoration(color: status.needsAttention ? status.color.withOpacity(0.1) : color.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(Icons.description_outlined, color: status.needsAttention ? status.color : color, size: 18),
         ),
-        title: Text(d.name, style: AppTextStyles.bodyBold, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text("ينتهي: ${d.expiryDate}${isExpired ? ' (منتهي)' : ''}", style: AppTextStyles.caption.copyWith(color: isExpired ? AppColors.danger : null)),
+        title: Text(d.typeName ?? d.name, style: AppTextStyles.bodyBold, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(status.label, style: AppTextStyles.caption.copyWith(color: status.needsAttention ? status.color : null)),
         trailing: const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
         onTap: () => _openDocumentDetail(d),
       ),

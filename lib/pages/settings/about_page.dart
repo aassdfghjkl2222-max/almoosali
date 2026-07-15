@@ -13,7 +13,7 @@ class AboutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("حول التطبيق"),
         centerTitle: true,
@@ -39,14 +39,14 @@ class AboutPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSizes.xl),
-          _buildCard([
+          _buildCard(context, [
             _infoRow("اسم التطبيق", AppConfig.appName),
             _infoRow("الجهة المالكة", AppConfig.companyNameAr),
             _infoRow("رقم الإصدار", AppConfig.version),
             _infoRow("إصدار قاعدة البيانات", "24"),
           ]),
           const SizedBox(height: AppSizes.md),
-          _buildCard([
+          _buildCard(context, [
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 4),
               child: Text(
@@ -56,12 +56,12 @@ class AboutPage extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: AppSizes.md),
-          _buildCard([
+          _buildCard(context, [
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
                 children: [
-                  const Icon(Icons.history_outlined, color: AppColors.textSecondary, size: 18),
+                  Icon(Icons.history_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 18),
                   const SizedBox(width: 8),
                   Expanded(child: Text("سجل التحديثات", style: AppTextStyles.bodyBold.copyWith(fontSize: 13))),
                 ],
@@ -82,11 +82,11 @@ class AboutPage extends StatelessWidget {
     );
   }
 
-  Widget _buildCard(List<Widget> children) {
+  Widget _buildCard(BuildContext context, List<Widget> children) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSizes.md),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(AppRadius.lg), boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
     );
   }

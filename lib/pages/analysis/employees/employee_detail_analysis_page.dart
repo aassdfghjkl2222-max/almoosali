@@ -69,7 +69,7 @@ class _EmployeeDetailAnalysisPageState extends State<EmployeeDetailAnalysisPage>
     final e = widget.employee;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: e.name, hotel: widget.hotel),
         centerTitle: true,

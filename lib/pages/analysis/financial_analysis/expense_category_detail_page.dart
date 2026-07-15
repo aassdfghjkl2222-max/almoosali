@@ -100,7 +100,7 @@ class _ExpenseCategoryDetailPageState extends State<ExpenseCategoryDetailPage> {
     final change = _monthChangePercent;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "تحليل: ${widget.categoryName}", hotel: widget.hotel),
         centerTitle: true,

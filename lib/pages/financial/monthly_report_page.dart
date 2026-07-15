@@ -74,7 +74,7 @@ class _MonthlyReportPageState extends State<MonthlyReportPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
           "التقرير الشهري والمراجعة",

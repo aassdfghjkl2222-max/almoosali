@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'dart:io';
-import '../../../core/app_colors.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../core/formatters/thousands_separator_formatter.dart';
@@ -150,7 +149,7 @@ class _AddPersonOperationPageState extends State<AddPersonOperationPage> {
   Widget build(BuildContext context) {
     final isPerson = widget.type == 'person';
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(isPerson ? "إضافة عملية شخص" : "إضافة عملية مورد", 
                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
@@ -278,7 +277,7 @@ class _AddPersonOperationPageState extends State<AddPersonOperationPage> {
           child: Center(
             child: Text(
               label,
-              style: TextStyle(color: isSelected ? Colors.white : AppColors.textPrimary, fontWeight: FontWeight.bold),
+              style: TextStyle(color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold),
             ),
           ),
         ),

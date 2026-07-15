@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
@@ -92,7 +91,7 @@ class _AddHotelPageState extends State<AddHotelPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(widget.hotel == null ? "إضافة منشأة جديدة" : "تعديل المنشأة"),
         centerTitle: true,
@@ -158,7 +157,7 @@ class _AddHotelPageState extends State<AddHotelPage> {
         const SizedBox(height: AppSizes.xs),
         Text(
           "اختر لوناً واحداً يمثّل هوية هذا الفندق — سيُستخدم تلقائياً في كل شاشاته",
-          style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+          style: AppTextStyles.caption.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: AppSizes.md),
         Wrap(
@@ -202,7 +201,7 @@ class _AddHotelPageState extends State<AddHotelPage> {
                       option.name,
                       style: AppTextStyles.caption.copyWith(
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? color : AppColors.textPrimary,
+                        color: isSelected ? color : Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                   ],

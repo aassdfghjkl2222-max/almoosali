@@ -2,7 +2,7 @@ class PendingExpense {
   final int? id;
   final int hotelId;
   final double amount;
-  final String paymentMethod; // نقد / شبكة
+  final String paymentMethod; // نقد / شبكة / ... / "آجل (دين)"
   final int categoryId;
   final String? categoryName; // Helper for display
   final int? categoryIcon; // Helper for display
@@ -14,6 +14,14 @@ class PendingExpense {
   final bool isTransferred;
   final String amountSource; // الخزنة / الحساب البنكي / خارج النظام
   final String createdAt;
+
+  /// المورد المرتبط بدين هذا المصروف (إلزامي فقط عند paymentMethod == آجل
+  /// (دين)) — راجع [fundingSourceDeferred].
+  final int? supplierId;
+  final String? supplierName; // حقل عرض فقط من JOIN، لا يُكتب في toMap
+  final String? dueDate; // تاريخ استحقاق الدين — اختياري
+
+  static const fundingSourceDeferred = 'آجل (دين)';
 
   PendingExpense({
     this.id,
@@ -31,7 +39,12 @@ class PendingExpense {
     this.isTransferred = false,
     this.amountSource = 'خارج النظام',
     required this.createdAt,
+    this.supplierId,
+    this.supplierName,
+    this.dueDate,
   });
+
+  bool get isDeferredDebt => paymentMethod == fundingSourceDeferred;
 
   Map<String, dynamic> toMap() {
     return {
@@ -47,6 +60,8 @@ class PendingExpense {
       'is_transferred': isTransferred ? 1 : 0,
       'amount_source': amountSource,
       'created_at': createdAt,
+      'supplier_id': supplierId,
+      'due_date': dueDate,
     };
   }
 
@@ -67,6 +82,9 @@ class PendingExpense {
       isTransferred: (map['is_transferred'] ?? 0) == 1,
       amountSource: map['amount_source'] ?? 'خارج النظام',
       createdAt: map['created_at'],
+      supplierId: map['supplier_id'] as int?,
+      supplierName: map['supplier_name'] as String?,
+      dueDate: map['due_date'] as String?,
     );
   }
 
@@ -86,6 +104,11 @@ class PendingExpense {
     bool? isTransferred,
     String? amountSource,
     String? createdAt,
+    int? supplierId,
+    String? supplierName,
+    String? dueDate,
+    bool clearSupplier = false,
+    bool clearDueDate = false,
   }) {
     return PendingExpense(
       id: id ?? this.id,
@@ -103,6 +126,9 @@ class PendingExpense {
       isTransferred: isTransferred ?? this.isTransferred,
       amountSource: amountSource ?? this.amountSource,
       createdAt: createdAt ?? this.createdAt,
+      supplierId: clearSupplier ? null : (supplierId ?? this.supplierId),
+      supplierName: clearSupplier ? null : (supplierName ?? this.supplierName),
+      dueDate: clearDueDate ? null : (dueDate ?? this.dueDate),
     );
   }
 }

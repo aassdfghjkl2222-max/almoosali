@@ -11,6 +11,20 @@ class Invoice {
   final String facilityName;
   final String amountSource;
 
+  /// تصنيف المصروف المرتبط بالفاتورة — نصّ حر بنفس اسم التصنيف (بلا ربط
+  /// مباشر بجدول expense_categories)، بنفس أسلوب amountSource. قد يكون
+  /// null للفواتير المضافة قبل توفر هذا الحقل أو التي لم تُصنَّف بعد.
+  final String? expenseCategory;
+
+  /// طريقة الدفع الفعلية ('نقد'/'بنك'/'دفع جزئي') — لا تنطبق على "شراء آجل"
+  /// (المبلغ لم يُدفع بعد)، فتبقى null في تلك الحالة.
+  final String? paymentMethod;
+
+  /// الفندق الآخر المرتبط عندما يكون مصدر التمويل "منشأة أخرى" — يُستخدم
+  /// مستقبلاً لبناء العلاقة المالية الفعلية بين المنشأتين؛ لا يُنشئ أي سجل
+  /// علاقة/دين فعلي في هذه المرحلة (بنية بيانات أساسية فقط).
+  final int? relatedHotelId;
+
   const Invoice({
     this.id,
     required this.hotelId,
@@ -23,6 +37,9 @@ class Invoice {
     required this.totalAmount,
     required this.facilityName,
     this.amountSource = 'خارج النظام',
+    this.expenseCategory,
+    this.paymentMethod,
+    this.relatedHotelId,
   });
 
   Map<String, dynamic> toMap() {
@@ -38,6 +55,9 @@ class Invoice {
       'total_amount': totalAmount,
       'facility_name': facilityName,
       'amount_source': amountSource,
+      'expense_category': expenseCategory,
+      'payment_method': paymentMethod,
+      'related_hotel_id': relatedHotelId,
     };
   }
 
@@ -54,6 +74,9 @@ class Invoice {
       totalAmount: (map['total_amount'] as num).toDouble(),
       facilityName: map['facility_name'] as String,
       amountSource: map['amount_source'] ?? 'خارج النظام',
+      expenseCategory: map['expense_category'] as String?,
+      paymentMethod: map['payment_method'] as String?,
+      relatedHotelId: map['related_hotel_id'] as int?,
     );
   }
 }

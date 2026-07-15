@@ -34,12 +34,18 @@ class ExpenseItem {
   final FocusNode nameFocus;
   final FocusNode amountFocus;
 
+  /// غير null فقط للبنود التي أصلها مصروف معلق حقيقي مُرحَّل داخل هذا
+  /// التقرير (وليس بنداً حراً أُضيف يدوياً) — راجع _loadReportForDate و
+  /// _unpostPendingItem. هذه البنود مقفلة (بلا تعديل مباشر) إلا عبر "إلغاء الترحيل".
+  final int? pendingExpenseId;
+
   ExpenseItem({
     required this.nameController,
     required this.amountController,
     this.paymentMethod = "نقد",
     required this.nameFocus,
     required this.amountFocus,
+    this.pendingExpenseId,
   });
 
   void dispose() {
@@ -173,6 +179,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               amountController: TextEditingController(text: _fmtAmount(item['amount'])),
               paymentMethod: item['method'] ?? "نقد",
               nameFocus: FocusNode(), amountFocus: FocusNode(),
+              pendingExpenseId: item['is_pending_transferred'] == true ? item['pending_id'] as int? : null,
             ));
           }
           if (_otherExpenses.isNotEmpty) _showMoreExpenses = true;
@@ -250,7 +257,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     final pTotal = _availablePendingExpenses.fold(0.0, (sum, e) => sum + e.amount);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
@@ -261,7 +268,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           children: [
             IconButton(
               onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.arrow_back_ios, color: AppColors.textPrimary, size: 20),
+              icon: Icon(Icons.arrow_back_ios, color: Theme.of(context).colorScheme.onSurface, size: 20),
             ),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -312,7 +319,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           Expanded(
             child: Text(
               widget.hotel.arabicName,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: AppColors.textPrimary),
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: Theme.of(context).colorScheme.onSurface),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -625,8 +632,8 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     AppTextField(controller: c, hint: "0.00", icon: i, focusNode: f, formatThousands: true, onChanged: (_) => _calculateTotals(), onSubmitted: onSubmitted ?? (_) => n != null ? FocusScope.of(context).requestFocus(n) : null, readOnly: _isLocked),
   ]);
 
-  Widget _smallToggle(String current, Function(String) onC) {
-    if (_isLocked) return Container(
+  Widget _smallToggle(String current, Function(String) onC, {bool locked = false}) {
+    if (_isLocked || locked) return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: Colors.grey)),
       child: Text(current, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey)),
@@ -655,19 +662,37 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     ));
   }
 
-  Widget _buildDynamicRow(ExpenseItem item, int index) => Column(children: [
-    Row(children: [
-      Expanded(flex: 2, child: AppTextField(controller: item.nameController, hint: "اسم المصروف", icon: Icons.edit_note, readOnly: _isLocked)),
-      const SizedBox(width: 8),
-      Expanded(flex: 1, child: AppTextField(controller: item.amountController, hint: "0.00", formatThousands: true, onChanged: (_) => _calculateTotals(), readOnly: _isLocked)),
-    ]),
-    const SizedBox(height: 4),
-    if (!_isLocked)
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        _smallToggle(item.paymentMethod, (v) => setState(() => item.paymentMethod = v)),
-        IconButton(onPressed: () { setState(() => _otherExpenses.removeAt(index)); _calculateTotals(); }, icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20)),
+  Widget _buildDynamicRow(ExpenseItem item, int index) {
+    final isPendingLinked = item.pendingExpenseId != null;
+    return Column(children: [
+      Row(children: [
+        Expanded(flex: 2, child: AppTextField(controller: item.nameController, hint: "اسم المصروف", icon: Icons.edit_note, readOnly: _isLocked || isPendingLinked)),
+        const SizedBox(width: 8),
+        Expanded(flex: 1, child: AppTextField(controller: item.amountController, hint: "0.00", formatThousands: true, onChanged: (_) => _calculateTotals(), readOnly: _isLocked || isPendingLinked)),
       ]),
-  ]);
+      if (isPendingLinked)
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Row(children: [
+            Icon(Icons.link, size: 12, color: Colors.grey),
+            SizedBox(width: 4),
+            Text("من المصروفات المعلقة — مقفل حتى يُلغى ترحيله", style: TextStyle(fontSize: 10, color: Colors.grey)),
+          ]),
+        ),
+      const SizedBox(height: 4),
+      if (!_isLocked)
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _smallToggle(item.paymentMethod, (v) => setState(() => item.paymentMethod = v), locked: isPendingLinked),
+          isPendingLinked
+              ? TextButton.icon(
+                  onPressed: () => _unpostPendingItem(item, index),
+                  icon: const Icon(Icons.undo, size: 16, color: Colors.orange),
+                  label: const Text("إلغاء ترحيل", style: TextStyle(fontSize: 11, color: Colors.orange)),
+                )
+              : IconButton(onPressed: () { setState(() => _otherExpenses.removeAt(index)); _calculateTotals(); }, icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20)),
+        ]),
+    ]);
+  }
 
   void _showIncreasePopup() {
     if (_isLocked) return;
@@ -690,15 +715,31 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     )));
   }
 
-  Future<void> _reviewReport() async {
-    final otherDetails = _otherExpenses.map((e) => {'name': e.nameController.text, 'amount': ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0, 'method': e.paymentMethod}).toList();
-    for (var e in _availablePendingExpenses) if (_selectedPendingIds.contains(e.id)) otherDetails.add({'name': "${e.categoryName}: ${e.statement}", 'amount': e.amount, 'method': e.paymentMethod, 'is_pending_transferred': true, 'pending_id': e.id!});
+  /// يبني قائمة "المصروفات الأخرى" (الحرة + المصروفات المعلقة المُحدَّدة الآن)
+  /// بنفس بنية JSON المخزَّنة دوماً — بما فيها وسم pending_id للبنود التي
+  /// أصلها مصروف معلق، حتى تبقى قابلة للتتبع لاحقاً (راجع _unpostPendingItem).
+  List<Map<String, dynamic>> _buildOtherExpensesDetails() {
+    final otherDetails = _otherExpenses.map((e) => {
+      'name': e.nameController.text,
+      'amount': ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0,
+      'method': e.paymentMethod,
+      if (e.pendingExpenseId != null) 'is_pending_transferred': true,
+      if (e.pendingExpenseId != null) 'pending_id': e.pendingExpenseId,
+    }).toList();
+    for (var e in _availablePendingExpenses) {
+      if (_selectedPendingIds.contains(e.id)) {
+        otherDetails.add({'name': "${e.categoryName}: ${e.statement}", 'amount': e.amount, 'method': e.paymentMethod, 'is_pending_transferred': true, 'pending_id': e.id!});
+      }
+    }
+    return otherDetails;
+  }
 
+  Future<FinancialReport> _buildReportFromCurrentState() async {
     final repo = FinancialRepository();
     final mainR = await repo.getMainReportForDate(widget.hotel.id!, DateFormat('yyyy-MM-dd').format(_selectedDate));
-    
-    final report = FinancialReport(
-      hotelId: widget.hotel.id!, date: DateFormat('yyyy-MM-dd').format(_selectedDate), income: _totalIncome, expenses: _totalExpenses, 
+
+    return FinancialReport(
+      hotelId: widget.hotel.id!, date: DateFormat('yyyy-MM-dd').format(_selectedDate), income: _totalIncome, expenses: _totalExpenses,
       reportType: mainR == null || (mainR.id == _loadedReportId) ? 'main' : 'additional', increaseDesc: _increaseDesc, shortageDesc: _shortageDesc,
       detailsJson: jsonEncode({
         'income_details': {
@@ -714,44 +755,88 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           'refund': ThousandsSeparatorInputFormatter.parse(_refundController.text) ?? 0,
           'refund_method': _refundMethod,
           'cash_to_pos': ThousandsSeparatorInputFormatter.parse(_cashToPosController.text) ?? 0,
-          'other': otherDetails,
+          'other': _buildOtherExpensesDetails(),
         },
         'adjustments': {'increase': _increaseAmount, 'shortage': _shortageAmount, 'increase_effect': _increaseSource, 'shortage_effect': _shortageSource},
         'net_cash': _netCash.toStringAsFixed(2), 'net_pos': _netPos.toStringAsFixed(2),
       }),
       createdAt: DateTime.now().toIso8601String(),
     );
+  }
+
+  /// يحفظ تقريراً (إنشاء أو تحديث) + صندوقه المودَع المرتبط — الجزء المشترك
+  /// بين تأكيد "تعيين" (بعد المعاينة) وبين "إلغاء ترحيل" مصروف من داخل تقرير
+  /// محمَّل مسبقاً (يحفظ فوراً بلا معاينة، لأنه تصحيح لا تقرير جديد).
+  Future<int> _persistReport(FinancialReport report) async {
+    final repo = FinancialRepository();
+    final vaultRepo = VaultRepository();
+    int rId;
+
+    if (_loadedReportId != null) {
+      await repo.updateFinancialReport(report.copyWith(id: _loadedReportId));
+      rId = _loadedReportId!;
+
+      final existingFund = await vaultRepo.getDepositedFundByReportId(rId);
+      if (existingFund != null) {
+        await vaultRepo.updateDepositedFundByReportId(
+          existingFund.copyWith(
+            cashAmount: _netCash,
+            networkAmount: _netPos,
+            date: report.date,
+          ),
+          rId,
+        );
+      } else {
+         await vaultRepo.addDepositedFund(DepositedFund(hotelId: widget.hotel.id!, reportId: rId, date: report.date, cashAmount: _netCash, networkAmount: _netPos));
+      }
+    } else {
+      rId = await repo.addFinancialReport(report);
+      await vaultRepo.addDepositedFund(DepositedFund(hotelId: widget.hotel.id!, reportId: rId, date: report.date, cashAmount: _netCash, networkAmount: _netPos));
+    }
+    return rId;
+  }
+
+  Future<void> _reviewReport() async {
+    final report = await _buildReportFromCurrentState();
 
     if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ReportPreviewPage(hotel: widget.hotel, report: report, detailedData: jsonDecode(report.detailsJson!), onConfirm: () async {
-      final repo = FinancialRepository();
-      final vaultRepo = VaultRepository();
-      int rId;
-      
-      if (_loadedReportId != null) {
-        await repo.updateFinancialReport(report.copyWith(id: _loadedReportId));
-        rId = _loadedReportId!;
-        
-        final existingFund = await vaultRepo.getDepositedFundByReportId(rId);
-        if (existingFund != null) {
-          await vaultRepo.updateDepositedFundByReportId(
-            existingFund.copyWith(
-              cashAmount: _netCash,
-              networkAmount: _netPos,
-              date: report.date,
-            ),
-            rId,
-          );
-        } else {
-           await vaultRepo.addDepositedFund(DepositedFund(hotelId: widget.hotel.id!, reportId: rId, date: report.date, cashAmount: _netCash, networkAmount: _netPos));
-        }
-      } else {
-        rId = await repo.addFinancialReport(report);
-        await vaultRepo.addDepositedFund(DepositedFund(hotelId: widget.hotel.id!, reportId: rId, date: report.date, cashAmount: _netCash, networkAmount: _netPos));
-      }
-
+      await _persistReport(report);
       if (_selectedPendingIds.isNotEmpty) await _expenseRepository.transferExpenses(_selectedPendingIds.toList());
       if (mounted) { Navigator.pop(context); Navigator.pop(context, true); }
     })));
+  }
+
+  /// "إلغاء ترحيل" مصروف معلق من داخل هذا التقرير — يُزيله من التقرير الحالي
+  /// فوراً (يُحفظ التقرير مباشرة بلا معاينة)، ويُعيد المصروف نفسه إلى
+  /// المصروفات المعلقة القابلة للتعديل (is_transferred=0). لا يمسّ أي دين
+  /// مرتبط به (إن وُجد) — الدين يبقى قائماً حتى يُعدَّل المصروف أو يُحذف صراحة.
+  Future<void> _unpostPendingItem(ExpenseItem item, int index) async {
+    final pendingId = item.pendingExpenseId;
+    if (pendingId == null || _loadedReportId == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+        title: const Text("إلغاء ترحيل المصروف"),
+        content: const Text("سيُزال هذا المصروف من التقرير الحالي فوراً، ويعود إلى المصروفات المعلقة ليصبح قابلاً للتعديل مرة أخرى."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("إلغاء الترحيل", style: TextStyle(color: Colors.orange))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _otherExpenses.removeAt(index));
+    _calculateTotals();
+    await _expenseRepository.untransferExpenses([pendingId]);
+    final report = await _buildReportFromCurrentState();
+    await _persistReport(report);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم إلغاء الترحيل — يمكن تعديل المصروف الآن من المصروفات المعلقة")));
+    }
+    _loadPendingExpenses();
   }
 
   void _showPendingExpensesSelector() async {

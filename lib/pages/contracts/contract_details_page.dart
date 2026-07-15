@@ -57,7 +57,7 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("تفاصيل العقد"),
         centerTitle: true,
@@ -109,7 +109,7 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
       case 'يقترب من الانتهاء': statusColor = Colors.orange; break;
       case 'منتهي': statusColor = Colors.red; break;
       case 'مكتمل': statusColor = Colors.blue; break;
-      default: statusColor = AppColors.textSecondary;
+      default: statusColor = Theme.of(context).colorScheme.onSurfaceVariant;
     }
 
     return AppCard(
@@ -232,7 +232,7 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Column(
           children: [
@@ -287,7 +287,7 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Row(
         children: [
@@ -341,7 +341,7 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
                  ],
                ),
                actions: [
-                 TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary))),
+                 TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
                  TextButton(
                    onPressed: () => Navigator.pop(context, selected),
                    child: Text("تأكيد", style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary))

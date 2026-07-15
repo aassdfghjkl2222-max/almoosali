@@ -4,6 +4,7 @@ import '../../core/app_colors.dart';
 import '../../core/app_config.dart';
 import '../../core/app_preferences.dart';
 import '../../core/app_radius.dart';
+import '../../core/app_theme_controller.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../services/security_service.dart';
@@ -90,7 +91,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("الإعدادات", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
@@ -138,7 +139,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildCard(List<Widget> children) {
     return Card(
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg), side: const BorderSide(color: AppColors.border)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg), side: BorderSide(color: Theme.of(context).dividerColor)),
       child: Column(children: children),
     );
   }
@@ -227,7 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             ListTile(
               title: const Text("4 أرقام"),
-              leading: Icon(_pinLength == 4 ? Icons.radio_button_checked : Icons.radio_button_off, color: _pinLength == 4 ? Theme.of(context).colorScheme.primary : AppColors.textSecondary),
+              leading: Icon(_pinLength == 4 ? Icons.radio_button_checked : Icons.radio_button_off, color: _pinLength == 4 ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant),
               onTap: () {
                 _updatePinLength(4);
                 Navigator.pop(context);
@@ -235,7 +236,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             ListTile(
               title: const Text("6 أرقام"),
-              leading: Icon(_pinLength == 6 ? Icons.radio_button_checked : Icons.radio_button_off, color: _pinLength == 6 ? Theme.of(context).colorScheme.primary : AppColors.textSecondary),
+              leading: Icon(_pinLength == 6 ? Icons.radio_button_checked : Icons.radio_button_off, color: _pinLength == 6 ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant),
               onTap: () {
                 _updatePinLength(6);
                 Navigator.pop(context);
@@ -286,7 +287,7 @@ class _SettingsPageState extends State<SettingsPage> {
         title: const Text("تسجيل الخروج", style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text("هل أنت متأكد من رغبتك في تسجيل الخروج؟"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           TextButton(
             onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const PinLoginPage()), (route) => false),
             child: const Text("تسجيل الخروج", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
@@ -304,11 +305,10 @@ class _SettingsPageState extends State<SettingsPage> {
       SwitchListTile(
         secondary: Icon(Icons.dark_mode_outlined, color: primary),
         title: const Text("الوضع الداكن"),
-        subtitle: const Text("سيتم تفعيل مظهره الفعلي في مرحلة قادمة", style: AppTextStyles.caption),
         value: _darkMode,
         activeThumbColor: primary,
         onChanged: (value) async {
-          await AppPreferences.setBool(AppPreferences.keyDarkMode, value);
+          await AppThemeController.setDarkMode(value);
           if (!mounted) return;
           setState(() => _darkMode = value);
         },
@@ -336,7 +336,7 @@ class _SettingsPageState extends State<SettingsPage> {
               selected: {_fontScale},
               showSelectedIcon: false,
               onSelectionChanged: (v) async {
-                await AppPreferences.setDouble(AppPreferences.keyFontScale, v.first);
+                await AppThemeController.setFontScale(v.first);
                 if (!mounted) return;
                 setState(() => _fontScale = v.first);
               },
@@ -361,7 +361,7 @@ class _SettingsPageState extends State<SettingsPage> {
               selected: {_animationSpeed},
               showSelectedIcon: false,
               onSelectionChanged: (v) async {
-                await AppPreferences.setString(AppPreferences.keyAnimationSpeed, v.first);
+                await AppThemeController.setAnimationSpeed(v.first);
                 if (!mounted) return;
                 setState(() => _animationSpeed = v.first);
               },

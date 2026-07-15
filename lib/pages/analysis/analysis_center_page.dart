@@ -6,6 +6,7 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/app_theme.dart';
+import '../../core/document_status.dart';
 import '../../core/hotel_identity.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/financial_report.dart';
@@ -253,16 +254,17 @@ class _AnalysisCenterPageState extends State<AnalysisCenterPage> {
     return {'cash': cash, 'bank': bank, 'receivable': receivable, 'liability': liability};
   }
 
+  /// "حرجة" الآن تعني منتهية أو خلال 7 أيام أو أقل (وليس المنتهية فقط كما
+  /// كان سابقاً) — بنفس عتبة DocumentStatus الموحّدة المعتمدة في كل مكان آخر
+  /// يعرض حالة المستندات، بدل تعريف منفصل كان يتجاهل التنبيه العاجل.
   Future<int> _loadCriticalAlerts(List<int> hotelIds) async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
     int count = 0;
     for (final id in hotelIds) {
-      final docs = await _documentRepo.getAllDocuments(id);
-      for (final d in docs) {
-        final expiry = DateTime.tryParse(d.expiryDate);
-        if (expiry != null && expiry.isBefore(today)) count++;
-      }
+      final docs = await _documentRepo.getDocumentsForHotel(id);
+      count += docs.where((d) {
+        final level = DocumentStatus.fromExpiryDate(d.expiryDate).level;
+        return level == DocumentStatusLevel.expired || level == DocumentStatusLevel.urgent;
+      }).length;
     }
     return count;
   }
@@ -405,7 +407,7 @@ class _AnalysisCenterPageState extends State<AnalysisCenterPage> {
     return Theme(
       data: AppTheme.createTheme(identity),
       child: Scaffold(
-        backgroundColor: AppColors.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           centerTitle: true,
           backgroundColor: identity.primary,
@@ -569,7 +571,7 @@ class _AnalysisCenterPageState extends State<AnalysisCenterPage> {
               final p = _periods[i];
               final selected = _selectedPeriod == p;
               return ChoiceChip(
-                label: Text(p, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : AppColors.textPrimary)),
+                label: Text(p, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                 selected: selected,
                 selectedColor: color,
                 backgroundColor: Colors.white,

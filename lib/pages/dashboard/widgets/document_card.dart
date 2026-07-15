@@ -1,58 +1,27 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/document_status.dart';
 import '../../../models/document.dart';
 import '../../../widgets/common/app_card.dart';
 
 class DocumentCard extends StatelessWidget {
-
   final Document document;
-
   final VoidCallback onTap;
 
   /// لون هوية الفندق الحالي — طبقة تصميم إضافية اختيارية، لا تغيّر ألوان حالة المستند.
   final Color? identityAccent;
 
   const DocumentCard({
-
     super.key,
-
     required this.document,
-
     required this.onTap,
-
     this.identityAccent,
-
   });
 
   @override
   Widget build(BuildContext context) {
-    final expiry = DateTime.tryParse(document.expiryDate);
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    String statusText = "غير معروف";
-    Color statusColor = Colors.grey;
-
-    if (expiry != null) {
-      final difference = expiry.difference(today).inDays;
-
-      if (expiry.isBefore(today)) {
-        statusText = "منتهي";
-        statusColor = Colors.black;
-      } else if (difference <= 5) {
-        statusText = "عاجل";
-        statusColor = Colors.red;
-      } else if (difference <= 10) {
-        statusText = "تحذير";
-        statusColor = Colors.red;
-      } else if (difference <= 30) {
-        statusText = "سينتهي قريباً";
-        statusColor = Colors.orange;
-      } else {
-        statusText = "ساري";
-        statusColor = Colors.green;
-      }
-    }
+    final status = DocumentStatus.fromExpiryDate(document.expiryDate);
+    final title = document.typeName ?? document.name;
 
     return AppCard(
       onTap: onTap,
@@ -60,33 +29,36 @@ class DocumentCard extends StatelessWidget {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: statusColor,
-            child: const Icon(
-              Icons.description,
-              color: Colors.white,
-            ),
+            backgroundColor: status.color,
+            child: Icon(status.icon, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(document.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Flexible(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                    if (document.isMandatory) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.push_pin, size: 12, color: Colors.grey),
+                    ],
+                  ],
+                ),
                 const SizedBox(height: 2),
-                Text(document.expiryDate, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                if (document.categoryName != null)
+                  Text(document.categoryName!, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
               ],
             ),
           ),
           Text(
-            statusText,
-            style: TextStyle(
-              color: statusColor,
-              fontWeight: FontWeight.bold,
-            ),
+            status.label,
+            style: TextStyle(color: status.color, fontWeight: FontWeight.bold, fontSize: 12),
+            textAlign: TextAlign.left,
           ),
         ],
       ),
     );
   }
-
 }

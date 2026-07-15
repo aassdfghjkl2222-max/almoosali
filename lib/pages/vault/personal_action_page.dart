@@ -91,7 +91,7 @@ class _PersonalActionPageState extends State<PersonalActionPage> {
     final actionColor = isWithdraw ? AppColors.danger : Colors.green;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: isWithdraw ? "سحب أموال" : "إيداع أموال", hotel: widget.hotel),
         centerTitle: true,

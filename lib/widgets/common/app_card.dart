@@ -59,7 +59,7 @@ class AppCard extends StatelessWidget {
             borderRadius: radius,
             child: Container(
               decoration: BoxDecoration(
-                color: color ?? AppColors.card,
+                color: color ?? Theme.of(context).cardColor,
                 borderRadius: radius,
                 boxShadow: const [
                   BoxShadow(

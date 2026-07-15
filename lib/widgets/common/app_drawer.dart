@@ -15,7 +15,10 @@ import '../../pages/settings/support_page.dart';
 import '../../pages/settlements/pages/supplier_debts_page.dart';
 import '../../pages/dashboard/pages/hotels_page.dart';
 import '../../pages/contracts/contracts_page.dart';
+import '../../pages/documents/documents_hub_page.dart';
 import '../../pages/login/pin_login_page.dart';
+import '../../pages/master_data/master_data_hub_page.dart';
+import '../../pages/users/users_page.dart';
 
 /// القائمة الرئيسية — مخصصة للأنظمة العامة الخاصة بالتطبيق فقط. أي نظام
 /// تشغيلي خاص بفندق معيّن (التقرير اليومي، مركز التحليل، المركز المالي،
@@ -61,7 +64,7 @@ class AppDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _identityColor(context);
     return Drawer(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       child: Column(
         children: [
           _buildHeader(color),
@@ -76,6 +79,14 @@ class AppDrawer extends StatelessWidget {
                   subtitle: "قائمة الفنادق",
                   color: color,
                   onTap: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const HotelsPage()), (route) => false),
+                ),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.folder_outlined,
+                  title: "المستندات",
+                  subtitle: "كل مستندات التطبيق في مكان واحد",
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DocumentsHubPage())),
                 ),
                 _drawerItem(
                   context: context,
@@ -98,13 +109,21 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => _openHotelScoped(context, "اختر الفندق لعرض ملاحظاته", (h) => NotesPage(hotel: h)),
                 ),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.library_books_outlined,
+                  title: "البيانات المرجعية",
+                  subtitle: "بيانات مشتركة بين كل الفنادق",
+                  color: color,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataHubPage())),
+                ),
                 if (kAppHasMultipleUsers)
                   _drawerItem(
                     context: context,
                     icon: Icons.manage_accounts_outlined,
                     title: "إدارة المستخدمين والصلاحيات",
                     color: color,
-                    onTap: () {},
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UsersPage())),
                   ),
                 const _DrawerDivider(),
                 _drawerItem(
@@ -240,7 +259,7 @@ class AppDrawer extends StatelessWidget {
         title: const Text("تسجيل الخروج", style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text("هل أنت متأكد من رغبتك في تسجيل الخروج؟"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           TextButton(
             onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const PinLoginPage()), (route) => false),
             child: const Text("تسجيل الخروج", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),

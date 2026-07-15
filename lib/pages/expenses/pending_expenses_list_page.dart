@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 // ignore_for_file: non_const_argument_for_const_parameter
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -98,7 +97,7 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "المصروفات المعلقة", hotel: widget.hotel),
         centerTitle: true,

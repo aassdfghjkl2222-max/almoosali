@@ -5,12 +5,17 @@ class Supplier {
   final String shortName;
   final String taxNumber;
 
+  /// ملاحظة اختيارية تُدخَل عند إضافة المورد — للاستخدام الداخلي فقط، لا
+  /// تظهر في الفاتورة ولا PDF ولا Excel ولا التقارير.
+  final String? notes;
+
   Supplier({
     this.id,
     required this.hotelId,
     required this.officialName,
     required this.shortName,
     required this.taxNumber,
+    this.notes,
   });
 
   Map<String, dynamic> toMap() {
@@ -20,6 +25,7 @@ class Supplier {
       'official_name': officialName,
       'short_name': shortName,
       'tax_number': taxNumber,
+      'notes': notes,
     };
   }
 
@@ -30,6 +36,7 @@ class Supplier {
       officialName: map['official_name'],
       shortName: map['short_name'],
       taxNumber: map['tax_number'],
+      notes: map['notes'] as String?,
     );
   }
 }

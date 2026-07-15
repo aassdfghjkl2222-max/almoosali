@@ -10,6 +10,7 @@ import '../../../models/entity_loan.dart';
 import '../../../models/financial_account.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/hotel_repository.dart';
+import '../../../repositories/supplier_repository.dart';
 import '../../../repositories/vault_repository.dart';
 import '../../../services/financial_engine.dart';
 import '../../../widgets/common/app_card.dart';
@@ -38,6 +39,7 @@ class FinancialCenterAnalysisPage extends StatefulWidget {
 class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPage> {
   final _engine = FinancialEngine();
   final _vaultRepo = VaultRepository();
+  final _supplierRepo = SupplierRepository();
 
   bool _isLoading = true;
   List<Hotel> _allHotels = [];
@@ -49,6 +51,8 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
   List<EntityLoan> _loans = [];
   List<FinancialAccount> _assets = [];
   List<FinancialAccount> _liabilities = [];
+  double _accountsPayableTotal = 0;
+  List<Map<String, dynamic>> _suppliersWithDebt = [];
 
   @override
   void initState() {
@@ -68,6 +72,8 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
     final loans = <EntityLoan>[];
     final assets = <FinancialAccount>[];
     final liabilities = <FinancialAccount>[];
+    double payableTotal = 0;
+    final suppliersWithDebt = <Map<String, dynamic>>[];
 
     for (final id in hotelIds) {
       cash += await _engine.getBalance(id, 'cash');
@@ -84,6 +90,12 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
       pending.addAll(funds.where((f) => f.cashStatus == 'pending' || f.networkStatus == 'pending'));
 
       loans.addAll(await _vaultRepo.getEntityLoans(id));
+
+      payableTotal += await _supplierRepo.getAccountsPayableTotal(id);
+      final suppliers = await _supplierRepo.getSuppliersWithOutstandingDebt(id);
+      for (final s in suppliers) {
+        suppliersWithDebt.add({...s, 'hotel_id': id});
+      }
     }
 
     if (!mounted) return;
@@ -95,6 +107,8 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
       _loans = loans;
       _assets = assets;
       _liabilities = liabilities;
+      _accountsPayableTotal = payableTotal;
+      _suppliersWithDebt = suppliersWithDebt;
       _isLoading = false;
     });
   }
@@ -200,7 +214,7 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
   Widget build(BuildContext context) {
     final color = _identityColor;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: color,
@@ -243,6 +257,13 @@ class _FinancialCenterAnalysisPageState extends State<FinancialCenterAnalysisPag
       _CategoryData("القروض", Icons.account_balance_wallet_outlined, const Color(0xFFD9743C), _format(loansTotal), () => Navigator.push(context, MaterialPageRoute(builder: (_) => _LoansPage(hotel: widget.hotel, loans: _loans, color: const Color(0xFFD9743C), hotelFor: _hotelFor)))),
       _CategoryData("الأصول", Icons.trending_up_outlined, const Color(0xFF1FA971), _format(assetsTotal), () => _openAccountsList("الأصول", _assets, const Color(0xFF1FA971))),
       _CategoryData("الالتزامات", Icons.trending_down_outlined, AppColors.danger, _format(liabilitiesTotal), () => _openAccountsList("الالتزامات", _liabilities, AppColors.danger)),
+      _CategoryData(
+        "الذمم الدائنة",
+        Icons.receipt_long_outlined,
+        const Color(0xFFB3541E),
+        _format(_accountsPayableTotal),
+        () => Navigator.push(context, MaterialPageRoute(builder: (_) => _AccountsPayablePage(hotel: widget.hotel, suppliers: _suppliersWithDebt, color: const Color(0xFFB3541E), hotelFor: _hotelFor))),
+      ),
     ];
     final rows = <Widget>[];
     for (int i = 0; i < categories.length; i += 2) {
@@ -292,7 +313,7 @@ class _AccountsListPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: Text(title, style: const TextStyle(color: Colors.white)), centerTitle: true, backgroundColor: identityColor, elevation: 0),
       body: accounts.isEmpty
           ? const Center(child: Text("لا توجد حسابات", style: TextStyle(color: Colors.grey)))
@@ -331,7 +352,7 @@ class _PendingFundsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text("الأموال المعلقة", style: TextStyle(color: Colors.white)), centerTitle: true, backgroundColor: identityColor, elevation: 0),
       body: funds.isEmpty
           ? const Center(child: Text("لا توجد أموال معلّقة", style: TextStyle(color: Colors.grey)))
@@ -354,6 +375,46 @@ class _PendingFundsPage extends StatelessWidget {
   }
 }
 
+/// "الذمم الدائنة" — ديون على المنشأة لصالح موردين، مجمَّعة من مصدرين
+/// (فواتير "شراء آجل" + مصروفات معلقة "آجل (دين)") عبر
+/// SupplierRepository.getSuppliersWithOutstandingDebt، ناقص ما سُدِّد. كل
+/// عنصر مرتبط بمورد حقيقي — لا كشف حساب تفصيلي بعد (خارج نطاق هذه المرحلة).
+class _AccountsPayablePage extends StatelessWidget {
+  final Hotel hotel;
+  final List<Map<String, dynamic>> suppliers;
+  final Color color;
+  final Hotel Function(int?) hotelFor;
+  const _AccountsPayablePage({required this.hotel, required this.suppliers, required this.color, required this.hotelFor});
+
+  String _format(double v) => NumberFormat("#,##0.##").format(v);
+
+  @override
+  Widget build(BuildContext context) {
+    final identityColor = HotelVisualIdentity.colorForHotel(hotel);
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(title: const Text("الذمم الدائنة", style: TextStyle(color: Colors.white)), centerTitle: true, backgroundColor: identityColor, elevation: 0),
+      body: suppliers.isEmpty
+          ? const Center(child: Text("لا توجد ديون قائمة على المنشأة", style: TextStyle(color: Colors.grey)))
+          : ListView(
+              padding: const EdgeInsets.all(AppSizes.md),
+              children: suppliers
+                  .map((s) => Card(
+                        margin: const EdgeInsets.only(bottom: AppSizes.sm),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                        child: ListTile(
+                          leading: Icon(Icons.local_shipping_outlined, color: color),
+                          title: Text(s['official_name'] as String, style: AppTextStyles.bodyBold),
+                          subtitle: Text("${hotelFor(s['hotel_id'] as int?).arabicName} · ${s['short_name']}", style: AppTextStyles.caption),
+                          trailing: Text(_format((s['balance'] as num).toDouble()), style: AppTextStyles.bodyBold.copyWith(color: color)),
+                        ),
+                      ))
+                  .toList(),
+            ),
+    );
+  }
+}
+
 class _LoansPage extends StatelessWidget {
   final Hotel hotel;
   final List<EntityLoan> loans;
@@ -367,7 +428,7 @@ class _LoansPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text("القروض", style: TextStyle(color: Colors.white)), centerTitle: true, backgroundColor: identityColor, elevation: 0),
       body: loans.isEmpty
           ? const Center(child: Text("لا توجد قروض", style: TextStyle(color: Colors.grey)))

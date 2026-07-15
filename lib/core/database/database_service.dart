@@ -17,7 +17,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), 'manazel.db');
     return await openDatabase(
       path,
-      version: 24, // Upgrade to v24 for event-sourced Employee Lifecycle module
+      version: 36, // Upgrade to v36 for deferred (آجل) pending-expense supplier debts + attachments
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -65,6 +65,83 @@ class DatabaseService {
           try { await db.execute('ALTER TABLE payroll_records ADD COLUMN days_worked INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
           try { await db.execute('ALTER TABLE payroll_records ADD COLUMN total_days_in_period INTEGER NOT NULL DEFAULT 30'); } catch (_) {}
           try { await db.execute('ALTER TABLE payroll_records ADD COLUMN prorated_base REAL NOT NULL DEFAULT 0'); } catch (_) {}
+        }
+        if (oldVersion < 25) {
+          try { await db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, password TEXT NOT NULL, role_id TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS permission_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, permissions_json TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL)'); } catch (_) {}
+          try { await _seedDefaultUsers(db); } catch (_) {}
+        }
+        if (oldVersion < 26) {
+          try { await db.execute('ALTER TABLE invoices ADD COLUMN expense_category TEXT'); } catch (_) {}
+        }
+        if (oldVersion < 27) {
+          try { await db.execute('ALTER TABLE suppliers ADD COLUMN notes TEXT'); } catch (_) {}
+        }
+        if (oldVersion < 28) {
+          try { await db.execute('ALTER TABLE invoices ADD COLUMN payment_method TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE invoices ADD COLUMN related_hotel_id INTEGER'); } catch (_) {}
+        }
+        if (oldVersion < 29) {
+          try { await db.execute('CREATE TABLE IF NOT EXISTS supplier_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT, date TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE)'); } catch (_) {}
+        }
+        if (oldVersion < 30) {
+          try { await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)'); } catch (_) {}
+          // بلا FOREIGN KEY على invoice_id عمداً — يجب أن يبقى سجل التعديلات موجوداً حتى بعد حذف الفاتورة نفسها (لا يُسمح بحذف سجل التعديلات).
+          try { await db.execute('CREATE TABLE IF NOT EXISTS invoice_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, username TEXT NOT NULL, operation_type TEXT NOT NULL, changed_fields TEXT, occurred_at TEXT NOT NULL)'); } catch (_) {}
+        }
+        if (oldVersion < 31) {
+          try { await db.execute('ALTER TABLE expense_categories ADD COLUMN short_code TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE expense_categories ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+          try { await _unifyExpenseCategories(db); } catch (_) {}
+        }
+        if (oldVersion < 32) {
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color_value INTEGER NOT NULL, created_at TEXT NOT NULL)'); } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_categories_name ON document_categories(name)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT, category_id INTEGER NOT NULL, is_mandatory INTEGER NOT NULL DEFAULT 0, requires_renewal INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL DEFAULT "all", is_active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES document_categories (id))'); } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_types_name ON document_types(name)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_type_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_type_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)'); } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_type_hotels ON document_type_hotels(document_type_id, hotel_id)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN document_type_id INTEGER'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN document_number TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN issue_date TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN issuing_authority TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN notes TEXT'); } catch (_) {}
+          try { await _seedGlobalDocumentCategories(db); } catch (_) {}
+          try { await _provisionDocumentTypesForAllHotels(db); } catch (_) {}
+        }
+        if (oldVersion < 33) {
+          try { await db.execute('ALTER TABLE documents ADD COLUMN owner_type TEXT NOT NULL DEFAULT "hotel"'); } catch (_) {}
+          try { await db.execute('ALTER TABLE documents ADD COLUMN owner_id INTEGER'); } catch (_) {}
+          try { await db.execute('UPDATE documents SET owner_id = hotel_id WHERE owner_id IS NULL'); } catch (_) {}
+          try { await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_type, owner_id)'); } catch (_) {}
+          try { await _migrateEmployeeDocuments(db); } catch (_) {}
+        }
+        if (oldVersion < 34) {
+          try { await db.execute('ALTER TABLE document_types ADD COLUMN lifecycle TEXT NOT NULL DEFAULT "permanent"'); } catch (_) {}
+        }
+        if (oldVersion < 35) {
+          try { await db.execute('ALTER TABLE documents ADD COLUMN hotel_scope TEXT NOT NULL DEFAULT "single"'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)'); } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_hotels ON document_hotels(document_id, hotel_id)'); } catch (_) {}
+          try { await db.execute('CREATE TABLE IF NOT EXISTS document_folder_links (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, document_type_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE)'); } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_folder_links ON document_folder_links(document_id, document_type_id)'); } catch (_) {}
+          try { await _migratePermanentFolderLinks(db); } catch (_) {}
+        }
+        if (oldVersion < 36) {
+          try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN supplier_id INTEGER'); } catch (_) {}
+          try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN due_date TEXT'); } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
         }
       },
     );
@@ -137,6 +214,93 @@ class DatabaseService {
       if (!await hasColumn('payroll_records', 'prorated_base')) {
         await db.execute('ALTER TABLE payroll_records ADD COLUMN prorated_base REAL NOT NULL DEFAULT 0');
       }
+
+      await db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, password TEXT NOT NULL, role_id TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)');
+      await db.execute('CREATE TABLE IF NOT EXISTS permission_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, permissions_json TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL)');
+      await _seedDefaultUsers(db);
+
+      if (!await hasColumn('invoices', 'expense_category')) {
+        await db.execute('ALTER TABLE invoices ADD COLUMN expense_category TEXT');
+      }
+      if (!await hasColumn('suppliers', 'notes')) {
+        await db.execute('ALTER TABLE suppliers ADD COLUMN notes TEXT');
+      }
+      if (!await hasColumn('invoices', 'payment_method')) {
+        await db.execute('ALTER TABLE invoices ADD COLUMN payment_method TEXT');
+      }
+      if (!await hasColumn('invoices', 'related_hotel_id')) {
+        await db.execute('ALTER TABLE invoices ADD COLUMN related_hotel_id INTEGER');
+      }
+      await db.execute('CREATE TABLE IF NOT EXISTS supplier_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)');
+      await db.execute('CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT, date TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE)');
+      await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+      await db.execute('CREATE TABLE IF NOT EXISTS invoice_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, username TEXT NOT NULL, operation_type TEXT NOT NULL, changed_fields TEXT, occurred_at TEXT NOT NULL)');
+
+      if (!await hasColumn('expense_categories', 'short_code')) {
+        await db.execute('ALTER TABLE expense_categories ADD COLUMN short_code TEXT');
+      }
+      if (!await hasColumn('expense_categories', 'is_default')) {
+        await db.execute('ALTER TABLE expense_categories ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0');
+      }
+      await _unifyExpenseCategories(db);
+
+      await db.execute('CREATE TABLE IF NOT EXISTS document_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color_value INTEGER NOT NULL, created_at TEXT NOT NULL)');
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_categories_name ON document_categories(name)');
+      await db.execute('CREATE TABLE IF NOT EXISTS document_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT, category_id INTEGER NOT NULL, is_mandatory INTEGER NOT NULL DEFAULT 0, requires_renewal INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL DEFAULT "all", is_active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, lifecycle TEXT NOT NULL DEFAULT "permanent", FOREIGN KEY (category_id) REFERENCES document_categories (id))');
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_types_name ON document_types(name)');
+      await db.execute('CREATE TABLE IF NOT EXISTS document_type_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_type_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_type_hotels ON document_type_hotels(document_type_id, hotel_id)');
+      await db.execute('CREATE TABLE IF NOT EXISTS document_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+      if (!await hasColumn('documents', 'document_type_id')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN document_type_id INTEGER');
+      }
+      if (!await hasColumn('documents', 'document_number')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN document_number TEXT');
+      }
+      if (!await hasColumn('documents', 'issue_date')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN issue_date TEXT');
+      }
+      if (!await hasColumn('documents', 'issuing_authority')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN issuing_authority TEXT');
+      }
+      if (!await hasColumn('documents', 'notes')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN notes TEXT');
+      }
+      if (!await hasColumn('documents', 'owner_type')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN owner_type TEXT NOT NULL DEFAULT "hotel"');
+      }
+      if (!await hasColumn('documents', 'owner_id')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN owner_id INTEGER');
+      }
+      await db.execute('UPDATE documents SET owner_id = hotel_id WHERE owner_id IS NULL');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_type, owner_id)');
+      if (!await hasColumn('document_types', 'lifecycle')) {
+        await db.execute('ALTER TABLE document_types ADD COLUMN lifecycle TEXT NOT NULL DEFAULT "permanent"');
+      }
+      if (!await hasColumn('documents', 'hotel_scope')) {
+        await db.execute('ALTER TABLE documents ADD COLUMN hotel_scope TEXT NOT NULL DEFAULT "single"');
+      }
+      await db.execute('CREATE TABLE IF NOT EXISTS document_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_hotels ON document_hotels(document_id, hotel_id)');
+      await db.execute('CREATE TABLE IF NOT EXISTS document_folder_links (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, document_type_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE)');
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_folder_links ON document_folder_links(document_id, document_type_id)');
+      await _seedGlobalDocumentCategories(db);
+      await _provisionDocumentTypesForAllHotels(db);
+      await _migrateEmployeeDocuments(db);
+      await _migratePermanentFolderLinks(db);
+
+      if (!await hasColumn('pending_expenses', 'supplier_id')) {
+        await db.execute('ALTER TABLE pending_expenses ADD COLUMN supplier_id INTEGER');
+      }
+      if (!await hasColumn('pending_expenses', 'due_date')) {
+        await db.execute('ALTER TABLE pending_expenses ADD COLUMN due_date TEXT');
+      }
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
       // بالحد الأدنى، وتُعاد المحاولة تلقائياً عند فتح التطبيق مرة أخرى.
@@ -145,7 +309,11 @@ class DatabaseService {
 
   Future<void> _createTables(Database db) async {
     await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER)');
-    await db.execute('CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, expiry_date TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    // محرك المستندات الموحّد: كل مستند صف واحد فقط، بمرجع مالك متعدد الأشكال
+    // (owner_type/owner_id) — 'hotel' (owner_id=hotel_id نفسه)، 'employee'، ومستقبلاً
+    // 'supplier'/'contract'/... بلا أي تعديل معماري، فقط قيمة owner_type جديدة.
+    await db.execute('CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, expiry_date TEXT NOT NULL, created_at TEXT NOT NULL, document_type_id INTEGER, document_number TEXT, issue_date TEXT, issuing_authority TEXT, notes TEXT, owner_type TEXT NOT NULL DEFAULT "hotel", owner_id INTEGER, hotel_scope TEXT NOT NULL DEFAULT "single", FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_type, owner_id)');
     await db.execute('CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, title TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, position TEXT NOT NULL, salary REAL NOT NULL, hired_at TEXT NOT NULL, phone TEXT, status TEXT NOT NULL DEFAULT "active", notes TEXT, employee_number TEXT, is_archived INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS payroll_records (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, period TEXT NOT NULL, base_salary REAL NOT NULL, allowances_total REAL NOT NULL DEFAULT 0, deductions_total REAL NOT NULL DEFAULT 0, advances_total REAL NOT NULL DEFAULT 0, net_salary REAL NOT NULL, status TEXT NOT NULL DEFAULT "approved", payment_source TEXT, cash_amount REAL NOT NULL DEFAULT 0, bank_amount REAL NOT NULL DEFAULT 0, personal_amount REAL NOT NULL DEFAULT 0, approved_at TEXT NOT NULL, paid_at TEXT, created_at TEXT NOT NULL, period_start TEXT, period_end TEXT, days_worked INTEGER NOT NULL DEFAULT 0, total_days_in_period INTEGER NOT NULL DEFAULT 30, prorated_base REAL NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE)');
@@ -157,20 +325,69 @@ class DatabaseService {
     await db.execute('CREATE TABLE IF NOT EXISTS financial_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, date TEXT NOT NULL, income REAL NOT NULL, expenses REAL NOT NULL, notes TEXT, increase_desc TEXT, shortage_desc TEXT, employee_name TEXT, details_json TEXT, created_at TEXT NOT NULL, is_posted INTEGER NOT NULL DEFAULT 0, report_type TEXT NOT NULL DEFAULT "main", is_locked INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS financial_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, balance REAL NOT NULL DEFAULT 0.0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS financial_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, account_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL, balance_before REAL NOT NULL, balance_after REAL NOT NULL, description TEXT NOT NULL, reference_id INTEGER, reference_type TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (account_id) REFERENCES financial_accounts (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
+    // موحّدة على مستوى التطبيق بالكامل (hotel_id يبقى دوماً NULL) — مصدر الحقيقة الوحيد
+    // لتصنيفات المصروفات، يُقرأ منه: الفواتير الضريبية، المصروفات المعلقة، مركز التحليل، المركز المالي، التقارير.
+    await db.execute('CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, short_code TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
+    // دين على المنشأة لمورد ناتج عن مصروف معلق بمصدر تمويل "آجل (دين)" — راجع
+    // PendingExpenseDebt. مستقل عن supplier_debts (فواتير "شراء آجل" فقط)، وكلاهما
+    // يُجمَّعان في "الذمم الدائنة" بمركز التحليل المالي (SupplierRepository.getAccountsPayableTotal).
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS deposited_funds (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, report_id INTEGER, date TEXT NOT NULL, cash_amount REAL NOT NULL, network_amount REAL NOT NULL, cash_status TEXT NOT NULL DEFAULT "pending", network_status TEXT NOT NULL DEFAULT "pending", is_archived INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (report_id) REFERENCES financial_reports (id) ON DELETE SET NULL)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, account_id INTEGER, creditor_hotel_id INTEGER, debtor_hotel_id INTEGER, amount REAL NOT NULL, date TEXT NOT NULL, description TEXT NOT NULL, attachments_json TEXT, status TEXT NOT NULL DEFAULT "open", total_paid REAL NOT NULL DEFAULT 0, direction TEXT, created_at TEXT NOT NULL, FOREIGN KEY (account_id) REFERENCES settlement_accounts (id) ON DELETE CASCADE, FOREIGN KEY (creditor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (debtor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, settlement_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, notes TEXT, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (settlement_id) REFERENCES settlements (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, invoice_number TEXT NOT NULL, date TEXT NOT NULL, company_name TEXT NOT NULL, tax_number TEXT NOT NULL, amount_before_tax REAL NOT NULL, vat REAL NOT NULL, total_amount REAL NOT NULL, facility_name TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, official_name TEXT NOT NULL, short_name TEXT NOT NULL, tax_number TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, invoice_number TEXT NOT NULL, date TEXT NOT NULL, company_name TEXT NOT NULL, tax_number TEXT NOT NULL, amount_before_tax REAL NOT NULL, vat REAL NOT NULL, total_amount REAL NOT NULL, facility_name TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", expense_category TEXT, payment_method TEXT, related_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, official_name TEXT NOT NULL, short_name TEXT NOT NULL, tax_number TEXT NOT NULL, notes TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contracts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, contractor_name TEXT NOT NULL, start_date TEXT NOT NULL, duration TEXT NOT NULL, end_date TEXT NOT NULL, total_value REAL NOT NULL, payment_method TEXT NOT NULL, status TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contract_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, contract_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (contract_id) REFERENCES contracts (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS vault_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, type TEXT NOT NULL, balance REAL NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, UNIQUE(hotel_id, type))');
     await db.execute('CREATE TABLE IF NOT EXISTS vault_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL, balance_before REAL NOT NULL, balance_after REAL NOT NULL, reference TEXT, notes TEXT, source TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS personal_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS entity_loans (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, source TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, password TEXT NOT NULL, role_id TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS permission_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, permissions_json TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS supplier_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT, date TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS invoice_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, username TEXT NOT NULL, operation_type TEXT NOT NULL, changed_fields TEXT, occurred_at TEXT NOT NULL)');
+    // موحّدة على مستوى التطبيق بالكامل — مصدر الحقيقة الوحيد لأنواع المستندات المرجعية
+    // وفئاتها، تُزوَّد منه تلقائياً كل الفنادق (راجع _provisionDocumentTypesForAllHotels).
+    await db.execute('CREATE TABLE IF NOT EXISTS document_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color_value INTEGER NOT NULL, created_at TEXT NOT NULL)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_categories_name ON document_categories(name)');
+    await db.execute('CREATE TABLE IF NOT EXISTS document_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT, category_id INTEGER NOT NULL, is_mandatory INTEGER NOT NULL DEFAULT 0, requires_renewal INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL DEFAULT "all", is_active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, lifecycle TEXT NOT NULL DEFAULT "permanent", FOREIGN KEY (category_id) REFERENCES document_categories (id))');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_types_name ON document_types(name)');
+    await db.execute('CREATE TABLE IF NOT EXISTS document_type_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_type_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_type_hotels ON document_type_hotels(document_type_id, hotel_id)');
+    await db.execute('CREATE TABLE IF NOT EXISTS document_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    // نطاق فنادق مستند واحد عندما hotel_scope='specific' (أكثر من فندق) — راجع
+    // documents.hotel_scope: 'single' (hotel_id وحده كما هو معتاد)، 'all'
+    // (كل الفنادق، يُحسَب ديناميكياً بلا صفوف هنا)، 'specific' (هذا الجدول).
+    await db.execute('CREATE TABLE IF NOT EXISTS document_hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_hotels ON document_hotels(document_id, hotel_id)');
+    // مراجع "المستند يظهر داخل مجلد" (نوع مرجعي) — علاقة متعددة لأكثر من مجلد
+    // لنفس المستند بلا أي نسخ للملف أو للسجل (مبدأ "References" في قسم المستندات).
+    await db.execute('CREATE TABLE IF NOT EXISTS document_folder_links (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, document_type_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_folder_links ON document_folder_links(document_id, document_type_id)');
+  }
+
+  /// يزرع نفس المستخدمين الثلاثة الافتراضيين الذين كانوا مُدرَجين سابقاً كقائمة
+  /// ثابتة في UserRepository — الآن كصفوف حقيقية في جدول users. لا يُدرج شيئاً
+  /// إن كان الجدول يحتوي بيانات بالفعل (لتفادي التكرار عند كل فتح للتطبيق).
+  Future<void> _seedDefaultUsers(Database db) async {
+    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM users')) ?? 0;
+    if (count > 0) return;
+    final now = DateTime.now().toIso8601String();
+    final defaults = [
+      {'username': 'admin', 'full_name': 'مدير النظام', 'password': '123456', 'role_id': 'admin'},
+      {'username': 'manager', 'full_name': 'مدير الفندق', 'password': '123456', 'role_id': 'manager'},
+      {'username': 'employee', 'full_name': 'موظف', 'password': '123456', 'role_id': 'employee'},
+    ];
+    for (final u in defaults) {
+      await db.insert('users', {...u, 'is_active': 1, 'created_at': now}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
   }
 
   Future<void> _initializeData(Database db) async {
@@ -178,8 +395,11 @@ class DatabaseService {
     for (var hotel in hotels) {
       final hId = hotel['id'] as int;
       await _initFinancialAccountsForHotel(db, hId);
-      await _seedCategoriesForHotel(db, hId);
     }
+    await _seedGlobalExpenseCategories(db);
+    await _seedGlobalDocumentCategories(db);
+    await _provisionDocumentTypesForAllHotels(db);
+    await _seedDefaultUsers(db);
   }
 
   Future<void> _initFinancialAccountsForHotel(Database db, int hId) async {
@@ -190,20 +410,185 @@ class DatabaseService {
     await db.insert('financial_accounts', {'hotel_id': hId, 'name': 'ديون لمنشآت أخرى', 'type': 'liability', 'category': 'entity', 'balance': 0.0});
   }
 
-  Future<void> _seedCategoriesForHotel(Database db, int hotelId) async {
-    final cats = [{'n': 'رواتب', 'i': 0xe4f4, 'c': 0xFF4CAF50}, {'n': 'كهرباء', 'i': 0xe098, 'c': 0xFFFFEB3B}, {'n': 'مياه', 'i': 0xe6e4, 'c': 0xFF2196F3}, {'n': 'صيانة', 'i': 0xe1bd, 'c': 0xFFFF9800}, {'n': 'تأمينات', 'i': 0xe69a, 'c': 0xFF9C27B0}, {'n': 'إيجار', 'i': 0xe317, 'c': 0xFFF44336}, {'n': 'مشتريات', 'i': 0xe59c, 'c': 0xFF00BCD4}, {'n': 'نظافة', 'i': 0xe0bc, 'c': 0xFF009688}, {'n': 'وقود', 'i': 0xe3f1, 'c': 0xFF212121}, {'n': 'اتصالات', 'i': 0xe0cd, 'c': 0xFF3F51B5}, {'n': 'ضيافة', 'i': 0xe570, 'c': 0xFF795548}, {'n': 'أدوات مكتبية', 'i': 0xe190, 'c': 0xFF607D8B}, {'n': 'تشغيل', 'i': 0xe8b8, 'c': 0xFF455A64}, {'n': 'نقل', 'i': 0xe55b, 'c': 0xFF673AB7}];
+  /// يزرع 14 تصنيف مصروف افتراضي على مستوى التطبيق بالكامل (hotel_id = NULL) وليس
+  /// لكل فندق كما كان سابقاً. آمنة للتشغيل المتكرر ولإعادة الترحيل: تعتمد على فهرس
+  /// UNIQUE(name) (عبر ConflictAlgorithm.ignore) بدل عدّ الصفوف — حتى تُضيف فقط
+  /// الأسماء الناقصة فعلياً بعد ترحيل تصنيفات قديمة كانت موجودة بأسماء أخرى.
+  Future<void> _seedGlobalExpenseCategories(Database db) async {
+    final cats = [
+      {'n': 'مشتريات عامة', 'i': 0xe59c, 'c': 0xFF00BCD4},
+      {'n': 'صيانة', 'i': 0xe1bd, 'c': 0xFFFF9800},
+      {'n': 'رسوم حكومية', 'i': 0xe69a, 'c': 0xFF9C27B0},
+      {'n': 'منظفات', 'i': 0xe0bc, 'c': 0xFF009688},
+      {'n': 'عمولات', 'i': 0xe55b, 'c': 0xFF673AB7},
+      {'n': 'مكتب العمل', 'i': 0xe8b8, 'c': 0xFF455A64},
+      {'n': 'الاتصالات', 'i': 0xe0cd, 'c': 0xFF3F51B5},
+      {'n': 'مخالفات', 'i': 0xe3f1, 'c': 0xFF212121},
+      {'n': 'أثاث الفندق', 'i': 0xe190, 'c': 0xFF607D8B},
+      {'n': 'كهرباء', 'i': 0xe098, 'c': 0xFFFFEB3B},
+      {'n': 'مياه', 'i': 0xe6e4, 'c': 0xFF2196F3},
+      {'n': 'رواتب', 'i': 0xe4f4, 'c': 0xFF4CAF50},
+      {'n': 'إيجار', 'i': 0xe317, 'c': 0xFFF44336},
+      {'n': 'أخرى', 'i': 0xe570, 'c': 0xFF795548},
+    ];
     final now = DateTime.now().toIso8601String();
+    var order = 0;
     for (var cat in cats) {
       await db.insert('expense_categories', {
-        'hotel_id': hotelId, 'name': cat['n'], 'is_basic': 1,
-        'icon_code': cat['i'], 'color_value': cat['c'], 'created_at': now
+        'hotel_id': null, 'name': cat['n'], 'is_basic': 1, 'sort_order': order,
+        'icon_code': cat['i'], 'color_value': cat['c'], 'created_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      order++;
+    }
+  }
+
+  /// يوحّد جدول expense_categories ليصبح مصدراً وحيداً على مستوى التطبيق بدل نظام
+  /// كان لكل فندق نسخته الخاصة. يدمج أي صفوف مكررة بنفس الاسم (يُعاد توجيه
+  /// pending_expenses.category_id إلى الصف الموحَّد أولاً — قبل حذف الصف المكرر —
+  /// لتفادي فقدان بيانات بسبب ON DELETE CASCADE)، ثم يجعل كل الصفوف المتبقية عامة
+  /// (hotel_id = NULL)، ثم يضمن فرادة الاسم عبر فهرس UNIQUE، ثم يضيف أي تصنيف افتراضي
+  /// ناقص من القائمة الأساسية. آمنة للتشغيل المتكرر عند كل فتح لقاعدة البيانات.
+  Future<void> _unifyExpenseCategories(Database db) async {
+    final anyScoped = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM expense_categories WHERE hotel_id IS NOT NULL')) ?? 0;
+    if (anyScoped > 0) {
+      await db.transaction((txn) async {
+        final rows = await txn.query('expense_categories', orderBy: 'id ASC');
+        final Map<String, int> canonicalIdByName = {};
+        for (var row in rows) {
+          final name = row['name'] as String;
+          final id = row['id'] as int;
+          final canonicalId = canonicalIdByName[name];
+          if (canonicalId == null) {
+            canonicalIdByName[name] = id;
+            continue;
+          }
+          await txn.update('pending_expenses', {'category_id': canonicalId}, where: 'category_id = ?', whereArgs: [id]);
+          await txn.delete('expense_categories', where: 'id = ?', whereArgs: [id]);
+        }
+        await txn.update('expense_categories', {'hotel_id': null});
+      });
+    }
+    try {
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
+    } catch (_) {}
+    await _seedGlobalExpenseCategories(db);
+  }
+
+  /// يزرع 5 فئات افتراضية لأنواع المستندات المرجعية — مرة واحدة فقط، آمنة
+  /// للتشغيل المتكرر عبر فهرس UNIQUE(name) و ConflictAlgorithm.ignore.
+  Future<void> _seedGlobalDocumentCategories(Database db) async {
+    final cats = [
+      {'n': 'حكومي', 'c': 0xFF9C27B0},
+      {'n': 'مالي', 'c': 0xFF4CAF50},
+      {'n': 'قانوني', 'c': 0xFF3F51B5},
+      {'n': 'تشغيلي', 'c': 0xFFFF9800},
+      {'n': 'عقود', 'c': 0xFF607D8B},
+    ];
+    final now = DateTime.now().toIso8601String();
+    for (var cat in cats) {
+      await db.insert('document_categories', {
+        'name': cat['n'], 'color_value': cat['c'], 'created_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
   }
 
+  /// يزوّد فندقاً واحداً تلقائياً بكل أنواع المستندات المرجعية المطابقة (المفعَّلة،
+  /// وإما "لكل الفنادق" أو مخصَّصة لهذا الفندق تحديداً) — يُدرج صفاً فارغاً في
+  /// documents لكل نوع لا يملك الفندق صفاً به بعد (expiry_date='' كبديل آمن عن
+  /// NULL طالما العمود NOT NULL؛ DateTime.tryParse('') تُعيد null بأمان في كل
+  /// أماكن القراءة الحالية). آمنة للتشغيل المتكرر: لا تكرر صفاً موجوداً فعلاً.
+  Future<void> _provisionDocumentTypesForHotel(Database db, int hotelId) async {
+    final types = await db.rawQuery(
+      'SELECT dt.* FROM document_types dt WHERE dt.is_active = 1 AND (dt.scope = "all" OR EXISTS (SELECT 1 FROM document_type_hotels dth WHERE dth.document_type_id = dt.id AND dth.hotel_id = ?))',
+      [hotelId],
+    );
+    final now = DateTime.now().toIso8601String();
+    for (var type in types) {
+      final typeId = type['id'] as int;
+      final exists = Sqflite.firstIntValue(await db.rawQuery(
+        'SELECT COUNT(*) FROM documents WHERE hotel_id = ? AND document_type_id = ?',
+        [hotelId, typeId],
+      )) ?? 0;
+      if (exists > 0) continue;
+      await db.insert('documents', {
+        'hotel_id': hotelId,
+        'document_type_id': typeId,
+        'name': type['name'],
+        'expiry_date': '',
+        'created_at': now,
+        'owner_type': 'hotel',
+        'owner_id': hotelId,
+      });
+    }
+  }
+
+  /// يرحّل جدول employee_documents القديم (منفصل، بلا مرفقات) إلى جدول
+  /// documents الموحّد (owner_type='employee') مرة واحدة فقط — دون فقدان أي
+  /// بيانات: النوع القديم (type) يُدمَج داخل notes، وتاريخ الانتهاء الفارغ
+  /// يُخزَّن كنص فارغ (نفس اصطلاح باقي الجدول). لا يُحذف الجدول القديم (عرف
+  /// "إضافة فقط" في هذا المشروع)، لكنه لم يعد يُستخدم من أي كود Dart بعد الآن.
+  Future<void> _migrateEmployeeDocuments(Database db) async {
+    final alreadyMigrated = Sqflite.firstIntValue(await db.rawQuery("SELECT COUNT(*) FROM documents WHERE owner_type = 'employee'")) ?? 0;
+    if (alreadyMigrated > 0) return;
+    final rows = await db.rawQuery(
+      'SELECT ed.*, e.hotel_id as emp_hotel_id FROM employee_documents ed JOIN employees e ON e.id = ed.employee_id',
+    );
+    for (var row in rows) {
+      final oldType = (row['type'] as String?) ?? '';
+      final oldNotes = row['notes'] as String?;
+      final combinedNotes = oldType.isEmpty
+          ? oldNotes
+          : 'النوع السابق: $oldType${(oldNotes != null && oldNotes.isNotEmpty) ? '\n$oldNotes' : ''}';
+      await db.insert('documents', {
+        'hotel_id': row['emp_hotel_id'],
+        'owner_type': 'employee',
+        'owner_id': row['employee_id'],
+        'document_type_id': null,
+        'name': row['name'],
+        'expiry_date': row['expiry_date'] ?? '',
+        'notes': combinedNotes,
+        'created_at': row['created_at'],
+      });
+    }
+  }
+
+  /// يربط كل مستند فندق (owner_type='hotel') مرتبط بنوع مرجعي بمجلده عبر
+  /// document_folder_links مرة واحدة فقط — حتى تبقى مستندات "المستندات
+  /// الدائمة" التي أُنشئت قبل إضافة نظام المراجع (References) ظاهرة داخل
+  /// مجلداتها دون فقدان، ودون إنشاء أي نسخة إضافية (مجرد صف مرجع).
+  Future<void> _migratePermanentFolderLinks(Database db) async {
+    final alreadyMigrated = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM document_folder_links')) ?? 0;
+    if (alreadyMigrated > 0) return;
+    final rows = await db.query('documents', where: 'document_type_id IS NOT NULL');
+    for (var row in rows) {
+      await db.insert(
+        'document_folder_links',
+        {'document_id': row['id'], 'document_type_id': row['document_type_id']},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  /// يزوّد كل الفنادق الحالية دفعة واحدة — يُستدعى عند التثبيت الجديد وعند كل
+  /// فتح لقاعدة البيانات (شبكة أمان)، وأيضاً من DocumentTypeRepository فور
+  /// تفعيل/حفظ نوع مستند حتى ينتشر فوراً دون انتظار إنشاء فندق جديد.
+  Future<void> _provisionDocumentTypesForAllHotels(Database db) async {
+    final hotels = await db.query('hotels');
+    for (var hotel in hotels) {
+      await _provisionDocumentTypesForHotel(db, hotel['id'] as int);
+    }
+  }
+
+  /// غلاف عام يستدعيه DocumentTypeRepository فور حفظ/تفعيل نوع مستند، لينشره
+  /// فوراً على كل الفنادق المطابقة دون انتظار إنشاء فندق جديد.
+  Future<void> provisionDocumentTypesAcrossHotels() async {
+    final db = await database;
+    await _provisionDocumentTypesForAllHotels(db);
+  }
+
   // --- CRUD ---
   Future<List<Map<String, dynamic>>> getHotels() async { final db = await database; return await db.query('hotels'); }
-  Future<int> insertHotel(Map<String, dynamic> data) async { final db = await database; final id = await db.insert('hotels', data); await _initFinancialAccountsForHotel(db, id); await _seedCategoriesForHotel(db, id); return id; }
+  Future<int> insertHotel(Map<String, dynamic> data) async { final db = await database; final id = await db.insert('hotels', data); await _initFinancialAccountsForHotel(db, id); await _provisionDocumentTypesForHotel(db, id); return id; }
   Future<int> updateHotel(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('hotels', data, where: 'id = ?', whereArgs: [id]); }
   Future<int> deleteHotel(int id) async { final db = await database; return await db.delete('hotels', where: 'id = ?', whereArgs: [id]); }
 
@@ -216,28 +601,332 @@ class DatabaseService {
     return results.isNotEmpty ? results.first : null;
   }
 
-  Future<List<Map<String, dynamic>>> getExpenseCategories(int hotelId) async { final db = await database; return await db.query('expense_categories', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'is_pinned DESC, sort_order ASC'); }
+  /// قائمة تصنيفات المصروفات الموحدة على مستوى التطبيق بالكامل (لا فلترة بفندق).
+  Future<List<Map<String, dynamic>>> getExpenseCategories({bool includeHidden = false}) async {
+    final db = await database;
+    return await db.query('expense_categories', where: includeHidden ? null : 'is_visible = 1', orderBy: 'is_pinned DESC, sort_order ASC');
+  }
   Future<int> insertExpenseCategory(Map<String, dynamic> data) async { final db = await database; return await db.insert('expense_categories', data); }
 
   Future<List<Map<String, dynamic>>> getPendingExpenses({required int hotelId, bool? isTransferred}) async {
     final db = await database;
     String where = 'pe.hotel_id = ?'; List<dynamic> args = [hotelId];
     if (isTransferred != null) { where += ' AND pe.is_transferred = ?'; args.add(isTransferred ? 1 : 0); }
-    return await db.rawQuery('SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value FROM pending_expenses pe JOIN expense_categories ec ON pe.category_id = ec.id WHERE $where ORDER BY pe.date DESC, pe.time DESC', args);
+    return await db.rawQuery(
+      'SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value, s.official_name as supplier_name '
+      'FROM pending_expenses pe JOIN expense_categories ec ON pe.category_id = ec.id '
+      'LEFT JOIN suppliers s ON s.id = pe.supplier_id WHERE $where ORDER BY pe.date DESC, pe.time DESC',
+      args,
+    );
   }
   Future<int> insertPendingExpense(Map<String, dynamic> data) async { final db = await database; await db.execute('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]); return await db.insert('pending_expenses', data); }
   Future<void> transferPendingExpenses(List<int> ids) async { final db = await database; await db.transaction((txn) async { for (var id in ids) { await txn.update('pending_expenses', {'is_transferred': 1}, where: 'id = ?', whereArgs: [id]); } }); }
+  /// إلغاء ترحيل مصروفات معلقة (عكس [transferPendingExpenses]) — تُستخدم عند
+  /// "إلغاء ترحيل المصروف" من داخل التقرير اليومي، لإعادتها إلى المصروفات
+  /// المعلقة القابلة للتعديل.
+  Future<void> untransferExpenses(List<int> ids) async { final db = await database; await db.transaction((txn) async { for (var id in ids) { await txn.update('pending_expenses', {'is_transferred': 0}, where: 'id = ?', whereArgs: [id]); } }); }
+
+  // ---------------- ديون المصروفات المعلقة الآجلة (pending_expense_debts) ----------------
+
+  Future<Map<String, dynamic>?> getPendingExpenseDebtByPendingExpenseId(int pendingExpenseId) async {
+    final db = await database;
+    final rows = await db.query('pending_expense_debts', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId], limit: 1);
+    return rows.isNotEmpty ? rows.first : null;
+  }
+  Future<int> insertPendingExpenseDebt(Map<String, dynamic> data) async { final db = await database; return await db.insert('pending_expense_debts', data); }
+  Future<int> updatePendingExpenseDebt(int id, Map<String, dynamic> data) async { final db = await database; return await db.update('pending_expense_debts', data, where: 'id = ?', whereArgs: [id]); }
+  Future<int> deletePendingExpenseDebtByPendingExpenseId(int pendingExpenseId) async { final db = await database; return await db.delete('pending_expense_debts', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId]); }
+
+  /// إجمالي "الذمم الدائنة" (ديون على المنشأة) لكل فندق: مجموع مديونيات
+  /// الفواتير الآجلة (supplier_debts) + مديونيات المصروفات المعلقة الآجلة
+  /// (pending_expense_debts) لموردي هذا الفندق، ناقص ما سُدِّد فعلياً
+  /// (supplier_payments) — لا شاشة سداد بعد فتبقى النتيجة عملياً مجموع الديون.
+  Future<double> getAccountsPayableTotalForHotel(int hotelId) async {
+    final db = await database;
+    final res = await db.rawQuery(
+      '''
+      SELECT
+        (SELECT COALESCE(SUM(sd.amount), 0) FROM supplier_debts sd JOIN suppliers s ON s.id = sd.supplier_id WHERE s.hotel_id = ?)
+        + (SELECT COALESCE(SUM(ped.amount), 0) FROM pending_expense_debts ped WHERE ped.hotel_id = ? AND ped.status != 'مسدد')
+        - (SELECT COALESCE(SUM(sp.amount), 0) FROM supplier_payments sp JOIN suppliers s2 ON s2.id = sp.supplier_id WHERE s2.hotel_id = ?)
+        AS total
+      ''',
+      [hotelId, hotelId, hotelId],
+    );
+    return (res.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  /// كل الموردين الذين لديهم رصيد مديونية مستحق (> 0) لفندق معيّن — أساس
+  /// شاشة "الذمم الدائنة" التفصيلية في المركز المالي.
+  Future<List<Map<String, dynamic>>> getSuppliersWithOutstandingDebt(int hotelId) async {
+    final db = await database;
+    return await db.rawQuery(
+      '''
+      SELECT s.id, s.official_name, s.short_name,
+        (COALESCE((SELECT SUM(amount) FROM supplier_debts WHERE supplier_id = s.id), 0)
+         + COALESCE((SELECT SUM(amount) FROM pending_expense_debts WHERE supplier_id = s.id AND status != 'مسدد'), 0)
+         - COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id = s.id), 0)) AS balance
+      FROM suppliers s
+      WHERE s.hotel_id = ?
+      HAVING balance > 0
+      ORDER BY balance DESC
+      ''',
+      [hotelId],
+    );
+  }
+
+  // ---------------- مرفقات المصروفات المعلقة (pending_expense_attachments) ----------------
+
+  Future<int> insertPendingExpenseAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('pending_expense_attachments', data); }
+  Future<List<Map<String, dynamic>>> getPendingExpenseAttachments(int pendingExpenseId) async { final db = await database; return await db.query('pending_expense_attachments', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId], orderBy: 'created_at DESC'); }
 
   Future<List<Map<String, dynamic>>> getNotes(int hotelId) async { final db = await database; return await db.query('notes', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'created_at DESC'); }
   Future<int> insertNote(Map<String, dynamic> data) async { final db = await database; return await db.insert('notes', data); }
 
-  Future<List<Map<String, dynamic>>> getDocuments(int hotelId) async { final db = await database; return await db.query('documents', where: 'hotel_id = ?', whereArgs: [hotelId]); }
   Future<int> insertDocument(Map<String, dynamic> data) async { final db = await database; return await db.insert('documents', data); }
+
+  // ---------------- أنواع المستندات المرجعية (Document Types) ----------------
+
+  Future<List<Map<String, dynamic>>> getDocumentCategories() async { final db = await database; return await db.query('document_categories', orderBy: 'name ASC'); }
+  Future<int> insertDocumentCategory(Map<String, dynamic> data) async { final db = await database; return await db.insert('document_categories', data); }
+
+  Future<List<Map<String, dynamic>>> getDocumentTypes({bool includeInactive = true, String? lifecycle}) async {
+    final db = await database;
+    final conditions = <String>[];
+    final args = <dynamic>[];
+    if (!includeInactive) conditions.add('dt.is_active = 1');
+    if (lifecycle != null) {
+      conditions.add('dt.lifecycle = ?');
+      args.add(lifecycle);
+    }
+    final where = conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
+    return await db.rawQuery(
+      'SELECT dt.*, dc.name as category_name, dc.color_value as category_color FROM document_types dt JOIN document_categories dc ON dc.id = dt.category_id $where ORDER BY dt.sort_order ASC, dt.name ASC',
+      args,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getDocumentTypeById(int id) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT dt.*, dc.name as category_name, dc.color_value as category_color FROM document_types dt JOIN document_categories dc ON dc.id = dt.category_id WHERE dt.id = ?',
+      [id],
+    );
+    return rows.isNotEmpty ? rows.first : null;
+  }
+
+  Future<int> insertDocumentType(Map<String, dynamic> data) async { final db = await database; return await db.insert('document_types', data); }
+
+  Future<List<int>> getDocumentTypeHotelIds(int documentTypeId) async {
+    final db = await database;
+    final rows = await db.query('document_type_hotels', where: 'document_type_id = ?', whereArgs: [documentTypeId]);
+    return rows.map((r) => r['hotel_id'] as int).toList();
+  }
+
+  Future<void> setDocumentTypeHotels(int documentTypeId, List<int> hotelIds) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('document_type_hotels', where: 'document_type_id = ?', whereArgs: [documentTypeId]);
+      for (var hId in hotelIds) {
+        await txn.insert('document_type_hotels', {'document_type_id': documentTypeId, 'hotel_id': hId});
+      }
+    });
+  }
+
+  /// مستندات فندق واحد مع بيانات نوعها/فئتها الحيّة (JOIN) — الفرز حسب أولوية
+  /// الحالة (منتهي أولاً... إلخ) يتم في طبقة الـ Repository لأنه يعتمد على
+  /// التاريخ الحالي وليس عموداً ثابتاً في قاعدة البيانات.
+  Future<List<Map<String, dynamic>>> getDocumentsForHotel(int hotelId) async {
+    final db = await database;
+    return await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      WHERE d.hotel_id = ?
+      ''',
+      [hotelId],
+    );
+  }
+
+  /// مستندات مالك واحد بعينه (موظف/مورد/عقد/... حسب [ownerType]) — نفس بنية
+  /// [getDocumentsForHotel] لكن مُصفَّاة بالمالك بدل الفندق بأكمله. هذا هو
+  /// نقطة التوسع الوحيدة المطلوبة لربط أي كيان جديد بمحرك المستندات مستقبلاً:
+  /// استدعاء هذه الدالة بقيمة owner_type جديدة، بلا أي تعديل معماري آخر.
+  Future<List<Map<String, dynamic>>> getDocumentsForOwner(String ownerType, int ownerId) async {
+    final db = await database;
+    return await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      WHERE d.owner_type = ? AND d.owner_id = ?
+      ''',
+      [ownerType, ownerId],
+    );
+  }
+
+  /// جملة WHERE تُطابق مستندات "تخص" مجموعة فنادق معيّنة مراعيةً نطاق كل
+  /// مستند (hotel_scope: single/all/specific) — مصدر وحيد لهذا المنطق، تُستخدم
+  /// من أي استعلام مستندات متعدد الفنادق (داخل مجلد، بحث، ...) حتى لا يتكرر.
+  /// تضيف عناصرها إلى [args] مباشرة (استدعِها بعد إضافة أي شروط where سابقة).
+  String _hotelScopeWhereClause(List<int> hotelIds, List<dynamic> args, {String alias = 'd'}) {
+    final placeholders = List.filled(hotelIds.length, '?').join(',');
+    args.addAll(hotelIds);
+    args.addAll(hotelIds);
+    return '''
+      ($alias.hotel_scope = 'all'
+       OR ($alias.hotel_scope = 'single' AND $alias.hotel_id IN ($placeholders))
+       OR ($alias.hotel_scope = 'specific' AND EXISTS (SELECT 1 FROM document_hotels dh WHERE dh.document_id = $alias.id AND dh.hotel_id IN ($placeholders))))
+    ''';
+  }
+
+  /// "داخل مجلد" — كل المستندات المرتبطة بنوع مرجعي (مجلد) عبر جدول المراجع
+  /// document_folder_links (وليس عمود document_type_id المباشر فقط)، لأن
+  /// مستنداً واحداً قد يظهر في أكثر من مجلد بلا أي نسخ. فلترة اختيارية
+  /// بمجموعة فنادق (فارغة/null = بلا فلترة) تراعي نطاق كل مستند
+  /// (hotel_scope: single/all/specific).
+  Future<List<Map<String, dynamic>>> getDocumentsInFolder(int documentTypeId, {List<int>? hotelIds, String? ownerType, int? ownerId}) async {
+    final db = await database;
+    final where = <String>['dfl.document_type_id = ?'];
+    final args = <dynamic>[documentTypeId];
+    if (hotelIds != null && hotelIds.isNotEmpty) {
+      where.add(_hotelScopeWhereClause(hotelIds, args));
+    }
+    if (ownerType != null) {
+      where.add('d.owner_type = ?');
+      args.add(ownerType);
+    }
+    if (ownerId != null) {
+      where.add('d.owner_id = ?');
+      args.add(ownerId);
+    }
+    return await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color, h.arabic_name as hotel_name
+      FROM documents d
+      JOIN document_folder_links dfl ON dfl.document_id = d.id
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      LEFT JOIN hotels h ON h.id = d.hotel_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY d.created_at DESC
+      ''',
+      args,
+    );
+  }
+
+  /// نسخة فندق واحد من نوع مرجعي واحد (نطاق single فقط) — تُستخدم لتفادي
+  /// إنشاء مستند مكرر عند التعبئة التلقائية لمستند فندق مُزوَّد سلفاً.
+  Future<Map<String, dynamic>?> getDocumentForHotelAndType(int hotelId, int documentTypeId) async {
+    final db = await database;
+    final rows = await db.query('documents', where: 'hotel_id = ? AND document_type_id = ?', whereArgs: [hotelId, documentTypeId], limit: 1);
+    return rows.isNotEmpty ? rows.first : null;
+  }
+
+  /// بحث عام في كل مستندات النظام بالاسم — أساس "ربط مستند موجود" (مرجع
+  /// جديد لمستند حالي داخل مجلد آخر، بلا أي نسخ للملف أو السجل). فلترة
+  /// اختيارية بمجموعة فنادق (نفس منطق [getDocumentsInFolder] عبر
+  /// [_hotelScopeWhereClause]) لأن شاشات الاختيار متعددة الفنادق تحتاج تقييد
+  /// نتائج البحث بالفندق المُختار حالياً. بلا LIMIT (خلافاً للنسخة القديمة)
+  /// لأن الترتيب حسب أولوية حالة الانتهاء يحدث في طبقة الـ Repository بعد
+  /// الجلب، وأي قصّ للنتائج هنا قبل الترتيب قد يُسقط مستندات منتهية فعلية.
+  Future<List<Map<String, dynamic>>> searchDocumentsByName(String query, {String? ownerType, List<int>? hotelIds}) async {
+    final db = await database;
+    final where = <String>['(d.name LIKE ? OR dt.name LIKE ?)'];
+    final args = <dynamic>['%$query%', '%$query%'];
+    if (ownerType != null) {
+      where.add('d.owner_type = ?');
+      args.add(ownerType);
+    }
+    if (hotelIds != null && hotelIds.isNotEmpty) {
+      where.add(_hotelScopeWhereClause(hotelIds, args));
+    }
+    return await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color, h.arabic_name as hotel_name
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      LEFT JOIN hotels h ON h.id = d.hotel_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY d.created_at DESC
+      ''',
+      args,
+    );
+  }
+
+  Future<int> insertDocumentFolderLink(int documentId, int documentTypeId) async {
+    final db = await database;
+    return await db.insert('document_folder_links', {'document_id': documentId, 'document_type_id': documentTypeId}, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  /// يحذف المرجع فقط (صف document_folder_links) — لا يمسّ صف المستند نفسه
+  /// ولا مرفقاته إطلاقاً، بغض النظر عن عدد المجلدات الأخرى التي يظهر بها.
+  Future<int> deleteDocumentFolderLink(int documentId, int documentTypeId) async {
+    final db = await database;
+    return await db.delete('document_folder_links', where: 'document_id = ? AND document_type_id = ?', whereArgs: [documentId, documentTypeId]);
+  }
+
+  Future<void> setDocumentHotels(int documentId, List<int> hotelIds) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('document_hotels', where: 'document_id = ?', whereArgs: [documentId]);
+      for (var hotelId in hotelIds) {
+        await txn.insert('document_hotels', {'document_id': documentId, 'hotel_id': hotelId});
+      }
+    });
+  }
+
+  Future<List<int>> getDocumentHotelIds(int documentId) async {
+    final db = await database;
+    final rows = await db.query('document_hotels', where: 'document_id = ?', whereArgs: [documentId]);
+    return rows.map((r) => r['hotel_id'] as int).toList();
+  }
+
+  /// دفعة واحدة لتفادي N+1 عند عرض قائمة مستندات فيها مستندات بنطاق 'specific'.
+  Future<Map<int, List<int>>> getDocumentHotelIdsBatch(List<int> documentIds) async {
+    if (documentIds.isEmpty) return {};
+    final db = await database;
+    final placeholders = List.filled(documentIds.length, '?').join(',');
+    final rows = await db.query('document_hotels', where: 'document_id IN ($placeholders)', whereArgs: documentIds);
+    final result = <int, List<int>>{};
+    for (var row in rows) {
+      final docId = row['document_id'] as int;
+      result.putIfAbsent(docId, () => []).add(row['hotel_id'] as int);
+    }
+    return result;
+  }
+
+  // ---------------- مرفقات المستندات ----------------
+
+  Future<int> insertDocumentAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('document_attachments', data); }
+  Future<List<Map<String, dynamic>>> getDocumentAttachments(int documentId) async { final db = await database; return await db.query('document_attachments', where: 'document_id = ?', whereArgs: [documentId], orderBy: 'created_at DESC'); }
+  Future<Map<String, dynamic>?> getDocumentAttachmentById(int id) async {
+    final db = await database;
+    final rows = await db.query('document_attachments', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isNotEmpty ? rows.first : null;
+  }
 
   Future<List<Map<String, dynamic>>> getEmployees(int hotelId, {bool includeArchived = false}) async {
     final db = await database;
     String where = 'hotel_id = ?'; List<dynamic> args = [hotelId];
     if (!includeArchived) where += ' AND (is_archived IS NULL OR is_archived = 0)';
+    return await db.query('employees', where: where, whereArgs: args, orderBy: 'name ASC');
+  }
+  /// كل موظفي كل الفنادق دفعة واحدة — يُستخدم في قسم "مستندات الموظفين"
+  /// الذي يعرض/يصفّي عبر الفنادق كلها، بخلاف بقية استعلامات الموظفين
+  /// المقيَّدة بفندق واحد.
+  Future<List<Map<String, dynamic>>> getAllEmployees({bool includeArchived = false}) async {
+    final db = await database;
+    String? where; List<dynamic>? args;
+    if (!includeArchived) { where = '(is_archived IS NULL OR is_archived = 0)'; args = []; }
     return await db.query('employees', where: where, whereArgs: args, orderBy: 'name ASC');
   }
   Future<List<Map<String, dynamic>>> getArchivedEmployees(int hotelId) async { final db = await database; return await db.query('employees', where: 'hotel_id = ? AND is_archived = 1', whereArgs: [hotelId], orderBy: 'name ASC'); }
@@ -341,18 +1030,145 @@ class DatabaseService {
     });
   }
 
-  // --- مستندات الموظف (تنتقل معه، غير مرتبطة بفندق) ---
-  Future<List<Map<String, dynamic>>> getEmployeeDocuments(int employeeId) async { final db = await database; return await db.query('employee_documents', where: 'employee_id = ?', whereArgs: [employeeId], orderBy: 'expiry_date ASC'); }
-  Future<int> insertEmployeeDocument(Map<String, dynamic> data) async { final db = await database; return await db.insert('employee_documents', data); }
 
   Future<List<Map<String, dynamic>>> getInvoices(int hotelId) async { final db = await database; return await db.query('invoices', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
   Future<int> insertInvoice(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoices', data); }
   Future<List<Map<String, dynamic>>> getInvoicesBySupplier({required int hotelId, required String companyName, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ? AND company_name = ?'; List<dynamic> args = [hotelId, companyName]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
-  Future<List<Map<String, dynamic>>> getFilteredInvoices({required int hotelId, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ?'; List<dynamic> args = [hotelId]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
+
+  /// يبني شرط WHERE مشتركاً لمركز الفواتير الضريبية (يدعم فندقاً واحداً/عدة
+  /// فنادق/كل الفنادق معاً) — يُستخدم من استعلامي الملخص والقائمة المُرقّمة معاً
+  /// حتى تبقى نفس الفلاتر متطابقة دائماً بين البطاقات والقائمة الظاهرة تحتها.
+  (String, List<Object?>) _buildInvoiceWhere({
+    List<int>? hotelIds,
+    String? startDate,
+    String? endDate,
+    String? supplierName,
+    String? category,
+    String? amountSource,
+    String? searchQuery,
+  }) {
+    final where = <String>[];
+    final args = <Object?>[];
+    if (hotelIds != null && hotelIds.isNotEmpty) {
+      where.add('hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})');
+      args.addAll(hotelIds);
+    }
+    if (startDate != null) { where.add('date >= ?'); args.add(startDate); }
+    if (endDate != null) { where.add('date <= ?'); args.add(endDate); }
+    if (supplierName != null && supplierName.isNotEmpty) { where.add('company_name = ?'); args.add(supplierName); }
+    if (category != null && category.isNotEmpty) {
+      where.add(category == _unclassifiedCategory ? '(expense_category IS NULL OR expense_category = "")' : 'expense_category = ?');
+      if (category != _unclassifiedCategory) args.add(category);
+    }
+    if (amountSource != null && amountSource.isNotEmpty) { where.add('amount_source = ?'); args.add(amountSource); }
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      where.add('(invoice_number LIKE ? OR company_name LIKE ?)');
+      args.add('%$searchQuery%');
+      args.add('%$searchQuery%');
+    }
+    return (where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}', args);
+  }
+
+  static const String _unclassifiedCategory = '__unclassified__';
+
+  /// خيارات ترتيب آمنة ومحدَّدة مسبقاً (لا يُبنى ORDER BY من نص حر قادم من
+  /// الواجهة مباشرة، تفادياً لأي حقن SQL) — المفتاح يُطابَق مقابل هذه
+  /// القائمة فقط، وأي مفتاح غير معروف يعود للترتيب الافتراضي.
+  static const Map<String, String> _invoiceSortOptions = {
+    'date_desc': 'date DESC, id DESC',
+    'date_asc': 'date ASC, id ASC',
+    'amount_desc': 'total_amount DESC, id DESC',
+    'amount_asc': 'total_amount ASC, id ASC',
+    'invoice_number_desc': 'invoice_number DESC',
+    'invoice_number_asc': 'invoice_number ASC',
+  };
+
+  Future<List<Map<String, dynamic>>> getInvoicesPagedFiltered({
+    List<int>? hotelIds,
+    String? startDate,
+    String? endDate,
+    String? supplierName,
+    String? category,
+    String? amountSource,
+    String? searchQuery,
+    String sortKey = 'date_desc',
+    required int limit,
+    required int offset,
+  }) async {
+    final db = await database;
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, searchQuery: searchQuery);
+    final orderBy = _invoiceSortOptions[sortKey] ?? _invoiceSortOptions['date_desc']!;
+    return await db.rawQuery('SELECT * FROM invoices $whereClause ORDER BY $orderBy LIMIT ? OFFSET ?', [...args, limit, offset]);
+  }
+
+  Future<Map<String, dynamic>> getInvoicesSummary({
+    List<int>? hotelIds,
+    String? startDate,
+    String? endDate,
+    String? supplierName,
+    String? category,
+    String? amountSource,
+    String? searchQuery,
+  }) async {
+    final db = await database;
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, searchQuery: searchQuery);
+    final totals = await db.rawQuery(
+      'SELECT COUNT(*) as invoice_count, COALESCE(SUM(total_amount),0) as total_amount, COALESCE(SUM(vat),0) as total_vat, COALESCE(SUM(amount_before_tax),0) as total_before_tax, COUNT(DISTINCT company_name) as supplier_count FROM invoices $whereClause',
+      args,
+    );
+    // "آخر فاتورة تمت إضافتها" تعني أحدث فاتورة أُدخلت فعلياً (ترتيب الإدخال
+    // عبر id)، وليس بالضرورة أحدث فاتورة بحسب تاريخها المُدخَل يدوياً.
+    final last = await db.rawQuery('SELECT * FROM invoices $whereClause ORDER BY id DESC LIMIT 1', args);
+    return {...totals.first, 'last_invoice': last.isNotEmpty ? last.first : null};
+  }
+
+  Future<List<String>> getDistinctInvoiceSuppliers(List<int>? hotelIds) async {
+    final db = await database;
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds);
+    final rows = await db.rawQuery('SELECT DISTINCT company_name FROM invoices $whereClause ORDER BY company_name ASC', args);
+    return rows.map((r) => r['company_name'] as String).toList();
+  }
+
+  Future<List<String>> getDistinctInvoiceCategories(List<int>? hotelIds) async {
+    final db = await database;
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds);
+    final baseWhere = whereClause.isEmpty ? 'WHERE expense_category IS NOT NULL AND expense_category != ""' : '$whereClause AND expense_category IS NOT NULL AND expense_category != ""';
+    final rows = await db.rawQuery('SELECT DISTINCT expense_category FROM invoices $baseWhere ORDER BY expense_category ASC', args);
+    return rows.map((r) => r['expense_category'] as String).toList();
+  }
+
+  Future<List<String>> getDistinctInvoiceAmountSources(List<int>? hotelIds) async {
+    final db = await database;
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds);
+    final baseWhere = whereClause.isEmpty ? 'WHERE amount_source IS NOT NULL AND amount_source != ""' : '$whereClause AND amount_source IS NOT NULL AND amount_source != ""';
+    final rows = await db.rawQuery('SELECT DISTINCT amount_source FROM invoices $baseWhere ORDER BY amount_source ASC', args);
+    return rows.map((r) => r['amount_source'] as String).toList();
+  }
 
   Future<int> insertSupplier(Map<String, dynamic> data) async { final db = await database; return await db.insert('suppliers', data); }
   Future<Map<String, dynamic>?> getSupplierByOfficialName(int hotelId, String name) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND official_name = ?', whereArgs: [hotelId, name], limit: 1); return res.isNotEmpty ? res.first : null; }
-  Future<List<Map<String, dynamic>>> searchSuppliers(int hotelId, String query) async { final db = await database; return await db.query('suppliers', where: 'hotel_id = ? AND (official_name LIKE ? OR short_name LIKE ?)', whereArgs: [hotelId, "%$query%", "%$query%"], limit: 10); }
+  Future<List<Map<String, dynamic>>> searchSuppliers(int hotelId, String query) async { final db = await database; return await db.query('suppliers', where: 'hotel_id = ? AND (official_name LIKE ? OR short_name LIKE ? OR tax_number LIKE ?)', whereArgs: [hotelId, "%$query%", "%$query%", "%$query%"], limit: 10); }
+  Future<Map<String, dynamic>?> getSupplierById(int id) async { final db = await database; final res = await db.query('suppliers', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
+
+  // --- مديونيات ومدفوعات الموردين (شراء آجل + كشف الحساب) ---
+  Future<Map<String, dynamic>?> getSupplierDebtByInvoiceId(int invoiceId) async { final db = await database; final res = await db.query('supplier_debts', where: 'invoice_id = ?', whereArgs: [invoiceId], limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<int> insertSupplierDebt(Map<String, dynamic> data) async { final db = await database; return await db.insert('supplier_debts', data); }
+  Future<int> updateSupplierDebtAmount(int id, double amount) async { final db = await database; return await db.update('supplier_debts', {'amount': amount}, where: 'id = ?', whereArgs: [id]); }
+  Future<List<Map<String, dynamic>>> getSupplierDebts(int supplierId) async { final db = await database; return await db.query('supplier_debts', where: 'supplier_id = ?', whereArgs: [supplierId], orderBy: 'created_at DESC'); }
+  Future<double> getSupplierDebtsTotal(int supplierId) async { final db = await database; final res = await db.rawQuery('SELECT COALESCE(SUM(amount),0) as total FROM supplier_debts WHERE supplier_id = ?', [supplierId]); return (res.first['total'] as num).toDouble(); }
+
+  Future<int> insertSupplierPayment(Map<String, dynamic> data) async { final db = await database; return await db.insert('supplier_payments', data); }
+  Future<List<Map<String, dynamic>>> getSupplierPayments(int supplierId) async { final db = await database; return await db.query('supplier_payments', where: 'supplier_id = ?', whereArgs: [supplierId], orderBy: 'date DESC, id DESC'); }
+  Future<double> getSupplierPaymentsTotal(int supplierId) async { final db = await database; final res = await db.rawQuery('SELECT COALESCE(SUM(amount),0) as total FROM supplier_payments WHERE supplier_id = ?', [supplierId]); return (res.first['total'] as num).toDouble(); }
+
+  // --- مرفقات الفواتير ---
+  Future<int> insertInvoiceAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoice_attachments', data); }
+  Future<List<Map<String, dynamic>>> getInvoiceAttachments(int invoiceId) async { final db = await database; return await db.query('invoice_attachments', where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id ASC'); }
+  Future<Map<String, dynamic>?> getInvoiceAttachmentById(int id) async { final db = await database; final res = await db.query('invoice_attachments', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
+
+  // --- سجل تعديلات الفواتير (بلا إمكانية حذف عمداً — لا توجد أي دالة حذف هنا) ---
+  Future<int> insertInvoiceAuditLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoice_audit_log', data); }
+  Future<List<Map<String, dynamic>>> getInvoiceAuditLog(int invoiceId) async { final db = await database; return await db.query('invoice_audit_log', where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id DESC'); }
 
   Future<List<Map<String, dynamic>>> getContracts(int hotelId) async { final db = await database; return await db.query('contracts', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
   Future<int> insertContract(Map<String, dynamic> data) async { final db = await database; return await db.insert('contracts', data); }
@@ -396,4 +1212,25 @@ class DatabaseService {
   Future<int> updateFinancialAccountBalance(int accId, double bal) async { final db = await database; return await db.update('financial_accounts', {'balance': bal}, where: 'id = ?', whereArgs: [accId]); }
   Future<int> insertLedgerEntry(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_ledger', data); }
   Future<List<Map<String, dynamic>>> getLedgerByAccount(int hotelId, String category) async { final db = await database; if (category == 'all') { return await db.query('financial_ledger', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC, time DESC'); } return await db.rawQuery('SELECT fl.* FROM financial_ledger fl JOIN financial_accounts fa ON fl.account_id = fa.id WHERE fl.hotel_id = ? AND fa.category = ? ORDER BY fl.date DESC, fl.time DESC', [hotelId, category]); }
+
+  // --- المستخدمون ومجموعات الصلاحيات (النسخ الاحتياطي/المزامنة وإدارة المستخدمين) ---
+  Future<List<Map<String, dynamic>>> getUsers({int limit = 50, int offset = 0}) async { final db = await database; return await db.query('users', orderBy: 'id ASC', limit: limit, offset: offset); }
+  Future<int> countUsers() async { final db = await database; return Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM users')) ?? 0; }
+  Future<Map<String, dynamic>?> getUserById(int id) async { final db = await database; final res = await db.query('users', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<int> insertUser(Map<String, dynamic> data) async { final db = await database; return await db.insert('users', data); }
+
+  Future<List<Map<String, dynamic>>> getPermissionGroups() async { final db = await database; return await db.query('permission_groups', orderBy: 'id ASC'); }
+  Future<int> insertPermissionGroup(Map<String, dynamic> data) async { final db = await database; return await db.insert('permission_groups', data); }
+
+  /// مسار ملف قاعدة البيانات الحالي على الجهاز (لأغراض النسخ الاحتياطي/الاستعادة).
+  Future<String> getDatabaseFilePath() async => join(await getDatabasesPath(), 'manazel.db');
+
+  /// يغلق اتصال قاعدة البيانات المفتوح تمهيداً لاستبدال ملفها فعلياً أثناء
+  /// الاستعادة من نسخة احتياطية؛ يُعاد فتحها تلقائياً عند أول استدعاء لاحق لـ [database].
+  Future<void> closeForRestore() async {
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
+  }
 }

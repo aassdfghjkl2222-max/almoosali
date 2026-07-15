@@ -4,7 +4,6 @@ import '../models/employee_allowance.dart';
 import '../models/employee_deduction.dart';
 import '../models/employee_advance.dart';
 import '../models/employee_event.dart';
-import '../models/employee_document.dart';
 import '../models/payroll_record.dart';
 
 class EmployeeRepository {
@@ -19,6 +18,13 @@ class EmployeeRepository {
   Future<List<Employee>> getArchivedEmployees(int? hotelId) async {
     if (hotelId == null) return [];
     final data = await _dbService.getArchivedEmployees(hotelId);
+    return data.map((map) => Employee.fromMap(map)).toList();
+  }
+
+  /// كل موظفي كل الفنادق — تُستخدم في قسم "مستندات الموظفين" الذي يعرض
+  /// ويصفّي عبر كل الفنادق دفعة واحدة، بخلاف بقية دوال هذا المستودع المقيَّدة بفندق واحد.
+  Future<List<Employee>> getAllEmployees() async {
+    final data = await _dbService.getAllEmployees();
     return data.map((map) => Employee.fromMap(map)).toList();
   }
 
@@ -71,16 +77,6 @@ class EmployeeRepository {
   Future<List<Map<String, dynamic>>> getEventsForHotel(int? hotelId, {String? eventType}) async {
     if (hotelId == null) return [];
     return await _dbService.getEmployeeEventsByHotel(hotelId, eventType: eventType);
-  }
-
-  // --- المستندات ---
-  Future<List<EmployeeDocument>> getDocuments(int employeeId) async {
-    final data = await _dbService.getEmployeeDocuments(employeeId);
-    return data.map((map) => EmployeeDocument.fromMap(map)).toList();
-  }
-
-  Future<int> addDocument(EmployeeDocument document) async {
-    return await _dbService.insertEmployeeDocument(document.toMap());
   }
 
   // --- البدلات ---

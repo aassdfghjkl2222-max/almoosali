@@ -311,7 +311,7 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
   Widget build(BuildContext context) {
     final color = _identityColor;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: color,
@@ -401,7 +401,7 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
               final p = _periods[i];
               final selected = _selectedPeriod == p;
               return ChoiceChip(
-                label: Text(p, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : AppColors.textPrimary)),
+                label: Text(p, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                 selected: selected,
                 selectedColor: color,
                 backgroundColor: Colors.white,
@@ -507,7 +507,7 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
             children: _revenueDimensions.map((d) {
               final selected = _revenueDimension == d;
               return ChoiceChip(
-                label: Text(d, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppColors.textPrimary)),
+                label: Text(d, style: TextStyle(fontSize: 12, color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface)),
                 selected: selected,
                 selectedColor: color,
                 onSelected: (_) => setState(() => _revenueDimension = d),

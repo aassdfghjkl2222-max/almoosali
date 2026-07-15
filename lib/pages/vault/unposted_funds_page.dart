@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/app_colors.dart';
 import '../../../core/hotel_visual_identity.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
@@ -93,7 +92,7 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "الأموال غير المرحلة", hotel: widget.hotel),
         centerTitle: true,

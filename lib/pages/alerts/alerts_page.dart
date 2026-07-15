@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
+import '../../core/document_status.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/document.dart';
 import '../../models/hotel.dart';
@@ -27,7 +27,7 @@ class _AlertsPageState extends State<AlertsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "التنبيهات العاجلة", hotel: widget.hotel),
         centerTitle: true,
@@ -37,7 +37,7 @@ class _AlertsPageState extends State<AlertsPage> {
       ),
       drawer: AppDrawer(hotel: widget.hotel),
       body: FutureBuilder<List<Document>>(
-        future: _documentRepository.getAllDocuments(widget.hotel.id!),
+        future: _documentRepository.getDocumentsForHotel(widget.hotel.id!),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const AppLoading();
@@ -47,15 +47,15 @@ class _AlertsPageState extends State<AlertsPage> {
           final alerts = _filterAlerts(allDocuments);
 
           if (alerts.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.notifications_none_outlined, size: 64, color: AppColors.textSecondary),
+                  Icon(Icons.notifications_none_outlined, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   SizedBox(height: AppSizes.md),
                   Text(
                     "لا توجد تنبيهات عاجلة",
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 16),
                   ),
                 ],
               ),
@@ -79,26 +79,11 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   List<Document> _filterAlerts(List<Document> documents) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    
-    return documents.where((doc) {
-      final expiry = DateTime.tryParse(doc.expiryDate);
-      if (expiry == null) return false;
-      
-      final daysRemaining = expiry.difference(today).inDays;
-      return daysRemaining <= 30; // تنبيه للمنتهي أو الذي ينتهي قريباً
-    }).toList();
+    return documents.where((doc) => DocumentStatus.fromExpiryDate(doc.expiryDate).needsAttention).toList();
   }
 
   Widget _buildAlertCard(Document document) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final expiry = DateTime.tryParse(document.expiryDate);
-    final days = expiry?.difference(today).inDays ?? 0;
-
-    final color = days < 0 ? AppColors.danger : AppColors.warning;
-    final statusText = days < 0 ? "منتهي" : "ينتهي قريباً ($days يوم)";
+    final status = DocumentStatus.fromExpiryDate(document.expiryDate);
 
     return AppCard(
       child: Row(
@@ -106,10 +91,10 @@ class _AlertsPageState extends State<AlertsPage> {
           Container(
             padding: const EdgeInsets.all(AppSizes.sm),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: status.color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
-            child: Icon(Icons.warning_amber_rounded, color: color),
+            child: Icon(status.icon, color: status.color),
           ),
           const SizedBox(width: AppSizes.md),
           Expanded(
@@ -117,17 +102,17 @@ class _AlertsPageState extends State<AlertsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  document.name,
+                  document.typeName ?? document.name,
                   style: AppTextStyles.bodyBold,
                 ),
                 Text(
-                  statusText,
-                  style: AppTextStyles.caption.copyWith(color: color),
+                  status.label,
+                  style: AppTextStyles.caption.copyWith(color: status.color),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.textSecondary),
+          Icon(Icons.arrow_forward_ios, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ],
       ),
     );

@@ -61,7 +61,7 @@ class _PersonalWithdrawalsPageState extends State<PersonalWithdrawalsPage> {
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "المركز المالي - السحب الشخصي", hotel: widget.hotel),
         centerTitle: true,
@@ -203,9 +203,9 @@ class _AddWithdrawalSheetState extends State<AddWithdrawalSheet> {
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSizes.lg),

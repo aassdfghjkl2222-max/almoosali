@@ -1,37 +1,71 @@
 import 'package:flutter/material.dart';
 import 'hotel_identity.dart';
 
+/// المصدر الوحيد للحقيقة لثيم التطبيق (فاتح وداكن معاً) — أي شاشة تعتمد على
+/// Theme.of(context) بدل ألوان ثابتة تتبع هذا الثيم تلقائياً، وتتحول فوراً
+/// عند تبديل الوضع الداكن من الإعدادات دون إعادة تشغيل التطبيق.
 class AppTheme {
   AppTheme._();
 
   static ThemeData get light => createTheme(HotelIdentity.defaultIdentity());
 
-  static ThemeData createTheme(HotelIdentity identity) {
+  static ThemeData get dark => createTheme(HotelIdentity.defaultIdentity(), brightness: Brightness.dark);
+
+  /// يبني ثيماً كاملاً (فاتحاً أو داكناً) لهوية فندق معيّنة. في الوضع الفاتح
+  /// يبقى الناتج مطابقاً تماماً لما كان عليه قبل دعم الوضع الداكن (لا تغيير
+  /// بصري). في الوضع الداكن تُشتق كل الألوان من نفس لون هوية الفندق عبر
+  /// ColorScheme.fromSeed حتى تبقى الهوية اللونية لكل فندق محفوظة حتى في
+  /// الوضع الداكن.
+  static ThemeData createTheme(HotelIdentity identity, {Brightness brightness = Brightness.light}) {
+    final isDark = brightness == Brightness.dark;
+
+    final colorScheme = isDark
+        ? ColorScheme.fromSeed(seedColor: identity.primary, brightness: Brightness.dark)
+        : ColorScheme.fromSeed(
+            seedColor: identity.primary,
+            primary: identity.primary,
+            secondary: identity.secondary,
+            surface: identity.cardBackground,
+            error: identity.danger,
+            outline: identity.dividerColor,
+          );
+
+    final scaffoldBackground = isDark ? colorScheme.surface : identity.scaffoldBackground;
+    final cardBackground = isDark ? colorScheme.surfaceContainerHigh : identity.cardBackground;
+    final appBarBackground = isDark ? colorScheme.surfaceContainer : identity.appBarBackground;
+    final appBarForeground = isDark ? colorScheme.onSurface : identity.appBarForeground;
+    final iconColor = isDark ? colorScheme.onSurfaceVariant : identity.iconColor;
+    final dividerColor = isDark ? colorScheme.outlineVariant : identity.dividerColor;
+    final unselectedGrey = isDark ? Colors.grey.shade500 : Colors.grey;
+
     return ThemeData(
       useMaterial3: true,
-      scaffoldBackgroundColor: identity.scaffoldBackground,
-      
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: identity.primary,
-        primary: identity.primary,
-        secondary: identity.secondary,
-        surface: identity.cardBackground,
-        error: identity.danger,
-        outline: identity.dividerColor,
-      ),
+      brightness: brightness,
+      scaffoldBackgroundColor: scaffoldBackground,
+      cardColor: cardBackground,
+      dividerColor: dividerColor,
+
+      colorScheme: colorScheme,
+
+      // نصوص التطبيق الافتراضية — أي Text بلا لون صريح (أو عبر AppTextStyles
+      // بلا لون مضمَّن) يتبع هذا تلقائياً في كلا الوضعين.
+      textTheme: (isDark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
+            bodyColor: colorScheme.onSurface,
+            displayColor: colorScheme.onSurface,
+          ),
 
       // ثيم AppBar
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: true,
-        backgroundColor: identity.appBarBackground,
-        foregroundColor: identity.appBarForeground,
-        iconTheme: IconThemeData(color: identity.appBarForeground),
+        backgroundColor: appBarBackground,
+        foregroundColor: appBarForeground,
+        iconTheme: IconThemeData(color: appBarForeground),
       ),
 
       // ثيم البطاقات
       cardTheme: CardThemeData(
-        color: identity.cardBackground,
+        color: cardBackground,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -41,8 +75,8 @@ class AppTheme {
       // ثيم الأزرار الرئيسية
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: identity.buttonBackground,
-          foregroundColor: identity.buttonForeground,
+          backgroundColor: isDark ? colorScheme.primary : identity.buttonBackground,
+          foregroundColor: isDark ? colorScheme.onPrimary : identity.buttonForeground,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -52,36 +86,36 @@ class AppTheme {
 
       // ثيم التبويبات (Tabs)
       tabBarTheme: TabBarThemeData(
-        labelColor: identity.primary,
-        unselectedLabelColor: Colors.grey,
-        indicatorColor: identity.hotelIndicatorColor,
+        labelColor: colorScheme.primary,
+        unselectedLabelColor: unselectedGrey,
+        indicatorColor: isDark ? colorScheme.primary : identity.hotelIndicatorColor,
       ),
 
       // ثيم الجداول (DataTable)
       dataTableTheme: DataTableThemeData(
-        headingRowColor: WidgetStateProperty.all(identity.hotelTableHeaderBackground),
-        dataRowColor: WidgetStateProperty.all(identity.hotelTableRowBackground),
-        headingTextStyle: TextStyle(color: identity.primary, fontWeight: FontWeight.bold),
+        headingRowColor: WidgetStateProperty.all(isDark ? colorScheme.surfaceContainerHigh : identity.hotelTableHeaderBackground),
+        dataRowColor: WidgetStateProperty.all(isDark ? colorScheme.surfaceContainerHigh : identity.hotelTableRowBackground),
+        headingTextStyle: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.bold),
       ),
 
       // ثيم الأيقونات
       iconTheme: IconThemeData(
-        color: identity.iconColor,
+        color: iconColor,
       ),
 
       dividerTheme: DividerThemeData(
-        color: identity.dividerColor,
+        color: dividerColor,
         thickness: 1,
       ),
 
       // ثيم شريط التنقل السفلي
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: identity.cardBackground,
-        selectedItemColor: identity.primary,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: cardBackground,
+        selectedItemColor: colorScheme.primary,
+        unselectedItemColor: unselectedGrey,
       ),
 
-      splashColor: identity.primary.withOpacity(0.1),
+      splashColor: colorScheme.primary.withOpacity(0.1),
     );
   }
 }

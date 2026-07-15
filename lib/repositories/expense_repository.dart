@@ -1,13 +1,45 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../core/database/database_service.dart';
 import '../models/expense_category.dart';
 import '../models/pending_expense.dart';
+import '../models/pending_expense_attachment.dart';
 
 class ExpenseRepository {
   final _dbService = DatabaseService();
 
-  Future<List<ExpenseCategory>> getCategories(int hotelId) async {
-    final data = await _dbService.getExpenseCategories(hotelId);
+  /// كل تصنيفات المصروفات الموحدة على مستوى التطبيق — [includeHidden] لعرض
+  /// المخفي أيضاً (تُستخدم في شاشة إدارة التصنيفات نفسها).
+  Future<List<ExpenseCategory>> getCategories({bool includeHidden = false}) async {
+    final data = await _dbService.getExpenseCategories(includeHidden: includeHidden);
     return data.map((map) => ExpenseCategory.fromMap(map)).toList();
+  }
+
+  /// بحث فوري بالاسم أو الرمز المختصر — لشاشة إدارة التصنيفات.
+  Future<List<ExpenseCategory>> searchCategories(String query, {bool includeHidden = true}) async {
+    final all = await getCategories(includeHidden: includeHidden);
+    if (query.trim().isEmpty) return all;
+    final q = query.trim();
+    return all.where((c) => c.name.contains(q) || (c.shortCode?.contains(q) ?? false)).toList();
+  }
+
+  /// يمنع إدراج اسم مكرر (فحص مسبق قبل addCategory) — الفهرس الفريد في قاعدة
+  /// البيانات هو خط الدفاع الأخير، لكن هذا الفحص يسمح برسالة خطأ عربية واضحة.
+  Future<ExpenseCategory?> getCategoryByName(String name) async {
+    final db = await _dbService.database;
+    final rows = await db.query('expense_categories', where: 'name = ?', whereArgs: [name], limit: 1);
+    return rows.isNotEmpty ? ExpenseCategory.fromMap(rows.first) : null;
+  }
+
+  /// هل التصنيف مستخدم فعلياً في مصروفات معلقة أو فواتير ضريبية؟ يُستخدم لمنع
+  /// الحذف الحقيقي (الحذف مسموح فقط للتصنيفات غير المستخدمة إطلاقاً؛ خلاف ذلك
+  /// يُعرض إخفاء التصنيف بدلاً من حذفه).
+  Future<bool> isCategoryInUse(int id, String name) async {
+    final db = await _dbService.database;
+    final pending = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM pending_expenses WHERE category_id = ?', [id])) ?? 0;
+    if (pending > 0) return true;
+    final invoices = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM invoices WHERE expense_category = ?', [name])) ?? 0;
+    return invoices > 0;
   }
 
   Future<int> addCategory(ExpenseCategory category) async {
@@ -17,6 +49,16 @@ class ExpenseRepository {
   Future<int> updateCategory(ExpenseCategory category) async {
     if (category.id == null) return 0;
     return await _dbService.updateById('expense_categories', category.toMap(), category.id!);
+  }
+
+  /// يجعل تصنيفاً واحداً فقط هو الافتراضي (يُلغي الافتراضي عن البقية أولاً) —
+  /// يُستخدم في شاشة إضافة الفاتورة الضريبية لتحديد التصنيف المُختار مسبقاً.
+  Future<void> setDefaultCategory(int id) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await txn.update('expense_categories', {'is_default': 0});
+      await txn.update('expense_categories', {'is_default': 1}, where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   Future<int> deleteCategory(int id) async {
@@ -51,6 +93,27 @@ class ExpenseRepository {
 
   Future<void> transferExpenses(List<int> ids) async {
     await _dbService.transferPendingExpenses(ids);
+  }
+
+  /// إلغاء ترحيل مصروفات معلقة — تُعيدها إلى المصروفات المعلقة القابلة
+  /// للتعديل (راجع تعليق [DatabaseService.untransferExpenses]).
+  Future<void> untransferExpenses(List<int> ids) async {
+    await _dbService.untransferExpenses(ids);
+  }
+
+  // ---------------- مرفقات المصروف المعلق ----------------
+
+  Future<int> addAttachment(PendingExpenseAttachment attachment) async {
+    return await _dbService.insertPendingExpenseAttachment(attachment.toMap());
+  }
+
+  Future<List<PendingExpenseAttachment>> getAttachments(int pendingExpenseId) async {
+    final data = await _dbService.getPendingExpenseAttachments(pendingExpenseId);
+    return data.map((map) => PendingExpenseAttachment.fromMap(map)).toList();
+  }
+
+  Future<int> deleteAttachment(int id) async {
+    return await _dbService.deleteById('pending_expense_attachments', id);
   }
 
   String _fmtDate(DateTime d) => "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";

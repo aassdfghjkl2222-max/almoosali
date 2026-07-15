@@ -213,7 +213,7 @@ class _AddContractPageState extends State<AddContractPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(_isEdit ? "تعديل عقد" : "إضافة عقد جديد"),
         centerTitle: true,
@@ -355,7 +355,7 @@ class _AddContractPageState extends State<AddContractPage> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: Theme.of(context).dividerColor),
               ),
               child: Row(
                 children: [
@@ -371,7 +371,7 @@ class _AddContractPageState extends State<AddContractPage> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.edit_outlined, size: 20, color: AppColors.textSecondary),
+                    icon: Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     onPressed: () => _editPayment(idx),
                   ),
                   IconButton(

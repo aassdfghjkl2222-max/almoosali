@@ -86,10 +86,10 @@ class VaultService {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoRow("الرصيد الحالي:", current),
-            _buildInfoRow("المبلغ المطلوب:", required),
+            _buildInfoRow(context, "الرصيد الحالي:", current),
+            _buildInfoRow(context, "المبلغ المطلوب:", required),
             const Divider(height: 24),
-            _buildInfoRow("مقدار العجز:", required - current, color: AppColors.danger),
+            _buildInfoRow(context, "مقدار العجز:", required - current, color: AppColors.danger),
           ],
         ),
         actions: [
@@ -102,7 +102,7 @@ class VaultService {
     );
   }
 
-  Widget _buildInfoRow(String label, double val, {Color? color}) {
+  Widget _buildInfoRow(BuildContext context, String label, double val, {Color? color}) {
     final format = NumberFormat("#,##0.##");
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -115,7 +115,7 @@ class VaultService {
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 16,
-              color: color ?? AppColors.textPrimary,
+              color: color ?? Theme.of(context).colorScheme.onSurface,
             ),
           ),
         ],
@@ -133,7 +133,7 @@ class VaultService {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("إلغاء", style: TextStyle(color: AppColors.textSecondary)),
+            child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
