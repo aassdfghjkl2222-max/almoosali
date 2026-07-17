@@ -186,7 +186,7 @@ class ReportDetailsPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
-      child: Text(isPosted ? "معتمد" : "معلّق", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11)),
+      child: Text(isPosted ? "مرحّل" : "غير مرحّل", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11)),
     );
   }
 
@@ -238,11 +238,11 @@ class ReportDetailsPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("بيانات الإنشاء والاعتماد", style: AppTextStyles.bodyBold.copyWith(fontSize: 15)),
+          Text("بيانات الإنشاء والترحيل", style: AppTextStyles.bodyBold.copyWith(fontSize: 15)),
           const SizedBox(height: AppSizes.md),
           _infoLine("الموظف الذي أنشأ التقرير", (report.employeeName?.isNotEmpty ?? false) ? report.employeeName! : "غير محدد"),
           _infoLine("تاريخ الإنشاء", report.createdAt.split('T').first),
-          _infoLine("تاريخ الاعتماد", report.isPosted ? "معتمد (تاريخ الاعتماد الدقيق غير مسجَّل في النظام)" : "لم يُعتمد بعد"),
+          _infoLine("حالة الترحيل", report.isPosted ? "مرحّل إلى الخزنة (تاريخ الترحيل الدقيق غير مسجَّل في النظام)" : "معتمد — لم يُرحَّل بعد"),
         ],
       ),
     );

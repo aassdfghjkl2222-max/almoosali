@@ -40,6 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _biometricLabel = "الدخول البيومتري";
   int _pinLength = 4;
   bool _hideBalances = false;
+  bool _trialMode = false;
 
   bool _darkMode = false;
   double _fontScale = 1.0;
@@ -67,6 +68,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _biometricLabel = _computeBiometricLabel(biometricTypes);
 
     _hideBalances = await AppPreferences.getBool(AppPreferences.keyHideBalances);
+    _trialMode = await AppPreferences.getBool(AppPreferences.keyTrialMode);
     _darkMode = await AppPreferences.getBool(AppPreferences.keyDarkMode);
     _fontScale = await AppPreferences.getDouble(AppPreferences.keyFontScale, defaultValue: 1.0);
     _animationSpeed = await AppPreferences.getString(AppPreferences.keyAnimationSpeed, defaultValue: 'normal');
@@ -200,6 +202,19 @@ class _SettingsPageState extends State<SettingsPage> {
           await AppPreferences.setBool(AppPreferences.keyHideBalances, value);
           if (!mounted) return;
           setState(() => _hideBalances = value);
+        },
+      ),
+      const Divider(height: 1, indent: 50),
+      SwitchListTile(
+        secondary: Icon(Icons.science_outlined, color: primary),
+        title: const Text("وضع التجربة"),
+        subtitle: const Text("يسمح بتكرار/تعديل/حذف التقرير المالي اليومي بحرية أثناء الاختبار", style: TextStyle(fontSize: 11)),
+        value: _trialMode,
+        activeThumbColor: primary,
+        onChanged: (value) async {
+          await AppPreferences.setBool(AppPreferences.keyTrialMode, value);
+          if (!mounted) return;
+          setState(() => _trialMode = value);
         },
       ),
       const Divider(height: 1, indent: 50),

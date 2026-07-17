@@ -133,7 +133,7 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm)),
-                child: const Text("بانتظار الاعتماد", style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold)),
+                child: const Text("معتمد — بانتظار الترحيل", style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -167,31 +167,35 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
   }
 
   Widget _buildActionButtons(DepositedFund fund, bool cashPending, bool bankPending) {
+    // "ترحيل إلى الخزنة" هو الإجراء الأساسي الظاهر بارزاً (يُحدّث الخزنة
+    // والمركز المالي والحركة المالية فوراً ويقفل التقرير) — خياري "النقد
+    // فقط"/"البنك فقط" أدناه يبقيان متاحين للمحاسب الذي يحتاج ترحيل جزئياً،
+    // بلا حذف أي وظيفة قائمة.
     return Column(
       children: [
         _postBtn(
-          "ترحيل الجميع", 
-          Icons.done_all, 
-          Colors.green, 
-          (cashPending || bankPending) ? () => _confirmAndPost(fund: fund, type: 'all', amount: 0) : null
+          "🏦 ترحيل إلى الخزنة",
+          Icons.done_all,
+          Colors.green,
+          (cashPending || bankPending) ? () => _confirmAndPost(fund: fund, type: 'all', amount: 0) : null,
         ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
               child: _postBtn(
-                cashPending ? "ترحيل النقد" : "✔ تم ترحيل النقد", 
-                Icons.money, 
-                Colors.blue, 
+                cashPending ? "ترحيل النقد فقط" : "✔ تم ترحيل النقد",
+                Icons.money,
+                Colors.blue,
                 cashPending ? () => _confirmAndPost(fund: fund, type: 'cash', amount: fund.cashAmount) : null
               )
             ),
             const SizedBox(width: 8),
             Expanded(
               child: _postBtn(
-                bankPending ? "ترحيل البنك" : "✔ تم ترحيل البنك", 
-                Icons.account_balance, 
-                Colors.purple, 
+                bankPending ? "ترحيل البنك فقط" : "✔ تم ترحيل البنك",
+                Icons.account_balance,
+                Colors.purple,
                 bankPending ? () => _confirmAndPost(fund: fund, type: 'bank', amount: fund.networkAmount) : null
               )
             ),
@@ -217,7 +221,14 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
           children: [
             Icon(icon, color: isDisabled ? Colors.grey : color, size: 18),
             const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: isDisabled ? Colors.grey : color, fontWeight: FontWeight.bold, fontSize: 11)),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(color: isDisabled ? Colors.grey : color, fontWeight: FontWeight.bold, fontSize: 11),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
       ),
@@ -232,7 +243,7 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
           Icon(Icons.check_circle_outline, size: 64, color: Colors.green.withOpacity(0.3)),
           const SizedBox(height: 16),
           const Text("لا توجد مبالغ بانتظار الترحيل", style: TextStyle(color: Colors.grey, fontSize: 16)),
-          const Text("تم اعتماد كافة التقارير المالية", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const Text("تم ترحيل كافة التقارير المالية المعتمدة إلى الخزنة", style: TextStyle(color: Colors.grey, fontSize: 12)),
         ],
       ),
     );

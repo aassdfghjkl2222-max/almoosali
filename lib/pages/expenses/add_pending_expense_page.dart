@@ -17,7 +17,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
-import '../../widgets/suppliers/supplier_picker_sheet.dart';
+import '../../widgets/financial/funding_source_picker.dart';
 import '../common/transaction_review_page.dart';
 
 class AddPendingExpensePage extends StatefulWidget {
@@ -43,8 +43,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   List<ExpenseCategory> _categories = [];
   List<Hotel> _allHotels = [];
   ExpenseCategory? _selectedCategory;
-  String _fundingSource = 'cash'; // cash, bank, personal, private, entity, deferred
-  Hotel? _otherHotel;
+  String? _paymentMethod;
   Supplier? _selectedSupplier;
   bool _isLoading = true;
 
@@ -52,6 +51,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   final List<({String path, String name, String type})> _newAttachments = [];
 
   bool get _isLocked => widget.editExpense?.isTransferred == true;
+  bool get _isDeferred => _paymentMethod == PendingExpense.fundingSourceDeferred;
 
   @override
   void initState() {
@@ -70,22 +70,9 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       _notesController.text = edit.notes ?? "";
       _dueDateController.text = edit.dueDate ?? "";
       attachments = await _repository.getAttachments(edit.id!);
-
-      if (edit.paymentMethod == 'نقد') {
-        _fundingSource = 'cash';
-      } else if (edit.paymentMethod == 'شبكة') {
-        _fundingSource = 'bank';
-      } else if (edit.paymentMethod == 'شخصي') {
-        _fundingSource = 'personal';
-      } else if (edit.paymentMethod == 'مصروف خاص') {
-        _fundingSource = 'private';
-      } else if (edit.isDeferredDebt) {
-        _fundingSource = 'deferred';
-        if (edit.supplierId != null) {
-          _selectedSupplier = Supplier(id: edit.supplierId, hotelId: widget.hotel.id!, officialName: edit.supplierName ?? '', shortName: '', taxNumber: '');
-        }
-      } else {
-        _fundingSource = 'entity';
+      _paymentMethod = edit.paymentMethod;
+      if (edit.isDeferredDebt && edit.supplierId != null) {
+        _selectedSupplier = await _supplierRepository.getSupplierById(edit.supplierId!);
       }
     }
 
@@ -98,20 +85,24 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
           for (final c in categories) {
             if (c.id == edit.categoryId) _selectedCategory = c;
           }
-          if (_fundingSource == 'entity') {
-            for (final h in _allHotels) {
-              if (h.arabicName == edit.paymentMethod) _otherHotel = h;
-            }
-          }
         }
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _pickSupplier() async {
-    final supplier = await showSupplierPicker(context, hotelId: widget.hotel.id!);
-    if (supplier != null) setState(() => _selectedSupplier = supplier);
+  Future<void> _pickFundingSource() async {
+    if (_isLocked) return;
+    final result = await showFundingSourcePicker(context, hotelId: widget.hotel.id!, otherHotels: _allHotels);
+    if (result == null) return;
+    Supplier? supplier;
+    if (result.supplierId != null) {
+      supplier = await _supplierRepository.getSupplierById(result.supplierId!);
+    }
+    setState(() {
+      _paymentMethod = result.paymentMethod;
+      _selectedSupplier = supplier;
+    });
   }
 
   Future<void> _pickDueDate() async {
@@ -152,11 +143,11 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار نوع المصروف")));
       return;
     }
-    if (_fundingSource == 'entity' && _otherHotel == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار المنشأة الأخرى")));
+    if (_paymentMethod == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار مصدر التمويل")));
       return;
     }
-    if (_fundingSource == 'deferred' && _selectedSupplier == null) {
+    if (_isDeferred && _selectedSupplier == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار المورد")));
       return;
     }
@@ -164,23 +155,11 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     final now = DateTime.now();
     final amount = double.tryParse(_amountController.text.replaceAll(',', '')) ?? 0;
 
-    String sourceName = _fundingSource == 'cash'
-        ? 'نقد'
-        : _fundingSource == 'bank'
-            ? 'شبكة'
-            : _fundingSource == 'personal'
-                ? 'شخصي'
-                : _fundingSource == 'private'
-                    ? 'مصروف خاص'
-                    : _fundingSource == 'deferred'
-                        ? PendingExpense.fundingSourceDeferred
-                        : _otherHotel!.arabicName;
-
     final expense = PendingExpense(
       id: widget.editExpense?.id,
       hotelId: widget.hotel.id!,
       amount: amount,
-      paymentMethod: sourceName,
+      paymentMethod: _paymentMethod!,
       categoryId: _selectedCategory!.id!,
       categoryName: _selectedCategory!.name,
       statement: _statementController.text.trim(),
@@ -188,8 +167,8 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       date: widget.editExpense?.date ?? DateFormat('yyyy-MM-dd').format(now),
       time: widget.editExpense?.time ?? DateFormat('HH:mm:ss').format(now),
       createdAt: widget.editExpense?.createdAt ?? now.toIso8601String(),
-      supplierId: _fundingSource == 'deferred' ? _selectedSupplier!.id : null,
-      dueDate: _fundingSource == 'deferred' && _dueDateController.text.trim().isNotEmpty ? _dueDateController.text.trim() : null,
+      supplierId: _isDeferred ? _selectedSupplier!.id : null,
+      dueDate: _isDeferred && _dueDateController.text.trim().isNotEmpty ? _dueDateController.text.trim() : null,
     );
 
     final reviewItems = [
@@ -197,8 +176,8 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(expense.amount)} ريال", color: AppColors.danger),
       ReviewItem(label: "النوع", value: expense.categoryName ?? ""),
       ReviewItem(label: "مصدر التمويل", value: expense.paymentMethod, color: Colors.blue),
-      if (_fundingSource == 'deferred') ReviewItem(label: "المورد", value: _selectedSupplier!.officialName, color: Colors.orange),
-      if (_fundingSource == 'deferred' && expense.dueDate != null) ReviewItem(label: "تاريخ الاستحقاق", value: expense.dueDate!),
+      if (_isDeferred) ReviewItem(label: "المورد", value: _selectedSupplier!.officialName, color: Colors.orange),
+      if (_isDeferred && expense.dueDate != null) ReviewItem(label: "تاريخ الاستحقاق", value: expense.dueDate!),
     ];
 
     Navigator.push(
@@ -216,7 +195,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
               await _repository.updatePendingExpense(expense);
             }
 
-            if (_fundingSource == 'deferred') {
+            if (_isDeferred) {
               await _supplierRepository.ensureDebtForPendingExpense(
                 hotelId: widget.hotel.id!,
                 supplierId: _selectedSupplier!.id!,
@@ -373,82 +352,48 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
-          const SizedBox(height: AppSizes.md),
-          _buildSourceRadio('cash', 'نقد (الخزنة)', Icons.money),
-          _buildSourceRadio('bank', 'شبكة (البنك)', Icons.credit_card),
-          _buildSourceRadio('entity', 'فندق آخر', Icons.business),
-          if (_fundingSource == 'entity') _buildOtherHotelSelector(),
-          _buildSourceRadio('personal', 'شخصي (من مال المالك)', Icons.person_add_alt),
-          _buildSourceRadio('private', 'مصروف خاص (لصالح المالك)', Icons.person_off_outlined),
-          _buildSourceRadio('deferred', '⏳ آجل (دين)', Icons.hourglass_bottom_outlined),
-          if (_fundingSource == 'deferred') _buildDeferredDebtSection(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSourceRadio(String value, String label, IconData icon) {
-    return RadioListTile<String>(
-      value: value,
-      groupValue: _fundingSource,
-      title: Row(
-        children: [
-          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 12),
-          Text(label, style: AppTextStyles.body),
-        ],
-      ),
-      onChanged: _isLocked ? null : (v) => setState(() => _fundingSource = v!),
-      activeColor: Theme.of(context).colorScheme.primary,
-      contentPadding: EdgeInsets.zero,
-    );
-  }
-
-  Widget _buildOtherHotelSelector() {
-    return Padding(
-      padding: const EdgeInsets.only(right: 48, bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(AppRadius.sm)),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<Hotel>(
-            value: _otherHotel,
-            hint: const Text("اختر الفندق الممول"),
-            isExpanded: true,
-            items: _allHotels.map((h) => DropdownMenuItem(value: h, child: Text(h.arabicName))).toList(),
-            onChanged: _isLocked ? null : (v) => setState(() => _otherHotel = v),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeferredDebtSection() {
-    return Padding(
-      padding: const EdgeInsets.only(right: 48, bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          const SizedBox(height: AppSizes.sm),
           InkWell(
-            onTap: _isLocked ? null : _pickSupplier,
+            onTap: _isLocked ? null : _pickFundingSource,
             borderRadius: BorderRadius.circular(AppRadius.sm),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(AppRadius.sm)),
               child: Row(
                 children: [
-                  const Icon(Icons.local_shipping_outlined, size: 18),
+                  const Icon(Icons.account_balance_wallet_outlined),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      _selectedSupplier?.officialName ?? "اختيار المورد",
-                      style: _selectedSupplier == null ? AppTextStyles.caption : AppTextStyles.bodyBold.copyWith(fontSize: 13),
+                      _paymentMethod ?? "اختيار مصدر التمويل",
+                      style: _paymentMethod == null ? AppTextStyles.caption : AppTextStyles.bodyBold.copyWith(fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const Icon(Icons.arrow_drop_down),
                 ],
               ),
             ),
+          ),
+          if (_isDeferred) _buildDeferredDebtSection(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeferredDebtSection() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_shipping_outlined, size: 16, color: Colors.orange),
+              const SizedBox(width: 6),
+              Expanded(child: Text(_selectedSupplier?.officialName ?? "—", style: AppTextStyles.bodyBold.copyWith(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ],
           ),
           const SizedBox(height: 12),
           GestureDetector(

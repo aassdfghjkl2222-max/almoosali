@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import '../../core/app_colors.dart';
+import '../../core/app_preferences.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
@@ -12,20 +13,47 @@ import '../../core/app_text_styles.dart';
 import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
 import '../../models/financial_report.dart';
+import '../../models/financial_report_item.dart';
 import '../../models/pending_expense.dart';
 import '../../models/expense_category.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/financial_repository.dart';
 import '../../repositories/expense_repository.dart';
+import '../../repositories/financial_report_item_repository.dart';
 import '../../repositories/vault_repository.dart';
 import '../../models/deposited_fund.dart';
+import '../../models/daily_report_template.dart';
+import '../../services/daily_report_builder.dart';
+import '../../services/daily_report_text_renderer.dart';
+import '../../services/pdf_service.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../../widgets/common/app_text_field.dart';
+import '../../widgets/financial/add_report_item_sheet.dart';
+import '../../widgets/financial/funding_source_picker.dart';
+import 'manage_report_items_page.dart';
 import 'monthly_report_page.dart';
+import 'previous_reports_page.dart';
 import 'report_preview_page.dart';
 import '../expenses/pending_expense_selector.dart';
+import '../vault/unposted_funds_page.dart';
+
+/// بند إيراد حر داخل التقرير — إما مُدخَل يدوياً أو مُضاف من كتالوج البنود
+/// الدائمة (financial_report_items نوع 'revenue') عبر "➕" بجانب التحويل
+/// البنكي. لا يوجد له مفهوم "مصروف معلّق مرحَّل" (خاص بـExpenseItem فقط).
+class IncomeItem {
+  final TextEditingController nameController;
+  final TextEditingController amountController;
+  String paymentMethod;
+
+  IncomeItem({required this.nameController, required this.amountController, this.paymentMethod = "نقد"});
+
+  void dispose() {
+    nameController.dispose();
+    amountController.dispose();
+  }
+}
 
 class ExpenseItem {
   final TextEditingController nameController;
@@ -39,6 +67,11 @@ class ExpenseItem {
   /// _unpostPendingItem. هذه البنود مقفلة (بلا تعديل مباشر) إلا عبر "إلغاء الترحيل".
   final int? pendingExpenseId;
 
+  /// اسم المورد (لبند "آجل (دين)" فقط) — يُحفَظ كنسخة ثابتة داخل JSON التقرير
+  /// حتى بعد أن يختفي المصروف المعلق الأصلي من _availablePendingExpenses (لأنه
+  /// أصبح مُرحَّلاً)، ليبقى ظاهراً في نص المشاركة/PDF ("أجل - اسم المورد").
+  final String? supplierName;
+
   ExpenseItem({
     required this.nameController,
     required this.amountController,
@@ -46,6 +79,7 @@ class ExpenseItem {
     required this.nameFocus,
     required this.amountFocus,
     this.pendingExpenseId,
+    this.supplierName,
   });
 
   void dispose() {
@@ -88,6 +122,8 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   String _shortageSource = "نقد";
 
   final List<ExpenseItem> _otherExpenses = [];
+  final List<IncomeItem> _otherIncomes = [];
+  final _reportItemRepository = FinancialReportItemRepository();
   final _cashFocus = FocusNode();
   final _posFocus = FocusNode();
   final _transferFocus = FocusNode();
@@ -126,6 +162,33 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     _selectedDate = widget.initialDate ?? DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
     _loadReportForDate(_selectedDate);
     _loadPendingExpenses();
+  }
+
+  @override
+  void dispose() {
+    _cashController.dispose();
+    _posController.dispose();
+    _transferController.dispose();
+    _parkingCashController.dispose();
+    _parkingPosController.dispose();
+    _subsistenceController.dispose();
+    _refundController.dispose();
+    _cashToPosController.dispose();
+    _cashFocus.dispose();
+    _posFocus.dispose();
+    _transferFocus.dispose();
+    _parkingCashFocus.dispose();
+    _parkingPosFocus.dispose();
+    _subsistenceFocus.dispose();
+    _refundFocus.dispose();
+    _cashToPosFocus.dispose();
+    for (final e in _otherExpenses) {
+      e.dispose();
+    }
+    for (final i in _otherIncomes) {
+      i.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _loadPendingExpenses() async {
@@ -180,9 +243,20 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               paymentMethod: item['method'] ?? "نقد",
               nameFocus: FocusNode(), amountFocus: FocusNode(),
               pendingExpenseId: item['is_pending_transferred'] == true ? item['pending_id'] as int? : null,
+              supplierName: item['supplier_name'] as String?,
             ));
           }
           if (_otherExpenses.isNotEmpty) _showMoreExpenses = true;
+
+          _otherIncomes.clear();
+          final otherIncomes = inc['other_income'] as List? ?? [];
+          for (var item in otherIncomes) {
+            _otherIncomes.add(IncomeItem(
+              nameController: TextEditingController(text: item['name']),
+              amountController: TextEditingController(text: _fmtAmount(item['amount'])),
+              paymentMethod: item['method'] ?? "نقد",
+            ));
+          }
 
           _increaseAmount = double.tryParse(adj['increase']?.toString() ?? '0') ?? 0;
           _increaseSource = adj['increase_effect'] ?? "نقد";
@@ -212,7 +286,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     _cashController.clear(); _posController.clear(); _transferController.clear();
     _parkingCashController.clear(); _parkingPosController.clear();
     _subsistenceController.clear(); _refundController.clear(); _cashToPosController.clear();
-    _otherExpenses.clear(); _increaseAmount = 0; _shortageAmount = 0;
+    _otherExpenses.clear(); _otherIncomes.clear(); _increaseAmount = 0; _shortageAmount = 0;
     _increaseDesc = ""; _shortageDesc = "";
     _showTransferField = false; _showMoreExpenses = false;
     _isLocked = false;
@@ -239,15 +313,26 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     for (var i in _otherExpenses) process(ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0, i.paymentMethod);
     for (var e in _availablePendingExpenses) if (_selectedPendingIds.contains(e.id)) process(e.amount, e.paymentMethod);
 
+    // بنود الإيراد الحرة — تُضاف إلى صافي النقد/الشبكة حسب مصدرها، أو إلى
+    // التحويل مباشرة لأي مصدر آخر (تحويل بنكي وأي مصدر مستقبلي).
+    double incOther = 0, incCash = 0, incBank = 0, incTransfer = 0;
+    for (var i in _otherIncomes) {
+      final a = ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0;
+      incOther += a;
+      if (i.paymentMethod == "نقد") incCash += a;
+      else if (i.paymentMethod == "شبكة") incBank += a;
+      else incTransfer += a;
+    }
+
     setState(() {
-      _totalIncome = cash + pos + transfer + pCash + pPos;
+      _totalIncome = cash + pos + transfer + pCash + pPos + incOther;
       _totalExpenses = sub + ref + oTotal;
       _totalDebtExpenses = oDebt;
-      _netCash = (cash + pCash + (_increaseSource == "نقد" ? _increaseAmount : 0)) - 
+      _netCash = (cash + pCash + incCash + (_increaseSource == "نقد" ? _increaseAmount : 0)) -
                  ((_subsistenceMethod == "نقد" ? sub : 0) + (_refundMethod == "نقد" ? ref : 0) + c2p + oCash + (_shortageSource == "نقد" ? _shortageAmount : 0));
-      _netPos = (pos + pPos + (_increaseSource == "شبكة" ? _increaseAmount : 0) + c2p) - 
+      _netPos = (pos + pPos + incBank + (_increaseSource == "شبكة" ? _increaseAmount : 0) + c2p) -
                 ((_subsistenceMethod == "شبكة" ? sub : 0) + (_refundMethod == "شبكة" ? ref : 0) + oBank + (_shortageSource == "شبكة" ? _shortageAmount : 0));
-      _finalBalance = _netCash + _netPos + transfer;
+      _finalBalance = _netCash + _netPos + transfer + incTransfer;
     });
   }
 
@@ -259,28 +344,44 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
         elevation: 0,
-        centerTitle: true,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: Icon(Icons.arrow_back_ios, color: Theme.of(context).colorScheme.onSurface, size: 20),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(onPressed: _shareText, icon: const Icon(Icons.share, color: Colors.blue, size: 20)),
-                IconButton(onPressed: _copyReport, icon: const Icon(Icons.copy, color: Colors.blueGrey, size: 20)),
-                IconButton(onPressed: _sharePdf, icon: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 20)),
-                IconButton(onPressed: _selectDate, icon: Icon(Icons.calendar_month, color: Theme.of(context).colorScheme.primary, size: 20)),
-              ],
-            ),
-          ],
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: Icon(Icons.arrow_back_ios, color: Theme.of(context).colorScheme.onSurface, size: 20),
         ),
+        // أزرار الإجراءات عبر actions الأصلية بدل Row مخصّص داخل title — تفادياً
+        // لتجاوز عرض الشاشة (Overflow) على الشاشات الضيقة. أزرار المشاركة الثلاثة
+        // مُجمَّعة في قائمة منسدلة واحدة بدل ثلاثة أيقونات منفصلة — يقلّل عدد
+        // عناصر actions من 5 إلى 3 (هامش أمان إضافي على الشاشات الصغيرة جداً).
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.ios_share, color: Colors.blue, size: 20),
+            tooltip: "مشاركة",
+            onSelected: (v) {
+              if (v == 'text') _shareText();
+              if (v == 'copy') _copyReport();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'text', child: Row(children: [Icon(Icons.share, size: 18), SizedBox(width: 8), Text("مشاركة نصية")])),
+              PopupMenuItem(value: 'copy', child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text("نسخ التقرير")])),
+            ],
+          ),
+          // زر "مشاركة PDF" منفصل وبارز حسب الطلب — بدل دمجه ضمن القائمة المنسدلة.
+          IconButton(onPressed: _sharePdf, icon: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 20), tooltip: "مشاركة PDF"),
+          IconButton(onPressed: _selectDate, icon: Icon(Icons.calendar_month, color: Theme.of(context).colorScheme.primary, size: 20)),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurface, size: 20),
+            onSelected: (v) {
+              if (v == 'items') Navigator.push(context, MaterialPageRoute(builder: (_) => ManageReportItemsPage(hotel: widget.hotel)));
+              if (v == 'history') Navigator.push(context, MaterialPageRoute(builder: (_) => PreviousReportsPage(hotel: widget.hotel)));
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'items', child: Row(children: [Icon(Icons.tune, size: 18), SizedBox(width: 8), Text("إدارة البنود")])),
+              PopupMenuItem(value: 'history', child: Row(children: [Icon(Icons.history, size: 18), SizedBox(width: 8), Text("التقارير السابقة")])),
+            ],
+          ),
+        ],
       ),
       bottomNavigationBar: _buildBottomNav(identityColor),
       body: Directionality(
@@ -412,8 +513,30 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               ],
             ),
           ),
+        if (!_isLocked && _loadedReportId != null)
+          InkWell(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UnpostedFundsPage(hotel: widget.hotel))),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(AppRadius.md)),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.hourglass_top_rounded, color: Colors.orange, size: 18),
+                  SizedBox(width: 8),
+                  Text("هذا التقرير معتمد وبانتظار الترحيل — عرض الأموال غير المرحلة", style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
         Row(
           children: [
+            if (!_isLocked && _loadedReportId != null) ...[
+              IconButton(onPressed: _deleteReport, icon: const Icon(Icons.delete_outline, color: Colors.red), tooltip: "حذف التقرير"),
+              const SizedBox(width: 8),
+            ],
             if (!_isLocked)
               Expanded(child: AppButton(text: "تعيين", onPressed: _reviewReport, icon: Icons.assignment_turned_in_outlined, backgroundColor: color)),
           ],
@@ -451,13 +574,69 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
             onTap: () => setState(() => _showTransferField = !_showTransferField),
             isActive: _showTransferField,
           ),
+          if (!_isLocked) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: _addIncomeItem,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: Colors.green)),
+                child: const Icon(Icons.add, size: 16, color: Colors.green),
+              ),
+            ),
+          ],
         ],
       ),
       if (_showTransferField) ...[
         const SizedBox(height: 12),
         _field("التحويل البنكي", _transferController, Icons.account_balance, _transferFocus, null),
       ],
+      ..._otherIncomes.asMap().entries.map((e) => Padding(padding: const EdgeInsets.only(top: 12), child: _buildIncomeRow(e.value, e.key))),
     ]));
+  }
+
+  Widget _buildIncomeRow(IncomeItem item, int index) {
+    return Column(children: [
+      Row(children: [
+        Expanded(flex: 2, child: AppTextField(controller: item.nameController, hint: "اسم بند الإيراد", icon: Icons.edit_note, readOnly: _isLocked)),
+        const SizedBox(width: 8),
+        Expanded(flex: 1, child: AppTextField(controller: item.amountController, hint: "0.00", formatThousands: true, onChanged: (_) => _calculateTotals(), readOnly: _isLocked)),
+      ]),
+      const SizedBox(height: 4),
+      if (!_isLocked)
+        Row(children: [
+          Flexible(child: _buildFundingSourceChip(item.paymentMethod, (v) => setState(() => item.paymentMethod = v))),
+          const Spacer(),
+          IconButton(
+            onPressed: () { setState(() => _otherIncomes.removeAt(index)); _calculateTotals(); },
+            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+          ),
+        ]),
+    ]);
+  }
+
+  /// "➕" بجانب التحويل البنكي — يفتح النافذة الموحّدة لإضافة بند إيراد (حر
+  /// أو من الكتالوج)، ويُضيفه فوراً لهذا التقرير فقط. حفظه بشكل دائم اختياري.
+  Future<void> _addIncomeItem() async {
+    if (_isLocked) return;
+    final result = await showAddReportItemSheet(context, itemType: FinancialReportItem.typeRevenue, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
+    if (result == null) return;
+    setState(() => _otherIncomes.add(IncomeItem(
+          nameController: TextEditingController(text: result.name),
+          amountController: TextEditingController(),
+          paymentMethod: result.fundingSource,
+        )));
+    _calculateTotals();
+    if (result.savePermanently && await _reportItemRepository.getItemByName(result.name, FinancialReportItem.typeRevenue) == null) {
+      await _reportItemRepository.addItem(FinancialReportItem(
+        name: result.name,
+        type: FinancialReportItem.typeRevenue,
+        defaultFundingSource: result.fundingSource,
+        sortOrder: 0,
+        createdAt: DateTime.now().toIso8601String(),
+      ));
+    }
   }
 
   Widget _buildTinyActionBtn({required String label, required IconData icon, required VoidCallback onTap, bool isActive = false}) {
@@ -554,15 +733,20 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
 
   Widget _adjustSummaryItem(String label, double amt, String source, Color color) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(children: [
-          Icon(Icons.circle, size: 8, color: color),
-          const SizedBox(width: 8),
-          Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
-          const SizedBox(width: 4),
-          Text("($source)", style: const TextStyle(fontSize: 10, color: Colors.grey)),
-        ]),
+        Icon(Icons.circle, size: 8, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(text: label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
+              TextSpan(text: " ($source)", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            ]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
         Text(NumberFormat("#,##0.##").format(amt), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
       ],
     );
@@ -619,7 +803,8 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   }
 
   Widget _totalRow(String l, double v, Color c) => Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-    Text(l, style: const TextStyle(fontSize: 13)),
+    Expanded(child: Text(l, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
+    const SizedBox(width: 8),
     Text(NumberFormat("#,##0.##").format(v), style: TextStyle(fontWeight: FontWeight.bold, color: v < 0 ? Colors.red : c, fontSize: 16)),
   ]);
 
@@ -632,34 +817,52 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     AppTextField(controller: c, hint: "0.00", icon: i, focusNode: f, formatThousands: true, onChanged: (_) => _calculateTotals(), onSubmitted: onSubmitted ?? (_) => n != null ? FocusScope.of(context).requestFocus(n) : null, readOnly: _isLocked),
   ]);
 
+  /// تبديل ثنائي بسيط (نقد/شبكة فقط) — يُستخدم حصراً لحقلي "الإعاشة"/"الاسترداد"
+  /// اللذين يُحسبان دوماً كخصم فوري من صندوق اليوم (راجع _calculateTotals، لا
+  /// يتعامل مع أي قيمة غير نقد/شبكة لهذين الحقلين تحديداً). لاختيار مصدر تمويل
+  /// كامل (بما فيه فندق آخر/آجل) راجع _buildFundingSourceChip أدناه.
   Widget _smallToggle(String current, Function(String) onC, {bool locked = false}) {
     if (_isLocked || locked) return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: Colors.grey)),
-      child: Text(current, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey)),
+      child: Text(current, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
     );
-    final List<String> options = ["نقد", "شبكة"];
-    for (var h in _otherHotels) {
-      options.add(h.arabicName);
-    }
-    options.addAll(["شخصي", "مصروف خاص"]);
-
-    final Map<String, Color> colorMap = {
+    const options = ["نقد", "شبكة"];
+    const colorMap = {
       "نقد": Colors.green,
       "شبكة": Colors.blue,
-      "شخصي": Colors.purple,
-      "مصروف خاص": Colors.indigo,
     };
-    for (var h in _otherHotels) {
-      colorMap[h.arabicName] = Colors.deepOrange;
-    }
 
     final color = colorMap[current] ?? Colors.grey;
     return InkWell(onTap: () { int idx = options.indexOf(current); if (idx == -1) idx = 0; onC(options[(idx + 1) % options.length]); _calculateTotals(); }, child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: color)),
-      child: Text(current, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+      child: Text(current, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color), maxLines: 1, overflow: TextOverflow.ellipsis),
     ));
+  }
+
+  /// شريحة مصدر تمويل كاملة (نقد/شبكة/فندق آخر/شخصي/مصروف خاص/آجل (دين)) عبر
+  /// النافذة الموحّدة showFundingSourcePicker — تُستخدم للبنود الحرة داخل قسم
+  /// المصروفات/الإيرادات (بخلاف _smallToggle الثنائي البسيط للإعاشة/الاسترداد).
+  Widget _buildFundingSourceChip(String current, ValueChanged<String> onSelected, {bool locked = false}) {
+    if (_isLocked || locked) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: Colors.grey)),
+        child: Text(current, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+      );
+    }
+    return InkWell(
+      onTap: () async {
+        final result = await showFundingSourcePicker(context, hotelId: widget.hotel.id!, otherHotels: _otherHotels, allowDeferred: false, allowBankTransfer: true);
+        if (result != null) { onSelected(result.paymentMethod); _calculateTotals(); }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm), border: Border.all(color: Colors.grey.shade400)),
+        child: Text(current, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
   }
 
   Widget _buildDynamicRow(ExpenseItem item, int index) {
@@ -676,13 +879,21 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           child: Row(children: [
             Icon(Icons.link, size: 12, color: Colors.grey),
             SizedBox(width: 4),
-            Text("من المصروفات المعلقة — مقفل حتى يُلغى ترحيله", style: TextStyle(fontSize: 10, color: Colors.grey)),
+            Expanded(
+              child: Text(
+                "من المصروفات المعلقة — مقفل حتى يُلغى ترحيله",
+                style: TextStyle(fontSize: 10, color: Colors.grey),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ]),
         ),
       const SizedBox(height: 4),
       if (!_isLocked)
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          _smallToggle(item.paymentMethod, (v) => setState(() => item.paymentMethod = v), locked: isPendingLinked),
+        Row(children: [
+          Flexible(child: _buildFundingSourceChip(item.paymentMethod, (v) => setState(() => item.paymentMethod = v), locked: isPendingLinked)),
+          const Spacer(),
           isPendingLinked
               ? TextButton.icon(
                   onPressed: () => _unpostPendingItem(item, index),
@@ -725,13 +936,30 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       'method': e.paymentMethod,
       if (e.pendingExpenseId != null) 'is_pending_transferred': true,
       if (e.pendingExpenseId != null) 'pending_id': e.pendingExpenseId,
+      if (e.supplierName != null) 'supplier_name': e.supplierName,
     }).toList();
     for (var e in _availablePendingExpenses) {
       if (_selectedPendingIds.contains(e.id)) {
-        otherDetails.add({'name': "${e.categoryName}: ${e.statement}", 'amount': e.amount, 'method': e.paymentMethod, 'is_pending_transferred': true, 'pending_id': e.id!});
+        otherDetails.add({
+          'name': "${e.categoryName}: ${e.statement}",
+          'amount': e.amount,
+          'method': e.paymentMethod,
+          'is_pending_transferred': true,
+          'pending_id': e.id!,
+          if (e.supplierName != null) 'supplier_name': e.supplierName,
+        });
       }
     }
     return otherDetails;
+  }
+
+  /// يبني قائمة بنود الإيراد الحرة بنفس بنية `other` الخاصة بالمصروفات.
+  List<Map<String, dynamic>> _buildOtherIncomeDetails() {
+    return _otherIncomes.map((i) => {
+      'name': i.nameController.text,
+      'amount': ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0,
+      'method': i.paymentMethod,
+    }).toList();
   }
 
   Future<FinancialReport> _buildReportFromCurrentState() async {
@@ -748,6 +976,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           'transfer': ThousandsSeparatorInputFormatter.parse(_transferController.text) ?? 0,
           'parking_cash': ThousandsSeparatorInputFormatter.parse(_parkingCashController.text) ?? 0,
           'parking_pos': ThousandsSeparatorInputFormatter.parse(_parkingPosController.text) ?? 0,
+          'other_income': _buildOtherIncomeDetails(),
         },
         'expense_details': {
           'subsistence': ThousandsSeparatorInputFormatter.parse(_subsistenceController.text) ?? 0,
@@ -797,13 +1026,68 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   }
 
   Future<void> _reviewReport() async {
-    final report = await _buildReportFromCurrentState();
+    // منع تكرار التقرير في الوضع الرسمي فقط — وضع التجربة يُبقي السلوك القديم
+    // (تقرير "إضافي" تلقائي) كما هو تماماً بلا أي تعديل لهذا المسار.
+    final trialMode = await AppPreferences.getBool(AppPreferences.keyTrialMode);
+    if (!trialMode) {
+      final repo = FinancialRepository();
+      final mainR = await repo.getMainReportForDate(widget.hotel.id!, DateFormat('yyyy-MM-dd').format(_selectedDate));
+      if (mainR != null && mainR.id != _loadedReportId) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يوجد تقرير معتمد مسبقاً لهذا الفندق بهذا التاريخ — فعّل \"وضع التجربة\" من الإعدادات إن أردت إنشاء تقرير إضافي.")));
+        }
+        return;
+      }
+    }
 
-    if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ReportPreviewPage(hotel: widget.hotel, report: report, detailedData: jsonDecode(report.detailsJson!), onConfirm: () async {
+    final report = await _buildReportFromCurrentState();
+    final template = _buildDailyReportTemplate(isAdditional: report.reportType == 'additional');
+
+    if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ReportPreviewPage(template: template, onConfirm: () async {
       await _persistReport(report);
       if (_selectedPendingIds.isNotEmpty) await _expenseRepository.transferExpenses(_selectedPendingIds.toList());
-      if (mounted) { Navigator.pop(context); Navigator.pop(context, true); }
+      if (mounted) {
+        Navigator.pop(context);
+        Navigator.pop(context, true);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("✅ تم اعتماد التقرير بنجاح — بانتظار الترحيل إلى الخزنة من \"الأموال غير المرحلة\"."),
+          duration: Duration(seconds: 4),
+        ));
+      }
     })));
+  }
+
+  /// حذف تقرير لم يُرحَّل بعد (قبل الترحيل فقط — التحقق يتم عبر إخفاء الزر
+  /// أصلاً عند _isLocked). يحذف صف financial_reports + صندوقه المودَع
+  /// المرتبط معاً، حتى لا يبقى صندوق يتيم في "الأموال غير المرحلة".
+  Future<void> _deleteReport() async {
+    if (_loadedReportId == null || _isLocked) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+        title: const Text("حذف التقرير"),
+        content: const Text("هل أنت متأكد من حذف هذا التقرير المالي؟ لم يُرحَّل بعد إلى الخزنة، فلن يتأثر أي رصيد."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("حذف"),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final vaultRepo = VaultRepository();
+    final fund = await vaultRepo.getDepositedFundByReportId(_loadedReportId!);
+    if (fund?.id != null) await vaultRepo.deleteDepositedFund(fund!.id!);
+    await FinancialRepository().deleteFinancialReport(_loadedReportId!);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم حذف التقرير")));
+      Navigator.pop(context, true);
+    }
   }
 
   /// "إلغاء ترحيل" مصروف معلق من داخل هذا التقرير — يُزيله من التقرير الحالي
@@ -852,9 +1136,28 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     }
   }
 
-  void _addExpense() {
+  /// "بند مصروف مخصص" — يفتح النافذة الموحّدة لإضافة بند مصروف (حر أو من
+  /// الكتالوج)، بدل إضافة صفّ فارغ مباشرة كما كان سابقاً.
+  Future<void> _addExpense() async {
     if (_isLocked) return;
-    setState(() => _otherExpenses.add(ExpenseItem(nameController: TextEditingController(), amountController: TextEditingController(), nameFocus: FocusNode(), amountFocus: FocusNode())));
+    final result = await showAddReportItemSheet(context, itemType: FinancialReportItem.typeExpense, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
+    if (result == null) return;
+    setState(() => _otherExpenses.add(ExpenseItem(
+          nameController: TextEditingController(text: result.name),
+          amountController: TextEditingController(),
+          paymentMethod: result.fundingSource,
+          nameFocus: FocusNode(),
+          amountFocus: FocusNode(),
+        )));
+    _calculateTotals();
+    if (result.savePermanently && await _reportItemRepository.getItemByName(result.name, FinancialReportItem.typeExpense) == null) {
+      await _reportItemRepository.addItem(FinancialReportItem(
+        name: result.name,
+        type: FinancialReportItem.typeExpense,
+        sortOrder: 0,
+        createdAt: DateTime.now().toIso8601String(),
+      ));
+    }
   }
   
   Future<void> _selectDate() async {
@@ -862,19 +1165,99 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     if (p != null) { _selectedDate = p; _loadReportForDate(p); }
   }
 
+  /// عناصر "مصروفات لم تخصم من خزنة الفندق" — كل بند لم يُسحب من النقد
+  /// الفعلي اليوم (نفس تصنيف oDebt في _calculateTotals، ماعدا "شبكة" التي
+  /// تُستبعَد من oDebt حسابياً لكنها تُعرَض هنا لأنها ليست نقداً من الخزنة —
+  /// تصنيف عرض بحت، بلا أي تغيير على _calculateTotals نفسها). التصنيف نفسه
+  /// (classifyUnwithdrawnSource) مشترك مع buildTemplateFromSavedReport حتى
+  /// تتطابق "التقارير السابقة" مع هذه الشاشة تماماً.
+  List<UnwithdrawnTemplateLine> _collectUnwithdrawnLines() {
+    final items = <UnwithdrawnTemplateLine>[];
+    void addIfNotCash(String name, String method, String? supplierName) {
+      if (method == "نقد" || method == "مصروف خاص") return;
+      final c = classifyUnwithdrawnSource(method, supplierName);
+      items.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: name, label: c.label));
+    }
+
+    for (final e in _otherExpenses) {
+      addIfNotCash(e.nameController.text, e.paymentMethod, e.supplierName);
+    }
+    for (final e in _availablePendingExpenses) {
+      if (_selectedPendingIds.contains(e.id)) {
+        addIfNotCash("${e.categoryName}: ${e.statement}", e.paymentMethod, e.isDeferredDebt ? e.supplierName : null);
+      }
+    }
+    return items;
+  }
+
+  /// يبني القالب الرسمي الموحّد من الحالة الحالية — بلا أي حساب جديد، فقط
+  /// تجميع القيم المحسوبة أصلاً (_totalIncome، _netCash، ...) في بنية عرض
+  /// واحدة يستهلكها عرض المعاينة داخل التطبيق ونص المشاركة/النسخ وPDF معاً.
+  DailyReportTemplate _buildDailyReportTemplate({bool isAdditional = false}) {
+    final sub = ThousandsSeparatorInputFormatter.parse(_subsistenceController.text) ?? 0;
+    final ref = ThousandsSeparatorInputFormatter.parse(_refundController.text) ?? 0;
+    final transfer = ThousandsSeparatorInputFormatter.parse(_transferController.text) ?? 0;
+    double incTransfer = 0;
+    for (final i in _otherIncomes) {
+      if (i.paymentMethod != "نقد" && i.paymentMethod != "شبكة") {
+        incTransfer += ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0;
+      }
+    }
+
+    final incomeLines = <ReportTemplateLine>[
+      ReportTemplateLine(label: "النقد", amount: ThousandsSeparatorInputFormatter.parse(_cashController.text) ?? 0),
+      ReportTemplateLine(label: "الشبكة", amount: ThousandsSeparatorInputFormatter.parse(_posController.text) ?? 0),
+      ReportTemplateLine(label: "التحويل البنكي", amount: transfer),
+      if (widget.hotel.hasParking) ...[
+        ReportTemplateLine(label: "مواقف (نقد)", amount: ThousandsSeparatorInputFormatter.parse(_parkingCashController.text) ?? 0),
+        ReportTemplateLine(label: "مواقف (شبكة)", amount: ThousandsSeparatorInputFormatter.parse(_parkingPosController.text) ?? 0),
+      ],
+      for (final i in _otherIncomes)
+        ReportTemplateLine(label: i.nameController.text, amount: ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0),
+    ];
+
+    final expenseLines = <ReportTemplateLine>[
+      ReportTemplateLine(label: "الإعاشة", amount: sub),
+      ReportTemplateLine(label: "الاسترداد", amount: ref),
+      for (final e in _otherExpenses)
+        ReportTemplateLine(label: e.nameController.text, amount: ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0),
+      for (final e in _availablePendingExpenses)
+        if (_selectedPendingIds.contains(e.id)) ReportTemplateLine(label: "${e.categoryName}: ${e.statement}", amount: e.amount),
+    ];
+
+    final netLines = <ReportTemplateLine>[
+      ReportTemplateLine(label: "صافي النقد", amount: _netCash),
+      ReportTemplateLine(label: "صافي الشبكة", amount: _netPos),
+      ReportTemplateLine(label: "صافي التحويل البنكي", amount: transfer + incTransfer),
+    ];
+
+    return buildDailyReportTemplate(
+      hotelName: widget.hotel.arabicName,
+      dayName: _getDayName(_selectedDate.weekday),
+      date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+      isAdditional: isAdditional,
+      rawIncomeLines: incomeLines,
+      totalIncome: _totalIncome,
+      rawExpenseLines: expenseLines,
+      totalExpenses: _totalExpenses,
+      rawNetLines: netLines,
+      netTotal: _finalBalance,
+      unwithdrawnLines: _collectUnwithdrawnLines(),
+    );
+  }
+
   void _copyReport() async {
-    final t = "تقرير فندق ${widget.hotel.arabicName}\nالتاريخ: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}\nإجمالي الإيراد: $_totalIncome\nإجمالي المصروف: $_totalExpenses\nصافي النقد: $_netCash\nصافي الشبكة: $_netPos";
-    await Clipboard.setData(ClipboardData(text: t));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم نسخ التقرير")));
+    await Clipboard.setData(ClipboardData(text: renderDailyReportAsText(_buildDailyReportTemplate())));
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم نسخ التقرير")));
   }
 
   void _shareText() {
-     final t = "تقرير فندق ${widget.hotel.arabicName}\nالتاريخ: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}\nإجمالي الإيراد: $_totalIncome\nإجمالي المصروف: $_totalExpenses\nصافي النقد: $_netCash\nصافي الشبكة: $_netPos";
-     Share.share(t);
+    Share.share(renderDailyReportAsText(_buildDailyReportTemplate()));
   }
 
   Future<void> _sharePdf() async {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("جاري إنشاء ملف PDF...")));
+    await PdfService.shareDailyReportPdf(_buildDailyReportTemplate());
   }
 
   void _showMonthlyReport() => Navigator.push(context, MaterialPageRoute(builder: (_) => MonthlyReportPage(hotel: widget.hotel, initialDate: _selectedDate)));

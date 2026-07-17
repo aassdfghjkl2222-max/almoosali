@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../models/daily_report_template.dart';
 import '../models/financial_report.dart';
 import '../models/settlement.dart';
 import '../models/settlement_account.dart';
@@ -64,7 +65,7 @@ class PdfService {
             data: reports.map((r) => [
               hotelNames[r.hotelId] ?? 'فندق #${r.hotelId}',
               r.date,
-              r.isPosted ? 'معتمد' : 'معلّق',
+              r.isPosted ? 'مرحّل' : 'غير مرحّل',
               currency.format(r.income),
               currency.format(r.expenses),
               currency.format(r.income - r.expenses),
@@ -77,6 +78,103 @@ class PdfService {
       ),
     );
     return pdf;
+  }
+
+  /// تقرير مالي يومي واحد (PDF كامل) — يعرض [DailyReportTemplate] بنفس
+  /// الترتيب والمحتوى وتدرّج الخطوط المعتمد في عرض المعاينة داخل التطبيق
+  /// (DailyReportView) وفي نص المشاركة (renderDailyReportAsText) حرفياً،
+  /// حتى يكون هناك قالب رسمي واحد موحّد عبر المخرجات الثلاثة. العناوين
+  /// الكبيرة الأربعة فقط بخط أكبر؛ كل ما عداها بالحجم العادي.
+  static Future<pw.Document> _buildDailyReportPdf(DailyReportTemplate t) async {
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.cairoMedium();
+    final boldFont = await PdfGoogleFonts.cairoBold();
+    final currency = NumberFormat("#,##0.##");
+
+    pw.Widget lineRow(String label, double amount, {PdfColor? color}) => pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 3),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(label, style: const pw.TextStyle(fontSize: 11)),
+              pw.Text(currency.format(amount), style: pw.TextStyle(fontSize: 11, font: boldFont, color: color)),
+            ],
+          ),
+        );
+
+    pw.Widget sectionCard(String largeTitle, List<ReportTemplateLine> lines, String totalLabel, double totalValue, PdfColor totalColor) {
+      return pw.Container(
+        margin: const pw.EdgeInsets.only(bottom: 14),
+        padding: const pw.EdgeInsets.all(10),
+        decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6))),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(largeTitle, style: pw.TextStyle(fontSize: 15, font: boldFont)),
+            pw.SizedBox(height: 6),
+            ...lines.map((l) => lineRow(l.label, l.amount)),
+            pw.Divider(color: PdfColors.grey300),
+            lineRow(totalLabel, totalValue, color: totalColor),
+          ],
+        ),
+      );
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        textDirection: pw.TextDirection.rtl,
+        theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text("📊 التقرير المالي اليومي", style: pw.TextStyle(fontSize: 20, font: boldFont)),
+                if (t.isAdditional) pw.Text("(تقرير إضافي)", style: const pw.TextStyle(fontSize: 11, color: PdfColors.red)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text("🏨 ${t.hotelName}", style: const pw.TextStyle(fontSize: 13)),
+          pw.SizedBox(height: 2),
+          pw.Text("📅 ${t.dayName}  |  📆 ${t.date}", style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700)),
+          pw.SizedBox(height: 16),
+          if (t.incomeLines.isNotEmpty) sectionCard("💰 الإيرادات اليومية", t.incomeLines, "✅ إجمالي الإيرادات", t.totalIncome, PdfColors.green700),
+          if (t.expenseLines.isNotEmpty) sectionCard("💸 المصروفات اليومية", t.expenseLines, "✅ إجمالي المصروفات", t.totalExpenses, PdfColors.red700),
+          if (t.netLines.isNotEmpty) sectionCard("💵 صافي النقد", t.netLines, "الإجمالي الصافي", t.netTotal, PdfColors.blueGrey800),
+          if (t.unwithdrawnLines.isNotEmpty) ...[
+            pw.Text("📌 مصروفات لم تخصم من خزنة الفندق", style: pw.TextStyle(fontSize: 12, font: boldFont)),
+            pw.SizedBox(height: 6),
+            pw.TableHelper.fromTextArray(
+              headers: ["البند", "السبب"],
+              data: t.unwithdrawnLines.map((l) => [l.itemName, "${l.icon} ${l.label}"]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, font: boldFont, fontSize: 10),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.orange),
+              cellStyle: const pw.TextStyle(fontSize: 10),
+              cellAlignment: pw.Alignment.centerRight,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return pdf;
+  }
+
+  static Future<void> shareDailyReportPdf(DailyReportTemplate t) async {
+    final pdf = await _buildDailyReportPdf(t);
+    final bytes = await pdf.save();
+    final directory = await getTemporaryDirectory();
+    final file = File("${directory.path}/تقرير_${t.hotelName}_${t.date}_${DateTime.now().millisecondsSinceEpoch}.pdf");
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: "تقرير فندق ${t.hotelName} بتاريخ ${t.date}");
+  }
+
+  /// طباعة مباشرة (بدل المشاركة) — لخيار "الطباعة" في شاشة "التقارير السابقة".
+  static Future<void> printDailyReportPdf(DailyReportTemplate t) async {
+    final pdf = await _buildDailyReportPdf(t);
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
   }
 
   static pw.Widget _summaryBox(String label, String value) {

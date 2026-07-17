@@ -1,0 +1,95 @@
+import 'dart:convert';
+import '../models/daily_report_template.dart';
+import '../models/financial_report.dart';
+
+/// يصنّف مصدر تمويل واحداً إلى (رمز تعبيري + تسمية) لقسم "مصروفات لم تخصم
+/// من خزنة الفندق" — "الخزنة" تعني النقد الفعلي حصراً، لذلك "شبكة" تظهر هنا
+/// أيضاً (لم تُسحب من صندوق النقد، وإن كانت محتسَبة ضمن صافي الشبكة أصلاً —
+/// تصنيف عرض فقط، بلا أي أثر على أي حساب). مصدر وحيد يُستخدم من كل من بناء
+/// القالب من الحالة الحيّة (FinancialSummaryPage) وبنائه من تقرير محفوظ سابقاً
+/// (buildTemplateFromSavedReport) — حتى لا يتكرر نفس المنطق في مكانين.
+({String icon, String label}) classifyUnwithdrawnSource(String method, String? supplierName) {
+  if (supplierName != null) return (icon: "📄", label: "دين - $supplierName");
+  if (method == "شبكة") return (icon: "🏦", label: "شبكة");
+  if (method == "تحويل بنكي") return (icon: "🏦", label: "تحويل بنكي");
+  if (method == "شخصي") return (icon: "👤", label: "مال المالك");
+  if (method.contains(" - ")) {
+    final parts = method.split(" - ");
+    return (icon: "🏨", label: "منشأة أخرى (${parts.first}) - ${parts.sublist(1).join(' - ')}");
+  }
+  return (icon: "📄", label: method);
+}
+
+const _dayNames = ["", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"];
+
+String _dayNameForDate(String isoDate) {
+  final d = DateTime.tryParse(isoDate);
+  if (d == null) return "";
+  return _dayNames[d.weekday];
+}
+
+/// يُعيد بناء القالب الرسمي من تقرير محفوظ سابقاً (details_json) — تُستخدم
+/// في "التقارير السابقة" لعرض/مشاركة/تصدير أي تقرير قديم بنفس القالب
+/// المعتمد تماماً، دون الحاجة لإعادة تحميله داخل شاشة التعديل الحيّة.
+DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport report, required String hotelName}) {
+  final details = report.detailsJson != null ? jsonDecode(report.detailsJson!) as Map<String, dynamic> : <String, dynamic>{};
+  final inc = (details['income_details'] as Map?) ?? {};
+  final exp = (details['expense_details'] as Map?) ?? {};
+
+  double asDouble(dynamic v) => v is num ? v.toDouble() : (double.tryParse(v?.toString() ?? '') ?? 0);
+
+  final incomeLines = <ReportTemplateLine>[
+    ReportTemplateLine(label: "النقد", amount: asDouble(inc['cash'])),
+    ReportTemplateLine(label: "الشبكة", amount: asDouble(inc['pos'])),
+    ReportTemplateLine(label: "التحويل البنكي", amount: asDouble(inc['transfer'])),
+    ReportTemplateLine(label: "مواقف (نقد)", amount: asDouble(inc['parking_cash'])),
+    ReportTemplateLine(label: "مواقف (شبكة)", amount: asDouble(inc['parking_pos'])),
+    for (final item in (inc['other_income'] as List? ?? []))
+      ReportTemplateLine(label: item['name']?.toString() ?? '', amount: asDouble(item['amount'])),
+  ];
+
+  final otherExpenses = (exp['other'] as List? ?? []);
+  final expenseLines = <ReportTemplateLine>[
+    ReportTemplateLine(label: "الإعاشة", amount: asDouble(exp['subsistence'])),
+    ReportTemplateLine(label: "الاسترداد", amount: asDouble(exp['refund'])),
+    for (final item in otherExpenses) ReportTemplateLine(label: item['name']?.toString() ?? '', amount: asDouble(item['amount'])),
+  ];
+
+  final netCash = asDouble(details['net_cash']);
+  final netPos = asDouble(details['net_pos']);
+  final transfer = asDouble(inc['transfer']);
+  double incTransfer = 0;
+  for (final item in (inc['other_income'] as List? ?? [])) {
+    final method = item['method']?.toString() ?? '';
+    if (method != "نقد" && method != "شبكة") incTransfer += asDouble(item['amount']);
+  }
+
+  final netLines = <ReportTemplateLine>[
+    ReportTemplateLine(label: "صافي النقد", amount: netCash),
+    ReportTemplateLine(label: "صافي الشبكة", amount: netPos),
+    ReportTemplateLine(label: "صافي التحويل البنكي", amount: transfer + incTransfer),
+  ];
+
+  final unwithdrawnLines = <UnwithdrawnTemplateLine>[];
+  for (final item in otherExpenses) {
+    final method = item['method']?.toString() ?? '';
+    if (method == "نقد" || method == "مصروف خاص") continue;
+    final supplierName = item['supplier_name']?.toString();
+    final c = classifyUnwithdrawnSource(method, supplierName);
+    unwithdrawnLines.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: item['name']?.toString() ?? '', label: c.label));
+  }
+
+  return buildDailyReportTemplate(
+    hotelName: hotelName,
+    dayName: _dayNameForDate(report.date),
+    date: report.date,
+    isAdditional: report.reportType == 'additional',
+    rawIncomeLines: incomeLines,
+    totalIncome: report.income,
+    rawExpenseLines: expenseLines,
+    totalExpenses: report.expenses,
+    rawNetLines: netLines,
+    netTotal: netCash + netPos + transfer + incTransfer,
+    unwithdrawnLines: unwithdrawnLines,
+  );
+}

@@ -29,7 +29,7 @@ class ExcelService {
       sheet.appendRow([
         TextCellValue(hotelNames[r.hotelId] ?? 'فندق #${r.hotelId}'),
         TextCellValue(r.date),
-        TextCellValue(r.isPosted ? 'معتمد' : 'معلّق'),
+        TextCellValue(r.isPosted ? 'مرحّل' : 'غير مرحّل'),
         TextCellValue(r.reportType == 'main' ? 'رئيسي' : 'إضافي'),
         DoubleCellValue(r.income),
         DoubleCellValue(r.expenses),

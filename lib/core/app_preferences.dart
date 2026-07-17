@@ -12,6 +12,11 @@ class AppPreferences {
   static const keyFontScale = 'pref_font_scale'; // 0.9 / 1.0 / 1.15
   static const keyAnimationSpeed = 'pref_animation_speed'; // 'slow' | 'normal' | 'fast'
   static const keyHideBalances = 'pref_hide_balances';
+  // وضع التجربة: يخفّف قواعد التقرير المالي اليومي الرسمية (تكرار تقرير لنفس
+  // الفندق/التاريخ، تعديل، حذف، إعادة إنشاء) لأغراض الاختبار أثناء التطوير —
+  // لا يغيّر أبداً قفل التقرير بعد الترحيل الفعلي إلى الخزنة (قاعدة صارمة في
+  // كلا الوضعين). راجع FinancialSummaryPage._reviewReport.
+  static const keyTrialMode = 'pref_trial_mode';
   static const keyNotificationsEnabled = 'pref_notifications_enabled';
   static const keySoundEnabled = 'pref_sound_enabled';
   static const keyVibrationEnabled = 'pref_vibration_enabled';

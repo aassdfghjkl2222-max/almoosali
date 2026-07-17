@@ -47,6 +47,12 @@ class VaultRepository {
     return map != null ? DepositedFund.fromMap(map) : null;
   }
 
+  /// يُستخدم فقط عند حذف تقرير مالي لم يُرحَّل بعد (راجع
+  /// FinancialSummaryPage._deleteReport) — تقرير مُرحَّل لا يُحذف إطلاقاً.
+  Future<int> deleteDepositedFund(int id) async {
+    return await _dbService.deleteById('deposited_funds', id);
+  }
+
   Future<int> updateDepositedFundByReportId(DepositedFund fund, int reportId) async {
     return await _dbService.updateDepositedFundByReportId(fund.toMap(), reportId);
   }

@@ -49,7 +49,7 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
 
   String _selectedPeriod = "الكل";
   DateTimeRange? _customRange;
-  bool? _statusFilter; // null=الكل، true=معتمد، false=معلّق
+  bool? _statusFilter; // null=الكل، true=مرحّل، false=غير مرحّل
   String? _typeFilter; // null=الكل، 'main'، 'additional'
   String? _employeeFilter;
   List<String> _employeeOptions = [];
@@ -221,7 +221,7 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
   String get _activeFiltersSummary {
     final parts = <String>[_hotelSummaryLabel];
     if (_selectedPeriod != "الكل") parts.add(_selectedPeriod);
-    if (_statusFilter != null) parts.add(_statusFilter! ? "معتمد" : "معلّق");
+    if (_statusFilter != null) parts.add(_statusFilter! ? "مرحّل" : "غير مرحّل");
     if (_typeFilter != null) parts.add(_typeFilter == 'main' ? "رئيسي" : "إضافي");
     if (_employeeFilter != null) parts.add("الموظف: $_employeeFilter");
     return parts.join(" · ");
@@ -358,8 +358,8 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                       spacing: 8,
                       children: [
                         ChoiceChip(label: const Text("الكل", style: TextStyle(fontSize: 12)), selected: status == null, selectedColor: _identityColor, onSelected: (_) => setSheetState(() => status = null)),
-                        ChoiceChip(label: Text("معتمد", style: TextStyle(fontSize: 12, color: status == true ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == true, selectedColor: AppColors.success, onSelected: (_) => setSheetState(() => status = true)),
-                        ChoiceChip(label: Text("معلّق", style: TextStyle(fontSize: 12, color: status == false ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == false, selectedColor: AppColors.warning, onSelected: (_) => setSheetState(() => status = false)),
+                        ChoiceChip(label: Text("مرحّل", style: TextStyle(fontSize: 12, color: status == true ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == true, selectedColor: AppColors.success, onSelected: (_) => setSheetState(() => status = true)),
+                        ChoiceChip(label: Text("غير مرحّل", style: TextStyle(fontSize: 12, color: status == false ? Colors.white : Theme.of(context).colorScheme.onSurface)), selected: status == false, selectedColor: AppColors.warning, onSelected: (_) => setSheetState(() => status = false)),
                       ],
                     ),
                     const SizedBox(height: AppSizes.md),
@@ -589,9 +589,8 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
       _CategoryData("التقارير اليومية", Icons.today_outlined, const Color(0xFF3B6FE0), _countToday, () => _applyCategoryFilter(period: "يوم")),
       _CategoryData("التقارير الشهرية", Icons.calendar_month_outlined, const Color(0xFF8B5CF6), _countMonth, () => _applyCategoryFilter(period: "شهر")),
       _CategoryData("التقارير السنوية", Icons.calendar_today_outlined, const Color(0xFF1E3A5F), _countYear, () => _applyCategoryFilter(period: "سنة")),
-      _CategoryData("التقارير المعتمدة", Icons.check_circle_outline, AppColors.success, _countPosted, () => _applyCategoryFilter(posted: true)),
-      _CategoryData("التقارير غير المعتمدة", Icons.cancel_outlined, AppColors.warning, _countPending, () => _applyCategoryFilter(posted: false)),
-      _CategoryData("التقارير المعلّقة", Icons.hourglass_empty_outlined, const Color(0xFFD9743C), _countPending, () => _applyCategoryFilter(posted: false)),
+      _CategoryData("التقارير المرحَّلة", Icons.check_circle_outline, AppColors.success, _countPosted, () => _applyCategoryFilter(posted: true)),
+      _CategoryData("التقارير غير المرحَّلة", Icons.hourglass_empty_outlined, AppColors.warning, _countPending, () => _applyCategoryFilter(posted: false)),
     ];
     return _buildStaticGrid(categories.map((c) => _buildCategoryCard(c)).toList(), columns: 2);
   }
@@ -700,7 +699,7 @@ class _ReportsCenterPageState extends State<ReportsCenterPage> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
-                    child: Text(r.isPosted ? "معتمد" : "معلّق", style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10)),
+                    child: Text(r.isPosted ? "مرحّل" : "غير مرحّل", style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10)),
                   ),
                 ],
               ),

@@ -718,7 +718,7 @@ class _AnalysisCenterPageState extends State<AnalysisCenterPage> {
       (const _TodayStat("إيرادات اليوم", Icons.arrow_downward_outlined, Color(0xFF1FA971)), _fmtAmount(todayIncome), () => _openReportsDrilldown("إيرادات اليوم", const Color(0xFF1FA971), reports: todayReports)),
       (const _TodayStat("مصروفات اليوم", Icons.arrow_upward_outlined, Color(0xFFE0524A)), _fmtAmount(todayExpenses), () => _openReportsDrilldown("مصروفات اليوم", const Color(0xFFE0524A), reports: todayReports, amountSelector: (r) => r.expenses)),
       (_TodayStat("صافي اليوم", Icons.equalizer_outlined, color), _fmtAmount(todayIncome - todayExpenses), () => _openReportsDrilldown("صافي اليوم", color, reports: todayReports, amountSelector: (r) => r.income - r.expenses)),
-      (const _TodayStat("تقارير غير معتمدة", Icons.pending_actions_outlined, AppColors.warning), "$_pendingReportsCount", () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReportsCenterPage(hotel: widget.hotel, initialPendingOnly: true))).then((_) => _loadKpis())),
+      (const _TodayStat("تقارير غير مرحَّلة", Icons.pending_actions_outlined, AppColors.warning), "$_pendingReportsCount", () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReportsCenterPage(hotel: widget.hotel, initialPendingOnly: true))).then((_) => _loadKpis())),
       (const _TodayStat("تنبيهات حرجة", Icons.notifications_active_outlined, AppColors.danger), "$_criticalAlertsCount", () => Navigator.push(context, MaterialPageRoute(builder: (_) => AlertsPage(hotel: _singleSelectedHotel ?? widget.hotel))).then((_) => _loadKpis())),
     ];
     return AppCard(

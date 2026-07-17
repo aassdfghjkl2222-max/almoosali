@@ -17,7 +17,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), 'manazel.db');
     return await openDatabase(
       path,
-      version: 36, // Upgrade to v36 for deferred (آجل) pending-expense supplier debts + attachments
+      version: 38, // Upgrade to v38 for deposited_funds.posted_at/posted_by (were written by the model/VaultRepository but never added to the table)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -142,6 +142,18 @@ class DatabaseService {
               'CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
             );
           } catch (_) {}
+        }
+        if (oldVersion < 37) {
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS financial_report_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, default_funding_source TEXT, is_visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)',
+            );
+          } catch (_) {}
+          try { await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_report_items_name_type ON financial_report_items(name, type)'); } catch (_) {}
+        }
+        if (oldVersion < 38) {
+          try { await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_at TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_by TEXT'); } catch (_) {}
         }
       },
     );
@@ -301,6 +313,17 @@ class DatabaseService {
       await db.execute(
         'CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
       );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS financial_report_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, default_funding_source TEXT, is_visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)',
+      );
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_report_items_name_type ON financial_report_items(name, type)');
+
+      if (!await hasColumn('deposited_funds', 'posted_at')) {
+        await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_at TEXT');
+      }
+      if (!await hasColumn('deposited_funds', 'posted_by')) {
+        await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_by TEXT');
+      }
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
       // بالحد الأدنى، وتُعاد المحاولة تلقائياً عند فتح التطبيق مرة أخرى.
@@ -335,7 +358,13 @@ class DatabaseService {
     // يُجمَّعان في "الذمم الدائنة" بمركز التحليل المالي (SupplierRepository.getAccountsPayableTotal).
     await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS deposited_funds (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, report_id INTEGER, date TEXT NOT NULL, cash_amount REAL NOT NULL, network_amount REAL NOT NULL, cash_status TEXT NOT NULL DEFAULT "pending", network_status TEXT NOT NULL DEFAULT "pending", is_archived INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (report_id) REFERENCES financial_reports (id) ON DELETE SET NULL)');
+    // كتالوج بنود التقرير المالي اليومي الدائمة (إيراد/مصروف) — راجع
+    // FinancialReportItemRepository. لا تظهر تلقائياً في الشاشة، فقط عبر
+    // منتقي "إضافة بند" — التقارير المحفوظة سابقاً تحتفظ بنسخة كاملة داخل
+    // details_json فلا ترتبط بهذا الجدول عبر FK إطلاقاً.
+    await db.execute('CREATE TABLE IF NOT EXISTS financial_report_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, default_funding_source TEXT, is_visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_report_items_name_type ON financial_report_items(name, type)');
+    await db.execute('CREATE TABLE IF NOT EXISTS deposited_funds (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, report_id INTEGER, date TEXT NOT NULL, cash_amount REAL NOT NULL, network_amount REAL NOT NULL, cash_status TEXT NOT NULL DEFAULT "pending", network_status TEXT NOT NULL DEFAULT "pending", is_archived INTEGER NOT NULL DEFAULT 0, posted_at TEXT, posted_by TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (report_id) REFERENCES financial_reports (id) ON DELETE SET NULL)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, account_id INTEGER, creditor_hotel_id INTEGER, debtor_hotel_id INTEGER, amount REAL NOT NULL, date TEXT NOT NULL, description TEXT NOT NULL, attachments_json TEXT, status TEXT NOT NULL DEFAULT "open", total_paid REAL NOT NULL DEFAULT 0, direction TEXT, created_at TEXT NOT NULL, FOREIGN KEY (account_id) REFERENCES settlement_accounts (id) ON DELETE CASCADE, FOREIGN KEY (creditor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (debtor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, settlement_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, notes TEXT, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (settlement_id) REFERENCES settlements (id) ON DELETE CASCADE)');
@@ -679,6 +708,23 @@ class DatabaseService {
 
   Future<int> insertPendingExpenseAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('pending_expense_attachments', data); }
   Future<List<Map<String, dynamic>>> getPendingExpenseAttachments(int pendingExpenseId) async { final db = await database; return await db.query('pending_expense_attachments', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId], orderBy: 'created_at DESC'); }
+
+  // ---------------- كتالوج بنود التقرير المالي اليومي (financial_report_items) ----------------
+
+  Future<List<Map<String, dynamic>>> getFinancialReportItems({String? type, bool includeHidden = false}) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <dynamic>[];
+    if (type != null) { where.add('type = ?'); args.add(type); }
+    if (!includeHidden) where.add('is_visible = 1');
+    return await db.query(
+      'financial_report_items',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
+      orderBy: 'sort_order ASC',
+    );
+  }
+  Future<int> insertFinancialReportItem(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_report_items', data); }
 
   Future<List<Map<String, dynamic>>> getNotes(int hotelId) async { final db = await database; return await db.query('notes', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'created_at DESC'); }
   Future<int> insertNote(Map<String, dynamic> data) async { final db = await database; return await db.insert('notes', data); }
