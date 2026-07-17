@@ -367,10 +367,6 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   void _onAmountSubmitted(String value) {
     final total = ThousandsSeparatorInputFormatter.parse(value) ?? 0;
     if (total <= 0 || _selectedSupplier == null || !_readyForAmount) return;
-    if (_isFromQrScan && _invoiceNumberController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى كتابة رقم الفاتورة أولاً (غير موجود داخل رمز QR)")));
-      return;
-    }
 
     double beforeTax;
     double vat;
@@ -409,14 +405,29 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
     setState(() => _isSaving = true);
     try {
       if (_isFromQrScan && !_isEditMode) {
-        final duplicate = await _invoiceRepository.findDuplicate(
-          hotelId: widget.hotel.id!,
-          taxNumber: _selectedSupplier!.taxNumber,
-          invoiceNumber: _invoiceNumberController.text.trim(),
-        );
-        if (duplicate != null) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("هذه الفاتورة مسجلة مسبقاً.")));
-          return;
+        final invoiceNumber = _invoiceNumberController.text.trim();
+        final duplicate = invoiceNumber.isEmpty
+            ? await _invoiceRepository.findDuplicateByContent(
+                hotelId: widget.hotel.id!,
+                taxNumber: _selectedSupplier!.taxNumber,
+                date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+                totalAmount: total,
+              )
+            : await _invoiceRepository.findDuplicate(
+                hotelId: widget.hotel.id!,
+                taxNumber: _selectedSupplier!.taxNumber,
+                invoiceNumber: invoiceNumber,
+              );
+        if (duplicate != null && mounted) {
+          bool proceed = false;
+          await AppDialog.confirmAction(
+            context: context,
+            title: "فاتورة مكرَّرة",
+            message: "هذه الفاتورة مسجلة مسبقاً، هل تريد المتابعة؟",
+            confirmLabel: "متابعة",
+            onConfirm: () async => proceed = true,
+          );
+          if (!proceed) return;
         }
       }
 

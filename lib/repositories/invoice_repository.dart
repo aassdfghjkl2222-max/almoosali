@@ -62,6 +62,15 @@ class InvoiceRepository {
     return Invoice.fromMap(map);
   }
 
+  /// بديل التحقق من التكرار عند غياب رقم الفاتورة (شائع في مسار QR — المعيار
+  /// لا يتضمّن رقم الفاتورة أصلاً) — يطابق بالرقم الضريبي + التاريخ + الإجمالي
+  /// معاً، وهي البيانات الوحيدة المضمونة من مسح نفس الفاتورة الورقية مرتين.
+  Future<Invoice?> findDuplicateByContent({required int hotelId, required String taxNumber, required String date, required double totalAmount}) async {
+    final map = await _dbService.findDuplicateInvoiceByContent(hotelId, taxNumber, date, totalAmount);
+    if (map == null) return null;
+    return Invoice.fromMap(map);
+  }
+
   Future<int> deleteInvoice(int id) async {
     return await _dbService.deleteById('invoices', id);
   }

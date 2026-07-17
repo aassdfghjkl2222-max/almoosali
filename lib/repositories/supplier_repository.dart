@@ -69,6 +69,13 @@ class SupplierRepository {
     return Supplier.fromMap(map);
   }
 
+  /// يحدّث تصنيف المصروف الافتراضي لمورد — يُستدعى عند أول ربط لمورد جديد
+  /// أو عند تغيير المستخدم للتصنيف يدوياً في شاشة المراجعة السريعة
+  /// (QuickInvoiceReviewPage)، حتى تُطبَّق تلقائياً في الفواتير القادمة.
+  Future<void> updateDefaultCategory(int supplierId, String category) async {
+    await _dbService.updateSupplierCategory(supplierId, category);
+  }
+
   Future<Supplier?> getSupplierById(int id) async {
     final map = await _dbService.getSupplierById(id);
     if (map == null) return null;

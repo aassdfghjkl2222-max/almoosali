@@ -18,6 +18,7 @@ import '../expenses/manage_categories_page.dart';
 import 'add_invoice_page.dart';
 import 'invoice_details_page.dart';
 import 'invoice_reports_page.dart';
+import 'quick_invoice_review_page.dart';
 import 'scan_invoice_qr_page.dart';
 import 'supplier_report_page.dart';
 import 'supplier_statement_page.dart';
@@ -364,16 +365,18 @@ class _InvoicesPageState extends State<InvoicesPage> {
   }
 
   /// يفتح شاشة مسح رمز QR. عند نجاح القراءة تُرجِع [ZatcaInvoiceData] فنفتح
-  /// "إضافة فاتورة" معبَّأة تلقائياً. عند اختيار "إدخال يدوي" داخل شاشة
-  /// المسح (بعد فشل قراءة) تستبدل تلك الشاشة نفسها بـAddInvoicePage فارغة
-  /// مباشرة، فتُرجِع القيمة `true` مباشرة إلى هنا عند نجاح الحفظ هناك. أما
-  /// الإلغاء ببساطة (زر الرجوع) فيُرجِع null ولا يفتح أي شاشة إضافية.
+  /// شاشة المراجعة السريعة (QuickInvoiceReviewPage) بدل "إضافة فاتورة"
+  /// الكاملة مباشرة — تلك تبقى متاحة من داخل المراجعة عبر زر "تعديل". عند
+  /// اختيار "إدخال يدوي" داخل شاشة المسح (بعد فشل قراءة) تستبدل تلك الشاشة
+  /// نفسها بـAddInvoicePage فارغة مباشرة، فتُرجِع القيمة `true` مباشرة إلى
+  /// هنا عند نجاح الحفظ هناك. أما الإلغاء ببساطة (زر الرجوع) فيُرجِع null
+  /// ولا يفتح أي شاشة إضافية.
   Future<void> _openQrScan() async {
     final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => ScanInvoiceQrPage(hotel: widget.hotel)));
     if (!mounted || result == null) return;
 
     if (result is ZatcaInvoiceData) {
-      final saved = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel, qrPrefill: result)));
+      final saved = await Navigator.push(context, MaterialPageRoute(builder: (_) => QuickInvoiceReviewPage(hotel: widget.hotel, qrData: result)));
       if (saved != true) return;
     } else if (result != true) {
       return;
@@ -807,6 +810,11 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
   // ---------------- قائمة الفواتير ----------------
 
+  /// بطاقة فاتورة واحدة — Row/Column يدويان بدل ListTile(isThreeLine:) عمداً:
+  /// isThreeLine كان يفرض ارتفاعاً ثابتاً مبنياً على افتراض داخلي في Flutter
+  /// لا يطابق دائماً الارتفاع الفعلي لنص فرعي بثلاثة أسطر بخط caption لهذا
+  /// التطبيق، فيسبب "BOTTOM OVERFLOWED" ثابتاً. البنية هنا بلا أي قيد
+  /// ارتفاع مطلقاً — تتمدد بحرية كاملة داخل ListView/Sliver المُحيط.
   Widget _buildInvoiceRow(Invoice invoice) {
     return Container(
       decoration: BoxDecoration(
@@ -814,57 +822,80 @@ class _InvoicesPageState extends State<InvoicesPage> {
         borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: Theme.of(context).dividerColor),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.xs),
-        onTap: () async {
-          final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceDetailsPage(invoice: invoice, hotel: widget.hotel)));
-          if (result == true) {
-            await _reloadFilterOptions();
-            await _reload();
-          }
-        },
-        leading: CircleAvatar(
-          backgroundColor: _identityColor.withOpacity(0.1),
-          child: Icon(Icons.receipt_outlined, color: _identityColor, size: 20),
-        ),
-        title: Text(invoice.companyName, style: AppTextStyles.bodyBold.copyWith(fontSize: 14)),
-        subtitle: Text(
-          "#${invoice.invoiceNumber} · ${invoice.date} · ${invoice.expenseCategory ?? 'غير مصنَّف'} · ${invoice.amountSource}\n${invoice.facilityName}",
-          style: AppTextStyles.caption,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        isThreeLine: true,
-        trailing: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
-              style: AppTextStyles.bodyBold.copyWith(color: _identityColor, fontSize: 13),
-            ),
-            PopupMenuButton<String>(
-              padding: EdgeInsets.zero,
-              icon: Icon(Icons.more_vert, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              onSelected: (value) {
-                if (value == 'supplier_report') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => SupplierReportPage(hotel: widget.hotel, companyName: invoice.companyName)),
-                  );
-                } else if (value == 'supplier_statement') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => SupplierStatementPage(hotel: widget.hotel, companyName: invoice.companyName)),
-                  );
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'supplier_statement', child: Text("كشف حساب المورد")),
-                PopupMenuItem(value: 'supplier_report', child: Text("تقرير هذا المورد")),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          onTap: () async {
+            final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceDetailsPage(invoice: invoice, hotel: widget.hotel)));
+            if (result == true) {
+              await _reloadFilterOptions();
+              await _reload();
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  backgroundColor: _identityColor.withOpacity(0.1),
+                  child: Icon(Icons.receipt_outlined, color: _identityColor, size: 20),
+                ),
+                const SizedBox(width: AppSizes.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(invoice.companyName, style: AppTextStyles.bodyBold.copyWith(fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(
+                        "#${invoice.invoiceNumber} · ${invoice.date} · ${invoice.expenseCategory ?? 'غير مصنَّف'} · ${invoice.amountSource}",
+                        style: AppTextStyles.caption,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(invoice.facilityName, style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSizes.sm),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
+                      style: AppTextStyles.bodyBold.copyWith(color: _identityColor, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.more_vert, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      onSelected: (value) {
+                        if (value == 'supplier_report') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => SupplierReportPage(hotel: widget.hotel, companyName: invoice.companyName)),
+                          );
+                        } else if (value == 'supplier_statement') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => SupplierStatementPage(hotel: widget.hotel, companyName: invoice.companyName)),
+                          );
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 'supplier_statement', child: Text("كشف حساب المورد")),
+                        PopupMenuItem(value: 'supplier_report', child: Text("تقرير هذا المورد")),
+                      ],
+                    ),
+                  ],
+                ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );

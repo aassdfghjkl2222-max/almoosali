@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 38, // Upgrade to v38 for deposited_funds.posted_at/posted_by (were written by the model/VaultRepository but never added to the table)
+      version: 39, // Upgrade to v39 for suppliers.default_expense_category (auto-categorization for QR-scanned invoices)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -163,6 +163,9 @@ class DatabaseService {
           try { await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_at TEXT'); } catch (_) {}
           try { await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_by TEXT'); } catch (_) {}
         }
+        if (oldVersion < 39) {
+          try { await db.execute('ALTER TABLE suppliers ADD COLUMN default_expense_category TEXT'); } catch (_) {}
+        }
       },
     );
   }
@@ -244,6 +247,9 @@ class DatabaseService {
       }
       if (!await hasColumn('suppliers', 'notes')) {
         await db.execute('ALTER TABLE suppliers ADD COLUMN notes TEXT');
+      }
+      if (!await hasColumn('suppliers', 'default_expense_category')) {
+        await db.execute('ALTER TABLE suppliers ADD COLUMN default_expense_category TEXT');
       }
       if (!await hasColumn('invoices', 'payment_method')) {
         await db.execute('ALTER TABLE invoices ADD COLUMN payment_method TEXT');
@@ -377,7 +383,7 @@ class DatabaseService {
     await db.execute('CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, account_id INTEGER, creditor_hotel_id INTEGER, debtor_hotel_id INTEGER, amount REAL NOT NULL, date TEXT NOT NULL, description TEXT NOT NULL, attachments_json TEXT, status TEXT NOT NULL DEFAULT "open", total_paid REAL NOT NULL DEFAULT 0, direction TEXT, created_at TEXT NOT NULL, FOREIGN KEY (account_id) REFERENCES settlement_accounts (id) ON DELETE CASCADE, FOREIGN KEY (creditor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (debtor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, settlement_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, notes TEXT, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (settlement_id) REFERENCES settlements (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, invoice_number TEXT NOT NULL, date TEXT NOT NULL, company_name TEXT NOT NULL, tax_number TEXT NOT NULL, amount_before_tax REAL NOT NULL, vat REAL NOT NULL, total_amount REAL NOT NULL, facility_name TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", expense_category TEXT, payment_method TEXT, related_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, official_name TEXT NOT NULL, short_name TEXT NOT NULL, tax_number TEXT NOT NULL, notes TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, official_name TEXT NOT NULL, short_name TEXT NOT NULL, tax_number TEXT NOT NULL, notes TEXT, default_expense_category TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contracts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, contractor_name TEXT NOT NULL, start_date TEXT NOT NULL, duration TEXT NOT NULL, end_date TEXT NOT NULL, total_value REAL NOT NULL, payment_method TEXT NOT NULL, status TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contract_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, contract_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (contract_id) REFERENCES contracts (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS vault_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, type TEXT NOT NULL, balance REAL NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, UNIQUE(hotel_id, type))');
@@ -1088,6 +1094,7 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getInvoices(int hotelId) async { final db = await database; return await db.query('invoices', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
   Future<int> insertInvoice(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoices', data); }
   Future<Map<String, dynamic>?> findDuplicateInvoice(int hotelId, String taxNumber, String invoiceNumber) async { final db = await database; final res = await db.query('invoices', where: 'hotel_id = ? AND tax_number = ? AND invoice_number = ?', whereArgs: [hotelId, taxNumber, invoiceNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<Map<String, dynamic>?> findDuplicateInvoiceByContent(int hotelId, String taxNumber, String date, double totalAmount) async { final db = await database; final res = await db.query('invoices', where: 'hotel_id = ? AND tax_number = ? AND date = ? AND total_amount = ?', whereArgs: [hotelId, taxNumber, date, totalAmount], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<List<Map<String, dynamic>>> getInvoicesBySupplier({required int hotelId, required String companyName, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ? AND company_name = ?'; List<dynamic> args = [hotelId, companyName]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
 
   /// يبني شرط WHERE مشتركاً لمركز الفواتير الضريبية (يدعم فندقاً واحداً/عدة
@@ -1203,6 +1210,7 @@ class DatabaseService {
   Future<int> insertSupplier(Map<String, dynamic> data) async { final db = await database; return await db.insert('suppliers', data); }
   Future<Map<String, dynamic>?> getSupplierByOfficialName(int hotelId, String name) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND official_name = ?', whereArgs: [hotelId, name], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<Map<String, dynamic>?> getSupplierByTaxNumber(int hotelId, String taxNumber) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND tax_number = ?', whereArgs: [hotelId, taxNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<int> updateSupplierCategory(int id, String category) async { final db = await database; return await db.update('suppliers', {'default_expense_category': category}, where: 'id = ?', whereArgs: [id]); }
   Future<List<Map<String, dynamic>>> searchSuppliers(int hotelId, String query) async { final db = await database; return await db.query('suppliers', where: 'hotel_id = ? AND (official_name LIKE ? OR short_name LIKE ? OR tax_number LIKE ?)', whereArgs: [hotelId, "%$query%", "%$query%", "%$query%"], limit: 10); }
   Future<Map<String, dynamic>?> getSupplierById(int id) async { final db = await database; final res = await db.query('suppliers', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
 
