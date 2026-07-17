@@ -9,8 +9,8 @@ import '../models/financial_report.dart';
 /// القالب من الحالة الحيّة (FinancialSummaryPage) وبنائه من تقرير محفوظ سابقاً
 /// (buildTemplateFromSavedReport) — حتى لا يتكرر نفس المنطق في مكانين.
 ({String icon, String label}) classifyUnwithdrawnSource(String method, String? supplierName) {
-  if (supplierName != null) return (icon: "📄", label: "دين - $supplierName");
-  if (method == "شبكة") return (icon: "🏦", label: "شبكة");
+  if (supplierName != null) return (icon: "🤝", label: "دين - $supplierName");
+  if (method == "شبكة") return (icon: "💳", label: "شبكة");
   if (method == "تحويل بنكي") return (icon: "🏦", label: "تحويل بنكي");
   if (method == "شخصي") return (icon: "👤", label: "مال المالك");
   if (method.contains(" - ")) {
@@ -19,6 +19,30 @@ import '../models/financial_report.dart';
   }
   return (icon: "📄", label: method);
 }
+
+/// أيقونة تعبيرية مناسبة لاسم بند حر (مصروف/إيراد مخصَّص أو بند من مصروف
+/// معلّق) — مطابقة بكلمات مفتاحية شائعة، مع رمز عام (📦) لأي اسم آخر غير
+/// مطابق. تحسين بصري بحت (لا علاقة له بأي تصنيف حسابي، خلافاً لِـ
+/// classifyUnwithdrawnSource الذي يصنّف حسب طريقة الدفع لا اسم البند) —
+/// مصدر وحيد يُستخدم من بناء القالب الحيّ ومن التقارير المحفوظة معاً.
+const _itemKeywordIcons = <String, String>{
+  'ثلاج': '🧊',
+  'كهرباء': '💡',
+  'مياه': '🚰',
+  'ماء': '🚰',
+  'نظاف': '🧹',
+  'صيان': '🔧',
+  'نقل': '🚗',
+};
+
+String iconForItemName(String name) {
+  for (final entry in _itemKeywordIcons.entries) {
+    if (name.contains(entry.key)) return entry.value;
+  }
+  return '📦';
+}
+
+String withItemIcon(String name) => name.isEmpty ? name : "${iconForItemName(name)} $name";
 
 const _dayNames = ["", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"];
 
@@ -39,20 +63,20 @@ DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport repor
   double asDouble(dynamic v) => v is num ? v.toDouble() : (double.tryParse(v?.toString() ?? '') ?? 0);
 
   final incomeLines = <ReportTemplateLine>[
-    ReportTemplateLine(label: "النقد", amount: asDouble(inc['cash'])),
-    ReportTemplateLine(label: "الشبكة", amount: asDouble(inc['pos'])),
-    ReportTemplateLine(label: "التحويل البنكي", amount: asDouble(inc['transfer'])),
+    ReportTemplateLine(label: "💵 النقد", amount: asDouble(inc['cash'])),
+    ReportTemplateLine(label: "💳 الشبكة", amount: asDouble(inc['pos'])),
+    ReportTemplateLine(label: "🏦 التحويل البنكي", amount: asDouble(inc['transfer'])),
     ReportTemplateLine(label: "مواقف (نقد)", amount: asDouble(inc['parking_cash'])),
     ReportTemplateLine(label: "مواقف (شبكة)", amount: asDouble(inc['parking_pos'])),
     for (final item in (inc['other_income'] as List? ?? []))
-      ReportTemplateLine(label: item['name']?.toString() ?? '', amount: asDouble(item['amount'])),
+      ReportTemplateLine(label: withItemIcon(item['name']?.toString() ?? ''), amount: asDouble(item['amount'])),
   ];
 
   final otherExpenses = (exp['other'] as List? ?? []);
   final expenseLines = <ReportTemplateLine>[
-    ReportTemplateLine(label: "الإعاشة", amount: asDouble(exp['subsistence'])),
-    ReportTemplateLine(label: "الاسترداد", amount: asDouble(exp['refund'])),
-    for (final item in otherExpenses) ReportTemplateLine(label: item['name']?.toString() ?? '', amount: asDouble(item['amount'])),
+    ReportTemplateLine(label: "🍽️ الإعاشة", amount: asDouble(exp['subsistence'])),
+    ReportTemplateLine(label: "↩️ الاسترداد", amount: asDouble(exp['refund'])),
+    for (final item in otherExpenses) ReportTemplateLine(label: withItemIcon(item['name']?.toString() ?? ''), amount: asDouble(item['amount'])),
   ];
 
   final netCash = asDouble(details['net_cash']);
@@ -65,9 +89,9 @@ DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport repor
   }
 
   final netLines = <ReportTemplateLine>[
-    ReportTemplateLine(label: "صافي النقد", amount: netCash),
-    ReportTemplateLine(label: "صافي الشبكة", amount: netPos),
-    ReportTemplateLine(label: "صافي التحويل البنكي", amount: transfer + incTransfer),
+    ReportTemplateLine(label: "💼 صافي النقد", amount: netCash),
+    ReportTemplateLine(label: "📊 صافي الشبكة", amount: netPos),
+    ReportTemplateLine(label: "🏦 صافي التحويل البنكي", amount: transfer + incTransfer),
   ];
 
   final unwithdrawnLines = <UnwithdrawnTemplateLine>[];

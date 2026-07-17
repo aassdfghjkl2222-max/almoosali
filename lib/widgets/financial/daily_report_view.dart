@@ -50,7 +50,7 @@ class DailyReportView extends StatelessWidget {
             context,
             largeTitle: "💵 صافي النقد",
             lines: template.netLines,
-            totalLabel: "الإجمالي الصافي",
+            totalLabel: "🏁 الإجمالي الصافي",
             totalValue: template.netTotal,
             totalColor: primary,
           ),
@@ -146,7 +146,7 @@ class DailyReportView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("📌 مصروفات لم تخصم من خزنة الفندق", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          const Text("🏛️ المصروفات التي لم تُصرف من خزينة الفندق", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
           const SizedBox(height: AppSizes.sm),
           for (final l in template.unwithdrawnLines)
             Padding(
@@ -157,7 +157,15 @@ class DailyReportView extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(child: Text(l.itemName, style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
                   const SizedBox(width: 6),
-                  Text(l.label, style: const TextStyle(fontSize: 11, color: AppColors.warning, fontWeight: FontWeight.w600)),
+                  Flexible(
+                    child: Text(
+                      l.label,
+                      style: const TextStyle(fontSize: 11, color: AppColors.warning, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                    ),
+                  ),
                 ],
               ),
             ),

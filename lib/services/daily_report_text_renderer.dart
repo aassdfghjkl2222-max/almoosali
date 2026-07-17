@@ -52,14 +52,14 @@ String renderDailyReportAsText(DailyReportTemplate t) {
     for (final l in t.netLines) {
       buffer.writeln("${l.label}: ${_currency.format(l.amount)}");
     }
-    buffer.writeln("الإجمالي الصافي: ${_currency.format(t.netTotal)}");
+    buffer.writeln("🏁 الإجمالي الصافي: ${_currency.format(t.netTotal)}");
   }
 
   if (t.unwithdrawnLines.isNotEmpty) {
     buffer
       ..writeln(_separator)
       ..writeln()
-      ..writeln("📌 مصروفات لم تخصم من خزنة الفندق");
+      ..writeln("🏛️ المصروفات التي لم تُصرف من خزينة الفندق");
     for (final l in t.unwithdrawnLines) {
       buffer.writeln("${l.itemName}: ${l.icon} ${l.label}");
     }

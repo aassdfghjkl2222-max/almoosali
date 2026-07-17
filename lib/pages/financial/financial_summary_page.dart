@@ -473,13 +473,17 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
             ),
             const SizedBox(height: 6),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  NumberFormat("#,##0.##").format(total),
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white),
+                Expanded(
+                  child: Text(
+                    NumberFormat("#,##0.##").format(total),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+                const SizedBox(width: 6),
                 Text(
                   _availablePendingExpenses.length.toString(),
                   style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
@@ -509,7 +513,13 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               children: [
                 Icon(Icons.lock_outline, color: Colors.grey, size: 20),
                 SizedBox(width: 8),
-                Text("هذا التقرير مقفل (تم الترحيل)", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                Flexible(
+                  child: Text(
+                    "هذا التقرير مقفل (تم الترحيل)",
+                    style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ],
             ),
           ),
@@ -526,7 +536,13 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
                 children: [
                   Icon(Icons.hourglass_top_rounded, color: Colors.orange, size: 18),
                   SizedBox(width: 8),
-                  Text("هذا التقرير معتمد وبانتظار الترحيل — عرض الأموال غير المرحلة", style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Flexible(
+                    child: Text(
+                      "هذا التقرير معتمد وبانتظار الترحيل — عرض الأموال غير المرحلة",
+                      style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1205,30 +1221,30 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     }
 
     final incomeLines = <ReportTemplateLine>[
-      ReportTemplateLine(label: "النقد", amount: ThousandsSeparatorInputFormatter.parse(_cashController.text) ?? 0),
-      ReportTemplateLine(label: "الشبكة", amount: ThousandsSeparatorInputFormatter.parse(_posController.text) ?? 0),
-      ReportTemplateLine(label: "التحويل البنكي", amount: transfer),
+      ReportTemplateLine(label: "💵 النقد", amount: ThousandsSeparatorInputFormatter.parse(_cashController.text) ?? 0),
+      ReportTemplateLine(label: "💳 الشبكة", amount: ThousandsSeparatorInputFormatter.parse(_posController.text) ?? 0),
+      ReportTemplateLine(label: "🏦 التحويل البنكي", amount: transfer),
       if (widget.hotel.hasParking) ...[
         ReportTemplateLine(label: "مواقف (نقد)", amount: ThousandsSeparatorInputFormatter.parse(_parkingCashController.text) ?? 0),
         ReportTemplateLine(label: "مواقف (شبكة)", amount: ThousandsSeparatorInputFormatter.parse(_parkingPosController.text) ?? 0),
       ],
       for (final i in _otherIncomes)
-        ReportTemplateLine(label: i.nameController.text, amount: ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0),
+        ReportTemplateLine(label: withItemIcon(i.nameController.text), amount: ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0),
     ];
 
     final expenseLines = <ReportTemplateLine>[
-      ReportTemplateLine(label: "الإعاشة", amount: sub),
-      ReportTemplateLine(label: "الاسترداد", amount: ref),
+      ReportTemplateLine(label: "🍽️ الإعاشة", amount: sub),
+      ReportTemplateLine(label: "↩️ الاسترداد", amount: ref),
       for (final e in _otherExpenses)
-        ReportTemplateLine(label: e.nameController.text, amount: ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0),
+        ReportTemplateLine(label: withItemIcon(e.nameController.text), amount: ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0),
       for (final e in _availablePendingExpenses)
-        if (_selectedPendingIds.contains(e.id)) ReportTemplateLine(label: "${e.categoryName}: ${e.statement}", amount: e.amount),
+        if (_selectedPendingIds.contains(e.id)) ReportTemplateLine(label: withItemIcon("${e.categoryName}: ${e.statement}"), amount: e.amount),
     ];
 
     final netLines = <ReportTemplateLine>[
-      ReportTemplateLine(label: "صافي النقد", amount: _netCash),
-      ReportTemplateLine(label: "صافي الشبكة", amount: _netPos),
-      ReportTemplateLine(label: "صافي التحويل البنكي", amount: transfer + incTransfer),
+      ReportTemplateLine(label: "💼 صافي النقد", amount: _netCash),
+      ReportTemplateLine(label: "📊 صافي الشبكة", amount: _netPos),
+      ReportTemplateLine(label: "🏦 صافي التحويل البنكي", amount: transfer + incTransfer),
     ];
 
     return buildDailyReportTemplate(

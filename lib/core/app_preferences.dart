@@ -17,6 +17,10 @@ class AppPreferences {
   // لا يغيّر أبداً قفل التقرير بعد الترحيل الفعلي إلى الخزنة (قاعدة صارمة في
   // كلا الوضعين). راجع FinancialSummaryPage._reviewReport.
   static const keyTrialMode = 'pref_trial_mode';
+  // وضع التدريب: نسخة كاملة منفصلة من ملف قاعدة البيانات (manazel_training.db)
+  // يُستخدَم بدل الملف الحقيقي بالكامل بينما هذا العلم مفعّل — لا علاقة له
+  // بـ keyTrialMode أعلاه. راجع TrainingModeService/TrainingModeController.
+  static const keyTrainingModeActive = 'pref_training_mode_active';
   static const keyNotificationsEnabled = 'pref_notifications_enabled';
   static const keySoundEnabled = 'pref_sound_enabled';
   static const keyVibrationEnabled = 'pref_vibration_enabled';

@@ -68,6 +68,7 @@ class _HotelsPageState extends State<HotelsPage> {
 
 
 
+
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.2),
         ),
         centerTitle: true,

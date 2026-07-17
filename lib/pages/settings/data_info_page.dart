@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
@@ -34,7 +32,7 @@ class _DataInfoPageState extends State<DataInfoPage> {
   }
 
   Future<void> _load() async {
-    final dbPath = join(await getDatabasesPath(), 'manazel.db');
+    final dbPath = await DatabaseService().getDatabaseFilePath();
     final dbFile = File(dbPath);
     final dbSize = await dbFile.exists() ? await dbFile.length() : 0;
 

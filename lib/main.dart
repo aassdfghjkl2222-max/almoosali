@@ -5,6 +5,7 @@ import 'core/app_theme.dart';
 import 'core/app_theme_controller.dart';
 import 'core/hotel_session.dart';
 import 'core/hotel_visual_identity.dart';
+import 'core/training_mode_controller.dart';
 import 'models/hotel.dart';
 import 'pages/login/security_setup_page.dart';
 import 'pages/login/pin_login_page.dart';
@@ -15,6 +16,7 @@ void main() async {
 
   final hasPin = await SecurityService.instance.hasPin();
   await AppThemeController.bootstrap();
+  await TrainingModeController.bootstrap();
 
   runApp(ManazelApp(hasPin: hasPin));
 }
@@ -52,7 +54,30 @@ class ManazelApp extends StatelessWidget {
                       builder: (context, child) {
                         return MediaQuery(
                           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(fontScale)),
-                          child: child!,
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: TrainingModeController.isActive,
+                            builder: (context, isTraining, _) {
+                              if (!isTraining) return child!;
+                              return Column(
+                                children: [
+                                  SafeArea(
+                                    bottom: false,
+                                    child: Container(
+                                      width: double.infinity,
+                                      color: Colors.amber.shade800,
+                                      padding: const EdgeInsets.symmetric(vertical: 6),
+                                      child: const Text(
+                                        '🎓 وضع التدريب',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(child: child!),
+                                ],
+                              );
+                            },
+                          ),
                         );
                       },
                       localizationsDelegates: const [

@@ -96,7 +96,8 @@ class PdfService {
           child: pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text(label, style: const pw.TextStyle(fontSize: 11)),
+              pw.Expanded(child: pw.Text(label, style: const pw.TextStyle(fontSize: 11))),
+              pw.SizedBox(width: 8),
               pw.Text(currency.format(amount), style: pw.TextStyle(fontSize: 11, font: boldFont, color: color)),
             ],
           ),
@@ -142,9 +143,9 @@ class PdfService {
           pw.SizedBox(height: 16),
           if (t.incomeLines.isNotEmpty) sectionCard("💰 الإيرادات اليومية", t.incomeLines, "✅ إجمالي الإيرادات", t.totalIncome, PdfColors.green700),
           if (t.expenseLines.isNotEmpty) sectionCard("💸 المصروفات اليومية", t.expenseLines, "✅ إجمالي المصروفات", t.totalExpenses, PdfColors.red700),
-          if (t.netLines.isNotEmpty) sectionCard("💵 صافي النقد", t.netLines, "الإجمالي الصافي", t.netTotal, PdfColors.blueGrey800),
+          if (t.netLines.isNotEmpty) sectionCard("💵 صافي النقد", t.netLines, "🏁 الإجمالي الصافي", t.netTotal, PdfColors.blueGrey800),
           if (t.unwithdrawnLines.isNotEmpty) ...[
-            pw.Text("📌 مصروفات لم تخصم من خزنة الفندق", style: pw.TextStyle(fontSize: 12, font: boldFont)),
+            pw.Text("🏛️ المصروفات التي لم تُصرف من خزينة الفندق", style: pw.TextStyle(fontSize: 12, font: boldFont)),
             pw.SizedBox(height: 6),
             pw.TableHelper.fromTextArray(
               headers: ["البند", "السبب"],

@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import '../app_preferences.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -13,8 +14,15 @@ class DatabaseService {
     return _db!;
   }
 
+  /// اسم ملف قاعدة البيانات النشط: النسخة التدريبية المنفصلة أثناء وضع
+  /// التدريب، أو الملف الحقيقي في كل الأحوال الأخرى. راجع TrainingModeService.
+  Future<String> _activeDbFileName() async {
+    final trainingActive = await AppPreferences.getBool(AppPreferences.keyTrainingModeActive);
+    return trainingActive ? 'manazel_training.db' : 'manazel.db';
+  }
+
   Future<Database> _initDb() async {
-    final path = join(await getDatabasesPath(), 'manazel.db');
+    final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
       version: 38, // Upgrade to v38 for deposited_funds.posted_at/posted_by (were written by the model/VaultRepository but never added to the table)
@@ -1269,7 +1277,7 @@ class DatabaseService {
   Future<int> insertPermissionGroup(Map<String, dynamic> data) async { final db = await database; return await db.insert('permission_groups', data); }
 
   /// مسار ملف قاعدة البيانات الحالي على الجهاز (لأغراض النسخ الاحتياطي/الاستعادة).
-  Future<String> getDatabaseFilePath() async => join(await getDatabasesPath(), 'manazel.db');
+  Future<String> getDatabaseFilePath() async => join(await getDatabasesPath(), await _activeDbFileName());
 
   /// يغلق اتصال قاعدة البيانات المفتوح تمهيداً لاستبدال ملفها فعلياً أثناء
   /// الاستعادة من نسخة احتياطية؛ يُعاد فتحها تلقائياً عند أول استدعاء لاحق لـ [database].

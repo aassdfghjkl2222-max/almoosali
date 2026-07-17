@@ -13,6 +13,13 @@ class AppCard extends StatelessWidget {
   /// شريط رفيع بلون هوية الفندق الحالي عند الحافة البادئة للبطاقة (اختياري).
   /// طبقة هوية بصرية إضافية فوق التصميم الحالي، لا تغيّر [color] الوظيفي للبطاقة
   /// ولا أي محتوى داخلها — مرّر مثلاً Theme.of(context).colorScheme.primary.
+  ///
+  /// يُرسَم عبر [BorderDirectional] على حافة "البداية" (start — يمين الشاشة في
+  /// RTL) بدل صف Row + IntrinsicHeight المستخدَم سابقاً: IntrinsicHeight كان
+  /// يفرض على [child] ارتفاعاً محسوباً مسبقاً (تقديرياً) بدل ارتفاعه الطبيعي،
+  /// وأي تقدير غير دقيق (شائع مع TextField/InputDecoration) يسبب
+  /// "BOTTOM OVERFLOWED" فوراً عند تمدد المحتوى (ظهور حقول إضافية). الحل
+  /// الحالي بلا أي قيد ارتفاع مطلقاً — البطاقة تتمدد بحرية تماماً كأي Container عادي.
   final Color? identityAccent;
 
   const AppCard({
@@ -29,25 +36,6 @@ class AppCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(AppRadius.lg);
 
-    Widget content = Padding(
-      padding: padding ?? const EdgeInsets.all(16),
-      child: child,
-    );
-
-    if (identityAccent != null) {
-      // IntrinsicHeight يحوّل ارتفاع الصف من "غير محدود" (كما هو الحال داخل Column/ListView)
-      // إلى ارتفاع محدود يساوي أطول عنصر فيه، حتى يعمل stretch بلا كسر في التخطيط (Layout).
-      content = IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(width: 4, color: identityAccent),
-            Expanded(child: content),
-          ],
-        ),
-      );
-    }
-
     return Container(
       margin: margin,
       child: Material(
@@ -61,6 +49,7 @@ class AppCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: color ?? Theme.of(context).cardColor,
                 borderRadius: radius,
+                border: identityAccent != null ? BorderDirectional(start: BorderSide(color: identityAccent!, width: 4)) : null,
                 boxShadow: const [
                   BoxShadow(
                     color: AppColors.shadow,
@@ -69,7 +58,10 @@ class AppCard extends StatelessWidget {
                   ),
                 ],
               ),
-              child: content,
+              child: Padding(
+                padding: padding ?? const EdgeInsets.all(16),
+                child: child,
+              ),
             ),
           ),
         ),
