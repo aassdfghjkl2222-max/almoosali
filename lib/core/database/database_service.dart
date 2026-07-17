@@ -1087,6 +1087,7 @@ class DatabaseService {
 
   Future<List<Map<String, dynamic>>> getInvoices(int hotelId) async { final db = await database; return await db.query('invoices', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
   Future<int> insertInvoice(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoices', data); }
+  Future<Map<String, dynamic>?> findDuplicateInvoice(int hotelId, String taxNumber, String invoiceNumber) async { final db = await database; final res = await db.query('invoices', where: 'hotel_id = ? AND tax_number = ? AND invoice_number = ?', whereArgs: [hotelId, taxNumber, invoiceNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<List<Map<String, dynamic>>> getInvoicesBySupplier({required int hotelId, required String companyName, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ? AND company_name = ?'; List<dynamic> args = [hotelId, companyName]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
 
   /// يبني شرط WHERE مشتركاً لمركز الفواتير الضريبية (يدعم فندقاً واحداً/عدة
@@ -1201,6 +1202,7 @@ class DatabaseService {
 
   Future<int> insertSupplier(Map<String, dynamic> data) async { final db = await database; return await db.insert('suppliers', data); }
   Future<Map<String, dynamic>?> getSupplierByOfficialName(int hotelId, String name) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND official_name = ?', whereArgs: [hotelId, name], limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<Map<String, dynamic>?> getSupplierByTaxNumber(int hotelId, String taxNumber) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND tax_number = ?', whereArgs: [hotelId, taxNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<List<Map<String, dynamic>>> searchSuppliers(int hotelId, String query) async { final db = await database; return await db.query('suppliers', where: 'hotel_id = ? AND (official_name LIKE ? OR short_name LIKE ? OR tax_number LIKE ?)', whereArgs: [hotelId, "%$query%", "%$query%", "%$query%"], limit: 10); }
   Future<Map<String, dynamic>?> getSupplierById(int id) async { final db = await database; final res = await db.query('suppliers', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
 

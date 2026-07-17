@@ -42,6 +42,9 @@ dependencies:
   # تخزين تفضيلات واجهة بسيطة غير حساسة (الإعدادات العامة)
   shared_preferences: ^2.3.3
 
+  # مسح رمز QR (فواتير ZATCA الضريبية)
+  mobile_scanner: ^7.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -11,12 +11,14 @@ import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
+import '../../services/zatca_qr_parser.dart';
 import '../../widgets/common/app_drawer.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../expenses/manage_categories_page.dart';
 import 'add_invoice_page.dart';
 import 'invoice_details_page.dart';
 import 'invoice_reports_page.dart';
+import 'scan_invoice_qr_page.dart';
 import 'supplier_report_page.dart';
 import 'supplier_statement_page.dart';
 
@@ -361,6 +363,26 @@ class _InvoicesPageState extends State<InvoicesPage> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceReportsPage(hotel: widget.hotel)));
   }
 
+  /// يفتح شاشة مسح رمز QR. عند نجاح القراءة تُرجِع [ZatcaInvoiceData] فنفتح
+  /// "إضافة فاتورة" معبَّأة تلقائياً. عند اختيار "إدخال يدوي" داخل شاشة
+  /// المسح (بعد فشل قراءة) تستبدل تلك الشاشة نفسها بـAddInvoicePage فارغة
+  /// مباشرة، فتُرجِع القيمة `true` مباشرة إلى هنا عند نجاح الحفظ هناك. أما
+  /// الإلغاء ببساطة (زر الرجوع) فيُرجِع null ولا يفتح أي شاشة إضافية.
+  Future<void> _openQrScan() async {
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => ScanInvoiceQrPage(hotel: widget.hotel)));
+    if (!mounted || result == null) return;
+
+    if (result is ZatcaInvoiceData) {
+      final saved = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel, qrPrefill: result)));
+      if (saved != true) return;
+    } else if (result != true) {
+      return;
+    }
+
+    await _reloadFilterOptions();
+    await _reload();
+  }
+
   PopupMenuItem<String> _sortMenuItem(String key, String label) {
     final isSelected = _sortKey == key;
     return PopupMenuItem(
@@ -450,18 +472,44 @@ class _InvoicesPageState extends State<InvoicesPage> {
         ],
       ),
       drawer: AppDrawer(hotel: widget.hotel),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel)));
-          if (result == true) {
-            await _reloadFilterOptions();
-            await _reload();
-          }
-        },
-        backgroundColor: _identityColor,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text("إضافة فاتورة"),
+      // زر "مسح الباركود" بجانب زر "إضافة فاتورة" مباشرة (بدل أيقونة مطمورة
+      // ضمن actions شريط العنوان) — تسمية كاملة ظاهرة لكليهما كما طُلب.
+      // Wrap بدل Row عمداً: على الشاشات الضيقة جداً حيث لا يتسع الزران معاً
+      // بعرض واحد، ينتقل الثاني لسطر جديد تلقائياً بدل حدوث RIGHT OVERFLOWED.
+      // ConstrainedBox صريح بعرض الشاشة لأن فتحة floatingActionButton داخل
+      // Scaffold لا تضمن قيداً أقصى محدداً للعرض تلقائياً (Wrap يحتاج قيداً
+      // محدوداً ليقرر متى ينتقل لسطر جديد).
+      floatingActionButton: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 32),
+        child: Wrap(
+          alignment: WrapAlignment.end,
+          spacing: AppSizes.sm,
+          runSpacing: AppSizes.sm,
+          children: [
+            FloatingActionButton.extended(
+              heroTag: 'scan_invoice_qr_fab',
+              onPressed: _openQrScan,
+              backgroundColor: Colors.white,
+              foregroundColor: _identityColor,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text("مسح الباركود"),
+            ),
+            FloatingActionButton.extended(
+              heroTag: 'add_invoice_fab',
+              onPressed: () async {
+                final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel)));
+                if (result == true) {
+                  await _reloadFilterOptions();
+                  await _reload();
+                }
+              },
+              backgroundColor: _identityColor,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text("إضافة فاتورة"),
+            ),
+          ],
+        ),
       ),
       body: _isLoadingFirstPage && _hotels.isEmpty
           ? const Center(child: CircularProgressIndicator())
@@ -783,6 +831,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
         subtitle: Text(
           "#${invoice.invoiceNumber} · ${invoice.date} · ${invoice.expenseCategory ?? 'غير مصنَّف'} · ${invoice.amountSource}\n${invoice.facilityName}",
           style: AppTextStyles.caption,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
         isThreeLine: true,
         trailing: Column(
