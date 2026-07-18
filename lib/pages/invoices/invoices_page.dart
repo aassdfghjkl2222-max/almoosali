@@ -13,25 +13,24 @@ import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../services/zatca_qr_parser.dart';
 import '../../widgets/common/app_drawer.dart';
-import '../../widgets/common/hotel_identity_title.dart';
 import '../expenses/manage_categories_page.dart';
 import 'add_invoice_page.dart';
 import 'invoice_details_page.dart';
 import 'invoice_reports_page.dart';
 import 'quick_invoice_review_page.dart';
 import 'scan_invoice_qr_page.dart';
-import 'supplier_report_page.dart';
-import 'supplier_statement_page.dart';
 
 enum _HotelScope { current, all, custom }
 
 enum _PeriodPreset { today, thisWeek, lastWeek, thisMonth, lastMonth, custom }
 
-/// مركز "الفواتير الضريبية" لكل فندق — الهيكل العام فقط في هذه المرحلة:
-/// بطاقات ملخص، اختيار فندق واحد/الكل/عدة، فترات جاهزة وفترة مخصصة، بحث
-/// فوري، فلاتر (مورد/تصنيف/مصدر تمويل)، قائمة مُحمَّلة تدريجياً. يُعاد
-/// استخدام AddInvoicePage/InvoiceDetailsPage الموجودتين فعلياً بلا أي
-/// تعديل — لا منطق مالي جديد ولا شاشات موردين/تقارير أُنشئت هنا.
+/// مركز "الفواتير الضريبية" لكل فندق — واجهة مُعاد تصميمها بالكامل: شريط
+/// علوي مبسَّط (بحث/فلاتر/تصدير فقط)، بلا اسم فندق مكرَّر (الفندق الحالي
+/// ضمني من widget.hotel؛ التبديل لفندق آخر/كل الفنادق فقط عبر قسم "الفندق"
+/// داخل نافذة الفلاتر الموحَّدة)، بطاقة فاتورة مبسَّطة (مورد + مبلغ فقط،
+/// بقية الحقول داخل InvoiceDetailsPage)، وزرّا الإضافة/مسح الباركود ثابتان
+/// أسفل الشاشة دائماً. منطق الفلترة/الفرز/الصفحات نفسه تماماً
+/// (InvoiceRepository) — هذه إعادة تنظيم واجهة فقط، بلا أي تغيير حسابي.
 class InvoicesPage extends StatefulWidget {
   final Hotel hotel;
   const InvoicesPage({super.key, required this.hotel});
@@ -59,10 +58,13 @@ class _InvoicesPageState extends State<InvoicesPage> {
   DateTime? _customStart;
   DateTime? _customEnd;
 
+  bool _isSearchVisible = false;
   String _searchQuery = '';
   String? _supplierFilter;
   String? _categoryFilter;
   String? _amountSourceFilter;
+  String? _paymentMethodFilter;
+  bool? _isPostedFilter;
 
   List<String> _availableSuppliers = [];
   List<String> _availableCategories = [];
@@ -75,6 +77,15 @@ class _InvoicesPageState extends State<InvoicesPage> {
   bool _isLoadingFirstPage = true;
   bool _isLoadingMore = false;
   bool _hasMore = true;
+
+  bool get _hasActiveFilters =>
+      _hotelScope != _HotelScope.current ||
+      _supplierFilter != null ||
+      _categoryFilter != null ||
+      _amountSourceFilter != null ||
+      _paymentMethodFilter != null ||
+      _periodPreset != null ||
+      _isPostedFilter != null;
 
   @override
   void initState() {
@@ -168,6 +179,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
       supplierName: _supplierFilter,
       category: _categoryFilter,
       amountSource: _amountSourceFilter,
+      paymentMethod: _paymentMethodFilter,
+      isPosted: _isPostedFilter,
       searchQuery: _searchQuery,
     );
     final firstPage = await _invoiceRepo.getInvoicesPagedFiltered(
@@ -177,6 +190,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
       supplierName: _supplierFilter,
       category: _categoryFilter,
       amountSource: _amountSourceFilter,
+      paymentMethod: _paymentMethodFilter,
+      isPosted: _isPostedFilter,
       searchQuery: _searchQuery,
       sortKey: _sortKey,
       limit: _pageSize,
@@ -204,6 +219,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
       supplierName: _supplierFilter,
       category: _categoryFilter,
       amountSource: _amountSourceFilter,
+      paymentMethod: _paymentMethodFilter,
+      isPosted: _isPostedFilter,
       searchQuery: _searchQuery,
       sortKey: _sortKey,
       limit: _pageSize,
@@ -232,131 +249,12 @@ class _InvoicesPageState extends State<InvoicesPage> {
     });
   }
 
-  Future<void> _openHotelScopeSheet() async {
-    var scope = _hotelScope;
-    var custom = {..._customHotelIds};
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: AppSizes.md,
-                right: AppSizes.md,
-                top: AppSizes.md,
-                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + AppSizes.md,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("اختيار الفندق", style: AppTextStyles.title.copyWith(fontSize: 18)),
-                  const SizedBox(height: AppSizes.sm),
-                  RadioListTile<_HotelScope>(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text("هذا الفندق فقط (${widget.hotel.arabicName})"),
-                    value: _HotelScope.current,
-                    groupValue: scope,
-                    onChanged: (v) => setSheetState(() => scope = v!),
-                  ),
-                  RadioListTile<_HotelScope>(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("جميع الفنادق"),
-                    value: _HotelScope.all,
-                    groupValue: scope,
-                    onChanged: (v) => setSheetState(() => scope = v!),
-                  ),
-                  RadioListTile<_HotelScope>(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("تحديد عدة فنادق"),
-                    value: _HotelScope.custom,
-                    groupValue: scope,
-                    onChanged: (v) => setSheetState(() => scope = v!),
-                  ),
-                  if (scope == _HotelScope.custom)
-                    ..._hotels.map((h) => CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: Text(h.arabicName),
-                          value: custom.contains(h.id),
-                          onChanged: (checked) => setSheetState(() {
-                            if (checked == true) {
-                              custom.add(h.id!);
-                            } else {
-                              custom.remove(h.id!);
-                            }
-                          }),
-                        )),
-                  const SizedBox(height: AppSizes.md),
-                  SizedBox(
-                    width: double.infinity,
-                    height: AppSizes.buttonHeight,
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(sheetContext, true),
-                      child: const Text("تطبيق"),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    if (result != true) return;
-    setState(() {
-      _hotelScope = scope;
-      _customHotelIds = custom.isEmpty ? {widget.hotel.id!} : custom;
-    });
-    await _reloadFilterOptions();
-    await _reload();
-  }
-
-  Future<void> _pickCustomRange() async {
-    final range = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
-      initialDateRange: _customStart != null && _customEnd != null ? DateTimeRange(start: _customStart!, end: _customEnd!) : null,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(colorScheme: Theme.of(context).colorScheme.copyWith(primary: _identityColor)),
-          child: child!,
-        );
-      },
-    );
-    if (range == null) return;
-    setState(() {
-      _periodPreset = _PeriodPreset.custom;
-      _customStart = range.start;
-      _customEnd = range.end;
-    });
-    _reload();
-  }
-
-  void _selectPeriod(_PeriodPreset preset) {
-    setState(() {
-      if (_periodPreset == preset) {
-        _periodPreset = null;
-      } else {
-        _periodPreset = preset;
-      }
-    });
-    _reload();
-  }
-
-  String get _hotelScopeLabel {
-    switch (_hotelScope) {
-      case _HotelScope.current:
-        return widget.hotel.arabicName;
-      case _HotelScope.all:
-        return "جميع الفنادق";
-      case _HotelScope.custom:
-        return "${_customHotelIds.length} فنادق مختارة";
+  void _toggleSearch() {
+    setState(() => _isSearchVisible = !_isSearchVisible);
+    if (!_isSearchVisible && _searchQuery.isNotEmpty) {
+      _searchController.clear();
+      _searchQuery = '';
+      _reload();
     }
   }
 
@@ -386,52 +284,345 @@ class _InvoicesPageState extends State<InvoicesPage> {
     await _reload();
   }
 
-  PopupMenuItem<String> _sortMenuItem(String key, String label) {
-    final isSelected = _sortKey == key;
-    return PopupMenuItem(
-      value: key,
-      child: Row(
-        children: [
-          if (isSelected) Icon(Icons.check, size: 16, color: _identityColor) else const SizedBox(width: 16),
-          const SizedBox(width: 8),
-          Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : null)),
-        ],
-      ),
+  // ---------------- نافذة الفلاتر الموحَّدة ----------------
+
+  /// نافذة واحدة تجمع كل أبعاد التصفية/الفرز (البند 4) — نسخ محلية من كل
+  /// فلتر تُعدَّل داخل النافذة فقط، ولا تُطبَّق على الشاشة الفعلية إلا عند
+  /// الضغط على "تطبيق" (نفس نمط `reports_center_page.dart::_openFilterSheet`).
+  /// إضافة فلتر مستقبلي = قسم جديد هنا فقط، بلا أي تعديل على AppBar أو بقية
+  /// الشاشة.
+  Future<void> _openFiltersSheet() async {
+    var scope = _hotelScope;
+    var customHotels = {..._customHotelIds};
+    var supplier = _supplierFilter;
+    var category = _categoryFilter;
+    var amountSource = _amountSourceFilter;
+    var paymentMethod = _paymentMethodFilter;
+    var period = _periodPreset;
+    var customStart = _customStart;
+    var customEnd = _customEnd;
+    var isPosted = _isPostedFilter;
+    var sortKey = _sortKey;
+
+    final periods = <(_PeriodPreset, String)>[
+      (_PeriodPreset.today, "اليوم"),
+      (_PeriodPreset.thisWeek, "هذا الأسبوع"),
+      (_PeriodPreset.lastWeek, "الأسبوع الماضي"),
+      (_PeriodPreset.thisMonth, "هذا الشهر"),
+      (_PeriodPreset.lastMonth, "الشهر الماضي"),
+    ];
+    final sortOptions = <(String, String)>[
+      ('date_desc', "الأحدث أولاً"),
+      ('date_asc', "الأقدم أولاً"),
+      ('amount_desc', "المبلغ الأعلى"),
+      ('amount_asc', "المبلغ الأقل"),
+      ('invoice_number_desc', "رقم الفاتورة تنازلياً"),
+      ('invoice_number_asc', "رقم الفاتورة تصاعدياً"),
+    ];
+
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: AppSizes.md,
+                right: AppSizes.md,
+                top: AppSizes.md,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + AppSizes.md,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * 0.88),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: Text("الفلاتر", style: AppTextStyles.title.copyWith(fontSize: 18))),
+                        TextButton(
+                          onPressed: () => setSheetState(() {
+                            scope = _HotelScope.current;
+                            customHotels = {widget.hotel.id!};
+                            supplier = null;
+                            category = null;
+                            amountSource = null;
+                            paymentMethod = null;
+                            period = null;
+                            customStart = null;
+                            customEnd = null;
+                            isPosted = null;
+                            sortKey = 'date_desc';
+                          }),
+                          child: const Text("إعادة تعيين"),
+                        ),
+                      ],
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _filterSectionTitle("الفندق"),
+                            RadioListTile<_HotelScope>(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text("هذا الفندق فقط (${widget.hotel.arabicName})", style: const TextStyle(fontSize: 13)),
+                              value: _HotelScope.current,
+                              groupValue: scope,
+                              onChanged: (v) => setSheetState(() => scope = v!),
+                            ),
+                            RadioListTile<_HotelScope>(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text("جميع الفنادق", style: TextStyle(fontSize: 13)),
+                              value: _HotelScope.all,
+                              groupValue: scope,
+                              onChanged: (v) => setSheetState(() => scope = v!),
+                            ),
+                            RadioListTile<_HotelScope>(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text("تحديد عدة فنادق", style: TextStyle(fontSize: 13)),
+                              value: _HotelScope.custom,
+                              groupValue: scope,
+                              onChanged: (v) => setSheetState(() => scope = v!),
+                            ),
+                            if (scope == _HotelScope.custom)
+                              ..._hotels.map((h) => CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    dense: true,
+                                    title: Text(h.arabicName, style: const TextStyle(fontSize: 13)),
+                                    value: customHotels.contains(h.id),
+                                    onChanged: (checked) => setSheetState(() {
+                                      if (checked == true) {
+                                        customHotels.add(h.id!);
+                                      } else {
+                                        customHotels.remove(h.id!);
+                                      }
+                                    }),
+                                  )),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("المورد"),
+                            const SizedBox(height: AppSizes.xs),
+                            _buildChipPicker(
+                              sheetContext: sheetContext,
+                              label: "المورد",
+                              value: supplier,
+                              options: _availableSuppliers,
+                              onChanged: (v) => setSheetState(() => supplier = v),
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("تصنيف المصروف"),
+                            const SizedBox(height: AppSizes.xs),
+                            _buildChipPicker(
+                              sheetContext: sheetContext,
+                              label: "تصنيف المصروف",
+                              value: category,
+                              options: _availableCategories,
+                              includeUnclassified: true,
+                              onChanged: (v) => setSheetState(() => category = v),
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(sheetContext);
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => ManageCategoriesPage(hotel: widget.hotel)));
+                                },
+                                icon: const Icon(Icons.settings_outlined, size: 16),
+                                label: const Text("إدارة تصنيفات المصروفات", style: TextStyle(fontSize: 12)),
+                              ),
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("مصدر التمويل"),
+                            const SizedBox(height: AppSizes.sm),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: kInvoiceFundingSources.map((option) {
+                                final isSelected = amountSource == option.label;
+                                return ChoiceChip(
+                                  label: Text(option.label, style: const TextStyle(fontSize: 12)),
+                                  avatar: Icon(option.icon, size: 16, color: isSelected ? Colors.white : option.color),
+                                  selected: isSelected,
+                                  selectedColor: option.color,
+                                  labelStyle: TextStyle(color: isSelected ? Colors.white : null, fontWeight: isSelected ? FontWeight.bold : null),
+                                  onSelected: (_) => setSheetState(() => amountSource = isSelected ? null : option.label),
+                                );
+                              }).toList(),
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("نوع العملية"),
+                            const SizedBox(height: AppSizes.sm),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: kInvoicePaymentMethods.map((method) {
+                                final isSelected = paymentMethod == method;
+                                return ChoiceChip(
+                                  label: Text(method, style: const TextStyle(fontSize: 12)),
+                                  selected: isSelected,
+                                  onSelected: (_) => setSheetState(() => paymentMethod = isSelected ? null : method),
+                                );
+                              }).toList(),
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("الفترة"),
+                            const SizedBox(height: AppSizes.sm),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ...periods.map((p) => ChoiceChip(
+                                      label: Text(p.$2, style: const TextStyle(fontSize: 12)),
+                                      selected: period == p.$1,
+                                      onSelected: (_) => setSheetState(() => period = period == p.$1 ? null : p.$1),
+                                    )),
+                                ChoiceChip(
+                                  label: Text(
+                                    customStart != null && period == _PeriodPreset.custom
+                                        ? "${DateFormat('yyyy-MM-dd').format(customStart!)} → ${DateFormat('yyyy-MM-dd').format(customEnd!)}"
+                                        : "فترة مخصصة",
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  selected: period == _PeriodPreset.custom,
+                                  onSelected: (_) async {
+                                    final range = await showDateRangePicker(
+                                      context: sheetContext,
+                                      firstDate: DateTime(2020),
+                                      lastDate: DateTime(2035),
+                                      initialDateRange: customStart != null && customEnd != null ? DateTimeRange(start: customStart!, end: customEnd!) : null,
+                                    );
+                                    if (range == null) return;
+                                    setSheetState(() {
+                                      period = _PeriodPreset.custom;
+                                      customStart = range.start;
+                                      customEnd = range.end;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("الحالة"),
+                            const SizedBox(height: AppSizes.sm),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(label: const Text("الكل", style: TextStyle(fontSize: 12)), selected: isPosted == null, onSelected: (_) => setSheetState(() => isPosted = null)),
+                                ChoiceChip(label: const Text("مرحّلة", style: TextStyle(fontSize: 12)), selected: isPosted == true, onSelected: (_) => setSheetState(() => isPosted = true)),
+                                ChoiceChip(label: const Text("غير مرحّلة", style: TextStyle(fontSize: 12)), selected: isPosted == false, onSelected: (_) => setSheetState(() => isPosted = false)),
+                              ],
+                            ),
+                            const Divider(height: AppSizes.lg),
+                            _filterSectionTitle("الترتيب"),
+                            const SizedBox(height: AppSizes.sm),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: sortOptions.map((s) => ChoiceChip(
+                                    label: Text(s.$2, style: const TextStyle(fontSize: 12)),
+                                    selected: sortKey == s.$1,
+                                    onSelected: (_) => setSheetState(() => sortKey = s.$1),
+                                  )).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSizes.md),
+                    SizedBox(
+                      width: double.infinity,
+                      height: AppSizes.buttonHeight,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(sheetContext, true),
+                        child: const Text("تطبيق"),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
+
+    if (applied != true) return;
+    setState(() {
+      _hotelScope = scope;
+      _customHotelIds = customHotels.isEmpty ? {widget.hotel.id!} : customHotels;
+      _supplierFilter = supplier;
+      _categoryFilter = category;
+      _amountSourceFilter = amountSource;
+      _paymentMethodFilter = paymentMethod;
+      _periodPreset = period;
+      _customStart = customStart;
+      _customEnd = customEnd;
+      _isPostedFilter = isPosted;
+      _sortKey = sortKey;
+    });
+    await _reloadFilterOptions();
+    await _reload();
   }
 
-  void _openSettingsSheet() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSizes.md),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("إعدادات الفواتير الضريبية", style: AppTextStyles.title.copyWith(fontSize: 18)),
-              const SizedBox(height: AppSizes.sm),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.category_outlined, color: _identityColor),
-                title: const Text("إدارة تصنيفات المصروفات"),
-                subtitle: const Text("قاعدة تصنيفات موحدة تُستخدم في كل الفنادق"),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => ManageCategoriesPage(hotel: widget.hotel)));
-                },
-              ),
-              const SizedBox(height: AppSizes.sm),
-              const Text(
-                "بقية إعدادات هذا القسم (ترقيم الفواتير، ربط الموردين) ستتوفر في مرحلة قادمة.",
-                style: AppTextStyles.caption,
-              ),
-            ],
-          ),
-        ),
+  Widget _filterSectionTitle(String title) => Text(title, style: AppTextStyles.bodyBold.copyWith(fontSize: 13));
+
+  /// منتقي قيمة واحدة من قائمة قد تطول (المورد/تصنيف المصروف) — رقاقة تفتح
+  /// نافذة سفلية متداخلة فوق نافذة الفلاتر نفسها (Flutter يدعم ذلك بأمان)،
+  /// وتُحدِّث حالة نافذة الفلاتر المحلية عبر [onChanged] فقط (لا تُطبَّق على
+  /// الشاشة الفعلية إلا بالضغط على "تطبيق" في النافذة الخارجية).
+  Widget _buildChipPicker({
+    required BuildContext sheetContext,
+    required String label,
+    required String? value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+    bool includeUnclassified = false,
+  }) {
+    final hasValue = value != null;
+    return InputChip(
+      label: Text(
+        hasValue ? (value == kUnclassifiedInvoiceCategory ? "غير مصنَّف" : value) : "الكل",
+        style: const TextStyle(fontSize: 12),
       ),
+      selected: hasValue,
+      onPressed: () async {
+        final chosen = await showModalBottomSheet<String?>(
+          context: sheetContext,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+          builder: (innerContext) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                ListTile(title: Text(label, style: AppTextStyles.bodyBold)),
+                ListTile(
+                  title: const Text("الكل"),
+                  trailing: value == null ? const Icon(Icons.check) : null,
+                  onTap: () => Navigator.pop(innerContext, ''),
+                ),
+                if (includeUnclassified)
+                  ListTile(
+                    title: const Text("غير مصنَّف"),
+                    trailing: value == kUnclassifiedInvoiceCategory ? const Icon(Icons.check) : null,
+                    onTap: () => Navigator.pop(innerContext, kUnclassifiedInvoiceCategory),
+                  ),
+                ...options.map((o) => ListTile(
+                      title: Text(o),
+                      trailing: value == o ? const Icon(Icons.check) : null,
+                      onTap: () => Navigator.pop(innerContext, o),
+                    )),
+              ],
+            ),
+          ),
+        );
+        if (chosen == null) return;
+        onChanged(chosen.isEmpty ? null : chosen);
+      },
+      onDeleted: hasValue ? () => onChanged(null) : null,
+      deleteIcon: hasValue ? const Icon(Icons.close, size: 16) : null,
     );
   }
 
@@ -440,48 +631,51 @@ class _InvoicesPageState extends State<InvoicesPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: "الفواتير الضريبية", hotel: widget.hotel),
-        centerTitle: true,
+        title: _isSearchVisible
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                cursorColor: Colors.white,
+                decoration: const InputDecoration(
+                  hintText: "رقم الفاتورة، المورد، أو الرقم الضريبي...",
+                  hintStyle: TextStyle(color: Colors.white70, fontSize: 13),
+                  border: InputBorder.none,
+                ),
+                onChanged: _onSearchChanged,
+              )
+            : const Text("الفواتير الضريبية", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        centerTitle: !_isSearchVisible,
         backgroundColor: _identityColor,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.sort),
-            tooltip: "الفرز والترتيب",
-            onSelected: (key) {
-              setState(() => _sortKey = key);
-              _reload();
-            },
-            itemBuilder: (context) => [
-              _sortMenuItem('date_desc', "التاريخ (الأحدث أولاً)"),
-              _sortMenuItem('date_asc', "التاريخ (الأقدم أولاً)"),
-              _sortMenuItem('amount_desc', "المبلغ (الأعلى أولاً)"),
-              _sortMenuItem('amount_asc', "المبلغ (الأقل أولاً)"),
-              _sortMenuItem('invoice_number_desc', "رقم الفاتورة (تنازلي)"),
-              _sortMenuItem('invoice_number_asc', "رقم الفاتورة (تصاعدي)"),
-            ],
-          ),
           IconButton(
-            icon: const Icon(Icons.bar_chart_outlined),
-            tooltip: "التقارير",
-            onPressed: _openReportsPage,
+            icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
+            tooltip: _isSearchVisible ? "إغلاق البحث" : "بحث",
+            onPressed: _toggleSearch,
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: "الإعدادات",
-            onPressed: _openSettingsSheet,
-          ),
+          if (!_isSearchVisible) ...[
+            IconButton(
+              icon: Badge(isLabelVisible: _hasActiveFilters, smallSize: 8, child: const Icon(Icons.tune)),
+              tooltip: "الفلاتر",
+              onPressed: _openFiltersSheet,
+            ),
+            IconButton(
+              icon: const Icon(Icons.ios_share),
+              tooltip: "تصدير التقرير",
+              onPressed: _openReportsPage,
+            ),
+          ],
         ],
       ),
       drawer: AppDrawer(hotel: widget.hotel),
-      // زر "مسح الباركود" بجانب زر "إضافة فاتورة" مباشرة (بدل أيقونة مطمورة
-      // ضمن actions شريط العنوان) — تسمية كاملة ظاهرة لكليهما كما طُلب.
-      // Wrap بدل Row عمداً: على الشاشات الضيقة جداً حيث لا يتسع الزران معاً
-      // بعرض واحد، ينتقل الثاني لسطر جديد تلقائياً بدل حدوث RIGHT OVERFLOWED.
-      // ConstrainedBox صريح بعرض الشاشة لأن فتحة floatingActionButton داخل
-      // Scaffold لا تضمن قيداً أقصى محدداً للعرض تلقائياً (Wrap يحتاج قيداً
-      // محدوداً ليقرر متى ينتقل لسطر جديد).
+      // زر "مسح الباركود" بجانب زر "إضافة فاتورة" مباشرة — تسمية كاملة ظاهرة
+      // لكليهما. Wrap بدل Row عمداً: على الشاشات الضيقة جداً حيث لا يتسع
+      // الزران معاً بعرض واحد، ينتقل الثاني لسطر جديد تلقائياً بدل حدوث
+      // RIGHT OVERFLOWED. ConstrainedBox صريح بعرض الشاشة لأن فتحة
+      // floatingActionButton داخل Scaffold لا تضمن قيداً أقصى محدداً للعرض
+      // تلقائياً (Wrap يحتاج قيداً محدوداً ليقرر متى ينتقل لسطر جديد).
       floatingActionButton: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 32),
         child: Wrap(
@@ -525,14 +719,12 @@ class _InvoicesPageState extends State<InvoicesPage> {
                 controller: _scrollController,
                 slivers: [
                   SliverToBoxAdapter(child: _buildSummarySection()),
-                  SliverToBoxAdapter(child: _buildControlsSection()),
-                  SliverToBoxAdapter(child: _buildSearchAndFilters()),
                   _isLoadingFirstPage
                       ? const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
                       : _invoices.isEmpty
                           ? SliverFillRemaining(child: _buildEmptyState())
                           : SliverPadding(
-                              padding: const EdgeInsets.fromLTRB(AppSizes.md, 0, AppSizes.md, 96),
+                              padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, 96),
                               sliver: SliverList(
                                 delegate: SliverChildBuilderDelegate(
                                   (context, index) {
@@ -568,7 +760,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
             const SizedBox(height: AppSizes.md),
             const Text("لا توجد فواتير مطابقة", style: AppTextStyles.bodyBold),
             const SizedBox(height: AppSizes.xs),
-            const Text("جرّب تغيير الفترة أو الفلاتر، أو أضِف أول فاتورة", style: AppTextStyles.caption, textAlign: TextAlign.center),
+            const Text("جرّب تغيير الفلاتر، أو أضِف أول فاتورة", style: AppTextStyles.caption, textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -628,193 +820,12 @@ class _InvoicesPageState extends State<InvoicesPage> {
     );
   }
 
-  // ---------------- أدوات التحكم (الفندق + الفترة) ----------------
-
-  Widget _buildControlsSection() {
-    final periods = <(_PeriodPreset, String)>[
-      (_PeriodPreset.today, "اليوم"),
-      (_PeriodPreset.thisWeek, "الأسبوع الحالي"),
-      (_PeriodPreset.lastWeek, "الأسبوع الماضي"),
-      (_PeriodPreset.thisMonth, "هذا الشهر"),
-      (_PeriodPreset.lastMonth, "الشهر الماضي"),
-    ];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            onTap: _openHotelScopeSheet,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.sm),
-              decoration: BoxDecoration(
-                color: _identityColor.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: _identityColor.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.apartment, color: _identityColor, size: 18),
-                  const SizedBox(width: AppSizes.sm),
-                  Expanded(child: Text(_hotelScopeLabel, style: AppTextStyles.bodyBold.copyWith(fontSize: 13))),
-                  Icon(Icons.expand_more, color: _identityColor),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSizes.sm),
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: periods.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
-              itemBuilder: (context, index) {
-                if (index == periods.length) {
-                  return ChoiceChip(
-                    label: const Text("فترة مخصصة"),
-                    selected: _periodPreset == _PeriodPreset.custom,
-                    onSelected: (_) => _pickCustomRange(),
-                  );
-                }
-                final (preset, label) = periods[index];
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: _periodPreset == preset,
-                  onSelected: (_) => _selectPeriod(preset),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------- البحث والفلاتر ----------------
-
-  Widget _buildSearchAndFilters() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SearchBar(
-            controller: _searchController,
-            hintText: "بحث برقم الفاتورة أو اسم الشركة...",
-            leading: const Icon(Icons.search),
-            trailing: _searchController.text.isEmpty
-                ? null
-                : [
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        _searchController.clear();
-                        _onSearchChanged('');
-                      },
-                    ),
-                  ],
-            onChanged: _onSearchChanged,
-          ),
-          const SizedBox(height: AppSizes.sm),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              _buildFilterDropdown(
-                label: "المورد",
-                value: _supplierFilter,
-                options: _availableSuppliers,
-                onChanged: (v) {
-                  setState(() => _supplierFilter = v);
-                  _reload();
-                },
-              ),
-              _buildFilterDropdown(
-                label: "تصنيف المصروف",
-                value: _categoryFilter,
-                options: _availableCategories,
-                includeUnclassified: true,
-                onChanged: (v) {
-                  setState(() => _categoryFilter = v);
-                  _reload();
-                },
-              ),
-              _buildFilterDropdown(
-                label: "مصدر التمويل",
-                value: _amountSourceFilter,
-                options: _availableAmountSources,
-                onChanged: (v) {
-                  setState(() => _amountSourceFilter = v);
-                  _reload();
-                },
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterDropdown({
-    required String label,
-    required String? value,
-    required List<String> options,
-    required ValueChanged<String?> onChanged,
-    bool includeUnclassified = false,
-  }) {
-    final hasValue = value != null;
-    return InputChip(
-      label: Text(
-        hasValue ? (value == kUnclassifiedInvoiceCategory ? "غير مصنَّف" : value) : label,
-        style: const TextStyle(fontSize: 12),
-      ),
-      selected: hasValue,
-      onPressed: () async {
-        final chosen = await showModalBottomSheet<String?>(
-          context: context,
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
-          builder: (sheetContext) => SafeArea(
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                ListTile(title: Text(label, style: AppTextStyles.bodyBold)),
-                ListTile(
-                  title: const Text("الكل"),
-                  trailing: value == null ? const Icon(Icons.check) : null,
-                  onTap: () => Navigator.pop(sheetContext, ''),
-                ),
-                if (includeUnclassified)
-                  ListTile(
-                    title: const Text("غير مصنَّف"),
-                    trailing: value == kUnclassifiedInvoiceCategory ? const Icon(Icons.check) : null,
-                    onTap: () => Navigator.pop(sheetContext, kUnclassifiedInvoiceCategory),
-                  ),
-                ...options.map((o) => ListTile(
-                      title: Text(o),
-                      trailing: value == o ? const Icon(Icons.check) : null,
-                      onTap: () => Navigator.pop(sheetContext, o),
-                    )),
-              ],
-            ),
-          ),
-        );
-        if (chosen == null) return;
-        onChanged(chosen.isEmpty ? null : chosen);
-      },
-      onDeleted: hasValue ? () => onChanged(null) : null,
-      deleteIcon: hasValue ? const Icon(Icons.close, size: 16) : null,
-    );
-  }
-
   // ---------------- قائمة الفواتير ----------------
 
-  /// بطاقة فاتورة واحدة — Row/Column يدويان بدل ListTile(isThreeLine:) عمداً:
-  /// isThreeLine كان يفرض ارتفاعاً ثابتاً مبنياً على افتراض داخلي في Flutter
-  /// لا يطابق دائماً الارتفاع الفعلي لنص فرعي بثلاثة أسطر بخط caption لهذا
-  /// التطبيق، فيسبب "BOTTOM OVERFLOWED" ثابتاً. البنية هنا بلا أي قيد
-  /// ارتفاع مطلقاً — تتمدد بحرية كاملة داخل ListView/Sliver المُحيط.
+  /// بطاقة فاتورة مبسَّطة — اسم المورد والمبلغ فقط (البند 5)؛ بقية الحقول
+  /// (التاريخ/التصنيف/مصدر التمويل/الفندق/رقم الفاتورة) تظهر في
+  /// InvoiceDetailsPage بعد الفتح. Row بسيط بلا أي قيد ارتفاع (نفس منهجية
+  /// إصلاح BOTTOM OVERFLOWED السابقة لهذه الشاشة تحديداً).
   Widget _buildInvoiceRow(Invoice invoice) {
     return Container(
       decoration: BoxDecoration(
@@ -834,9 +845,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
             }
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.sm),
+            padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.md),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 CircleAvatar(
                   backgroundColor: _identityColor.withOpacity(0.1),
@@ -844,54 +854,14 @@ class _InvoicesPageState extends State<InvoicesPage> {
                 ),
                 const SizedBox(width: AppSizes.sm),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(invoice.companyName, style: AppTextStyles.bodyBold.copyWith(fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 2),
-                      Text(
-                        "#${invoice.invoiceNumber} · ${invoice.date} · ${invoice.expenseCategory ?? 'غير مصنَّف'} · ${invoice.amountSource}",
-                        style: AppTextStyles.caption,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(invoice.facilityName, style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ],
-                  ),
+                  child: Text(invoice.companyName, style: AppTextStyles.bodyBold.copyWith(fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
                 const SizedBox(width: AppSizes.sm),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
-                      style: AppTextStyles.bodyBold.copyWith(color: _identityColor, fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    PopupMenuButton<String>(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.more_vert, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      onSelected: (value) {
-                        if (value == 'supplier_report') {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => SupplierReportPage(hotel: widget.hotel, companyName: invoice.companyName)),
-                          );
-                        } else if (value == 'supplier_statement') {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => SupplierStatementPage(hotel: widget.hotel, companyName: invoice.companyName)),
-                          );
-                        }
-                      },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(value: 'supplier_statement', child: Text("كشف حساب المورد")),
-                        PopupMenuItem(value: 'supplier_report', child: Text("تقرير هذا المورد")),
-                      ],
-                    ),
-                  ],
+                Text(
+                  "${NumberFormat("#,##0.00").format(invoice.totalAmount)} ريال",
+                  style: AppTextStyles.bodyBold.copyWith(color: _identityColor, fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

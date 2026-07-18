@@ -1100,6 +1100,12 @@ class DatabaseService {
   /// يبني شرط WHERE مشتركاً لمركز الفواتير الضريبية (يدعم فندقاً واحداً/عدة
   /// فنادق/كل الفنادق معاً) — يُستخدم من استعلامي الملخص والقائمة المُرقّمة معاً
   /// حتى تبقى نفس الفلاتر متطابقة دائماً بين البطاقات والقائمة الظاهرة تحتها.
+  /// اسم مصدر التمويل "شراء آجل (مورد)" الحرفي (نفس القيمة المستخدَمة في
+  /// kInvoiceFundingSources بـadd_invoice_page.dart) — الفاتورة الوحيدة غير
+  /// المدفوعة وقت الإدخال؛ يُستخدم لتفسير فلتر "مرحّلة/غير مرحّلة" (راجع
+  /// isPosted أدناه) بلا أي عمود جديد في قاعدة البيانات.
+  static const String _deferredPurchaseSource = 'شراء آجل (مورد)';
+
   (String, List<Object?>) _buildInvoiceWhere({
     List<int>? hotelIds,
     String? startDate,
@@ -1107,6 +1113,8 @@ class DatabaseService {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
     String? searchQuery,
   }) {
     final where = <String>[];
@@ -1123,8 +1131,14 @@ class DatabaseService {
       if (category != _unclassifiedCategory) args.add(category);
     }
     if (amountSource != null && amountSource.isNotEmpty) { where.add('amount_source = ?'); args.add(amountSource); }
+    if (paymentMethod != null && paymentMethod.isNotEmpty) { where.add('payment_method = ?'); args.add(paymentMethod); }
+    if (isPosted != null) {
+      where.add(isPosted ? 'amount_source != ?' : 'amount_source = ?');
+      args.add(_deferredPurchaseSource);
+    }
     if (searchQuery != null && searchQuery.isNotEmpty) {
-      where.add('(invoice_number LIKE ? OR company_name LIKE ?)');
+      where.add('(invoice_number LIKE ? OR company_name LIKE ? OR tax_number LIKE ?)');
+      args.add('%$searchQuery%');
       args.add('%$searchQuery%');
       args.add('%$searchQuery%');
     }
@@ -1152,13 +1166,15 @@ class DatabaseService {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
     String? searchQuery,
     String sortKey = 'date_desc',
     required int limit,
     required int offset,
   }) async {
     final db = await database;
-    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, searchQuery: searchQuery);
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, paymentMethod: paymentMethod, isPosted: isPosted, searchQuery: searchQuery);
     final orderBy = _invoiceSortOptions[sortKey] ?? _invoiceSortOptions['date_desc']!;
     return await db.rawQuery('SELECT * FROM invoices $whereClause ORDER BY $orderBy LIMIT ? OFFSET ?', [...args, limit, offset]);
   }
@@ -1170,10 +1186,12 @@ class DatabaseService {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
     String? searchQuery,
   }) async {
     final db = await database;
-    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, searchQuery: searchQuery);
+    final (whereClause, args) = _buildInvoiceWhere(hotelIds: hotelIds, startDate: startDate, endDate: endDate, supplierName: supplierName, category: category, amountSource: amountSource, paymentMethod: paymentMethod, isPosted: isPosted, searchQuery: searchQuery);
     final totals = await db.rawQuery(
       'SELECT COUNT(*) as invoice_count, COALESCE(SUM(total_amount),0) as total_amount, COALESCE(SUM(vat),0) as total_vat, COALESCE(SUM(amount_before_tax),0) as total_before_tax, COUNT(DISTINCT company_name) as supplier_count FROM invoices $whereClause',
       args,

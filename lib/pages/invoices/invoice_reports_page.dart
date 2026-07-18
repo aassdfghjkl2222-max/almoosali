@@ -9,6 +9,7 @@ import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../services/excel_service.dart';
+import '../../services/pdf_service.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 
@@ -45,6 +46,7 @@ class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
 
   bool _isLoading = false;
   bool _isExporting = false;
+  bool _isExportingPdf = false;
   InvoicesSummary? _summary;
   List<Invoice>? _reportInvoices;
 
@@ -151,6 +153,22 @@ class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
       );
     } finally {
       if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _exportPdf() async {
+    if (_reportInvoices == null) return;
+    setState(() => _isExportingPdf = true);
+    final (start, end) = _dateRange;
+    try {
+      await PdfService.shareInvoicesListPdf(
+        invoices: _reportInvoices!,
+        scopeLabel: _allHotels ? "جميع الفنادق" : widget.hotel.arabicName,
+        fromDate: start != null ? DateTime.tryParse(start) : null,
+        toDate: end != null ? DateTime.tryParse(end) : null,
+      );
+    } finally {
+      if (mounted) setState(() => _isExportingPdf = false);
     }
   }
 
@@ -330,16 +348,34 @@ class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
           _resultRow("إجمالي الضريبة", "${fmt.format(summary.totalVat)} ريال"),
           _resultRow("الإجمالي شامل الضريبة", "${fmt.format(summary.totalAmount)} ريال", isBold: true),
           const SizedBox(height: AppSizes.md),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              onPressed: summary.invoiceCount == 0 || _isExporting ? null : _export,
-              icon: _isExporting
-                  ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _identityColor))
-                  : const Icon(Icons.file_download_outlined),
-              label: const Text("تصدير Excel"),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: summary.invoiceCount == 0 || _isExporting ? null : _export,
+                    icon: _isExporting
+                        ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _identityColor))
+                        : const Icon(Icons.file_download_outlined),
+                    label: const Text("تصدير Excel"),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSizes.sm),
+              Expanded(
+                child: SizedBox(
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: summary.invoiceCount == 0 || _isExportingPdf ? null : _exportPdf,
+                    icon: _isExportingPdf
+                        ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _identityColor))
+                        : const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text("تصدير PDF"),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

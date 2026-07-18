@@ -21,6 +21,8 @@ import '../../widgets/common/hotel_identity_title.dart';
 import '../../core/hotel_visual_identity.dart';
 import 'add_invoice_page.dart';
 import 'invoice_audit_log_page.dart';
+import 'supplier_report_page.dart';
+import 'supplier_statement_page.dart';
 
 class InvoiceDetailsPage extends StatefulWidget {
   final Hotel hotel;
@@ -231,22 +233,6 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            onPressed: _currentInvoice.id == null
-                ? null
-                : () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => InvoiceAuditLogPage(
-                          hotel: widget.hotel,
-                          invoiceId: _currentInvoice.id!,
-                          invoiceLabel: "فاتورة رقم ${_currentInvoice.invoiceNumber} — ${_currentInvoice.companyName}",
-                        ),
-                      ),
-                    ),
-            icon: const Icon(Icons.history, color: Colors.white),
-            tooltip: "سجل التعديلات",
-          ),
-          IconButton(
             onPressed: _editInvoice,
             icon: const Icon(Icons.edit, color: Colors.white),
             tooltip: "تعديل",
@@ -255,6 +241,38 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
             onPressed: _confirmDelete,
             icon: const Icon(Icons.delete, color: Colors.white),
             tooltip: "حذف",
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) {
+              if (value == 'audit_log' && _currentInvoice.id != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InvoiceAuditLogPage(
+                      hotel: widget.hotel,
+                      invoiceId: _currentInvoice.id!,
+                      invoiceLabel: "فاتورة رقم ${_currentInvoice.invoiceNumber} — ${_currentInvoice.companyName}",
+                    ),
+                  ),
+                );
+              } else if (value == 'supplier_statement') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SupplierStatementPage(hotel: widget.hotel, companyName: _currentInvoice.companyName)),
+                );
+              } else if (value == 'supplier_report') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SupplierReportPage(hotel: widget.hotel, companyName: _currentInvoice.companyName)),
+                );
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'audit_log', child: Row(children: [Icon(Icons.history, size: 18), SizedBox(width: 8), Text("سجل التعديلات")])),
+              PopupMenuItem(value: 'supplier_statement', child: Row(children: [Icon(Icons.receipt_long_outlined, size: 18), SizedBox(width: 8), Text("كشف حساب المورد")])),
+              PopupMenuItem(value: 'supplier_report', child: Row(children: [Icon(Icons.summarize_outlined, size: 18), SizedBox(width: 8), Text("تقرير هذا المورد")])),
+            ],
           ),
         ],
       ),

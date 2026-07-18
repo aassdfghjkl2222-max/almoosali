@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/daily_report_template.dart';
 import '../models/financial_report.dart';
+import '../models/invoice.dart';
 import '../models/settlement.dart';
 import '../models/settlement_account.dart';
 
@@ -215,6 +216,107 @@ class PdfService {
     String filtersSummary = '',
   }) async {
     final pdf = await _buildReportsListPdf(reports: reports, hotelNames: hotelNames, filtersSummary: filtersSummary);
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+  }
+
+  /// تصدير قائمة فواتير ضريبية مفلترة (شاشة "تقارير الفواتير الضريبية") —
+  /// نفس نمط [_buildReportsListPdf] تماماً (خطوط Cairo عربية + جدول RTL +
+  /// صناديق إجماليات)، لأغراض PDF فقط — تصدير Excel المكافئ موجود أصلاً في
+  /// ExcelService.exportInvoicesDetailedReport.
+  static Future<pw.Document> _buildInvoicesListPdf({
+    required List<Invoice> invoices,
+    required String scopeLabel,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.cairoMedium();
+    final boldFont = await PdfGoogleFonts.cairoBold();
+    final currency = NumberFormat("#,##0.##");
+
+    double totalBeforeTax = 0, totalVat = 0, totalAmount = 0;
+    for (final inv in invoices) {
+      totalBeforeTax += inv.amountBeforeTax;
+      totalVat += inv.vat;
+      totalAmount += inv.totalAmount;
+    }
+
+    final dateFmt = DateFormat('yyyy-MM-dd');
+    final periodLabel = fromDate != null && toDate != null ? "${dateFmt.format(fromDate)} → ${dateFmt.format(toDate)}" : "كل الفترات";
+
+    pdf.addPage(
+      pw.MultiPage(
+        textDirection: pw.TextDirection.rtl,
+        theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text("تقرير الفواتير الضريبية", style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                pw.Text(DateTime.now().toString().split(' ')[0], style: const pw.TextStyle(fontSize: 12)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Text("النطاق: $scopeLabel — الفترة: $periodLabel", style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+          pw.SizedBox(height: 16),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              _summaryBox("عدد الفواتير", "${invoices.length}"),
+              _summaryBox("قبل الضريبة", "${currency.format(totalBeforeTax)} ر.س"),
+              _summaryBox("الضريبة", "${currency.format(totalVat)} ر.س"),
+              _summaryBox("الإجمالي", "${currency.format(totalAmount)} ر.س"),
+            ],
+          ),
+          pw.SizedBox(height: 16),
+          pw.TableHelper.fromTextArray(
+            headers: ["رقم الفاتورة", "التاريخ", "المورد", "الرقم الضريبي", "قبل الضريبة", "الضريبة", "الإجمالي", "التصنيف", "مصدر التمويل"],
+            data: invoices.map((inv) => [
+              inv.invoiceNumber,
+              inv.date,
+              inv.companyName,
+              inv.taxNumber,
+              currency.format(inv.amountBeforeTax),
+              currency.format(inv.vat),
+              currency.format(inv.totalAmount),
+              inv.expenseCategory ?? 'غير مصنَّف',
+              inv.amountSource,
+            ]).toList(),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, font: boldFont, fontSize: 9),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey),
+            cellStyle: const pw.TextStyle(fontSize: 8),
+            cellAlignment: pw.Alignment.center,
+          ),
+        ],
+      ),
+    );
+    return pdf;
+  }
+
+  static Future<void> shareInvoicesListPdf({
+    required List<Invoice> invoices,
+    required String scopeLabel,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    final pdf = await _buildInvoicesListPdf(invoices: invoices, scopeLabel: scopeLabel, fromDate: fromDate, toDate: toDate);
+    final bytes = await pdf.save();
+    final directory = await getTemporaryDirectory();
+    final file = File("${directory.path}/تقرير_الفواتير_الضريبية_${DateTime.now().millisecondsSinceEpoch}.pdf");
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: "تقرير الفواتير الضريبية (${invoices.length} فاتورة)");
+  }
+
+  static Future<void> printInvoicesListPdf({
+    required List<Invoice> invoices,
+    required String scopeLabel,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    final pdf = await _buildInvoicesListPdf(invoices: invoices, scopeLabel: scopeLabel, fromDate: fromDate, toDate: toDate);
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
   }
 

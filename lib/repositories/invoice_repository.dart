@@ -106,6 +106,8 @@ class InvoiceRepository {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
     String? searchQuery,
     String sortKey = 'date_desc',
     required int limit,
@@ -118,6 +120,8 @@ class InvoiceRepository {
       supplierName: supplierName,
       category: category,
       amountSource: amountSource,
+      paymentMethod: paymentMethod,
+      isPosted: isPosted,
       searchQuery: searchQuery,
       sortKey: sortKey,
       limit: limit,
@@ -133,6 +137,8 @@ class InvoiceRepository {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
     String? searchQuery,
   }) async {
     final map = await _dbService.getInvoicesSummary(
@@ -142,6 +148,8 @@ class InvoiceRepository {
       supplierName: supplierName,
       category: category,
       amountSource: amountSource,
+      paymentMethod: paymentMethod,
+      isPosted: isPosted,
       searchQuery: searchQuery,
     );
     return InvoicesSummary.fromMap(map);
@@ -169,6 +177,8 @@ class InvoiceRepository {
     String? supplierName,
     String? category,
     String? amountSource,
+    String? paymentMethod,
+    bool? isPosted,
   }) async {
     final data = await _dbService.getInvoicesPagedFiltered(
       hotelIds: hotelIds,
@@ -177,6 +187,8 @@ class InvoiceRepository {
       supplierName: supplierName,
       category: category,
       amountSource: amountSource,
+      paymentMethod: paymentMethod,
+      isPosted: isPosted,
       sortKey: 'date_desc',
       limit: 100000,
       offset: 0,
