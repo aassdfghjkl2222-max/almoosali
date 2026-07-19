@@ -6,6 +6,7 @@ import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/expense_category.dart';
+import '../../models/extracted_invoice_data.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../models/invoice_audit_log_entry.dart';
@@ -14,21 +15,20 @@ import '../../repositories/expense_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../repositories/supplier_repository.dart';
-import '../../services/zatca_qr_parser.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import 'add_invoice_page.dart';
 
-/// شاشة مراجعة سريعة بعد نجاح مسح رمز QR — بديل فتح AddInvoicePage الكاملة
-/// مباشرة (لا يزال متاحاً عبر زر "تعديل"). تعرض فقط البيانات المستخرَجة
-/// للقراءة + اختيار مصدر التمويل والتصنيف (يُختار تلقائياً للموردين
-/// المعروفين)، وزر تأكيد واحد يحفظ فوراً بلا أي حوار تأكيد إضافي — الشاشة
-/// نفسها هي التأكيد.
+/// شاشة مراجعة سريعة بعد نجاح القراءة (QR أو ذكاء اصطناعي أو OCR محلي) —
+/// بديل فتح AddInvoicePage الكاملة مباشرة (لا يزال متاحاً عبر زر "تعديل").
+/// تعرض فقط اسم المورد + المبلغ + اختيار مصدر التمويل والتصنيف (يُختار
+/// تلقائياً للموردين المعروفين)، وزر تأكيد واحد يحفظ فوراً بلا أي حوار
+/// تأكيد إضافي — الشاشة نفسها هي التأكيد.
 class QuickInvoiceReviewPage extends StatefulWidget {
   final Hotel hotel;
-  final ZatcaInvoiceData qrData;
-  const QuickInvoiceReviewPage({super.key, required this.hotel, required this.qrData});
+  final ExtractedInvoiceData extractedData;
+  const QuickInvoiceReviewPage({super.key, required this.hotel, required this.extractedData});
 
   @override
   State<QuickInvoiceReviewPage> createState() => _QuickInvoiceReviewPageState();
@@ -54,7 +54,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   int? _relatedHotelId;
   List<Hotel> _otherHotels = [];
 
-  DateTime get _invoiceDate => widget.qrData.timestamp ?? DateTime.now();
+  DateTime get _invoiceDate => widget.extractedData.timestamp ?? DateTime.now();
   String get _invoiceDateStr => DateFormat('yyyy-MM-dd').format(_invoiceDate);
 
   FundingSourceOption? get _selectedFundingOption {
@@ -74,7 +74,11 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   }
 
   bool get _canConfirm =>
-      !_isLoading && widget.qrData.invoiceTotal != null && widget.qrData.vatNumber != null && _selectedCategory != null && _fundingSourceReady;
+      !_isLoading &&
+      widget.extractedData.invoiceTotal != null &&
+      widget.extractedData.vatNumber != null &&
+      _selectedCategory != null &&
+      _fundingSourceReady;
 
   @override
   void initState() {
@@ -87,7 +91,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
     _otherHotels = allHotels.where((h) => h.id != widget.hotel.id).toList();
     _categories = await _expenseRepository.getCategories();
 
-    final vatNumber = widget.qrData.vatNumber;
+    final vatNumber = widget.extractedData.vatNumber;
     if (vatNumber != null) {
       _matchedSupplier = await _supplierRepository.getSupplierByTaxNumber(widget.hotel.id!, vatNumber);
       if (_matchedSupplier?.defaultExpenseCategory != null) {
@@ -99,43 +103,56 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
     await _checkDuplicate();
   }
 
-  /// يتحقق فور نجاح المسح (قبل أي تفاعل) بتوقيع محتوى الفاتورة — رقم
-  /// الفاتورة غائب عن معيار QR أصلاً، فالمطابقة تتم بالرقم الضريبي + التاريخ
-  /// + الإجمالي معاً. تحذير غير مانع: "متابعة" تُبقي الشاشة، "إلغاء" تُغلقها.
+  /// يتحقق فور نجاح القراءة (قبل أي تفاعل) — يعتمد على أكثر من عنصر معاً:
+  /// رقم الفاتورة (إن استُخرِج) + الرقم الضريبي، وأيضاً الرقم الضريبي +
+  /// التاريخ + الإجمالي (بديل ضروري لأن QR لا يتضمّن رقم الفاتورة أصلاً).
+  /// تطابق في أي من الفحصين يُظهر تحذيراً غير مانع: "متابعة" تُبقي الشاشة،
+  /// "إلغاء" تُغلقها.
   Future<void> _checkDuplicate() async {
-    final taxNumber = widget.qrData.vatNumber;
-    final total = widget.qrData.invoiceTotal;
-    if (taxNumber == null || total == null || !mounted) return;
+    final taxNumber = widget.extractedData.vatNumber;
+    final total = widget.extractedData.invoiceTotal;
+    final invoiceNumber = widget.extractedData.invoiceNumber;
+    if (taxNumber == null || !mounted) return;
 
-    final duplicate = await _invoiceRepository.findDuplicateByContent(
-      hotelId: widget.hotel.id!,
-      taxNumber: taxNumber,
-      date: _invoiceDateStr,
-      totalAmount: total,
-    );
+    Invoice? duplicate;
+    if (invoiceNumber != null && invoiceNumber.isNotEmpty) {
+      duplicate = await _invoiceRepository.findDuplicate(hotelId: widget.hotel.id!, taxNumber: taxNumber, invoiceNumber: invoiceNumber);
+    }
+    if (duplicate == null && total != null) {
+      duplicate = await _invoiceRepository.findDuplicateByContent(
+        hotelId: widget.hotel.id!,
+        taxNumber: taxNumber,
+        date: _invoiceDateStr,
+        totalAmount: total,
+      );
+    }
     if (duplicate == null || !mounted) return;
 
     bool proceed = false;
     await AppDialog.confirmAction(
       context: context,
       title: "فاتورة مكرَّرة",
-      message: "هذه الفاتورة مسجلة مسبقاً، هل تريد المتابعة؟",
-      confirmLabel: "متابعة",
+      message: "يبدو أن هذه الفاتورة موجودة مسبقاً.",
+      confirmLabel: "متابعة رغم ذلك",
+      cancelLabel: "إلغاء",
       onConfirm: () async => proceed = true,
     );
     if (!proceed && mounted) Navigator.pop(context);
   }
 
-  void _openFullEdit() {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel, qrPrefill: widget.qrData)));
+  /// Navigator.push (وليس pushReplacement) عمداً — راجع التعليق المطابق في
+  /// InvoiceCaptureProcessingPage._finishWithResults لسبب أهمية هذا الفرق.
+  Future<void> _openFullEdit() async {
+    final saved = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInvoicePage(hotel: widget.hotel, extractedPrefill: widget.extractedData)));
+    if (mounted) Navigator.pop(context, saved == true);
   }
 
   Future<void> _confirm() async {
     if (!_canConfirm) return;
     setState(() => _isSaving = true);
     try {
-      final taxNumber = widget.qrData.vatNumber!;
-      final sellerName = widget.qrData.sellerName ?? '';
+      final taxNumber = widget.extractedData.vatNumber!;
+      final sellerName = widget.extractedData.sellerName ?? '';
       final selectedCategory = _selectedCategory!;
 
       int supplierId;
@@ -154,15 +171,15 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
         ));
       }
 
-      final total = widget.qrData.invoiceTotal!;
-      // مبلغ ضريبة تقريبي (15%) فقط إن غاب تحديداً عن الرمز رغم توفر الإجمالي —
-      // نفس نسبة التقريب المستخدَمة في الإدخال اليدوي القياسي.
-      final vat = widget.qrData.vatTotal ?? double.parse((total - total / 1.15).toStringAsFixed(2));
+      final total = widget.extractedData.invoiceTotal!;
+      // مبلغ ضريبة تقريبي (15%) فقط إن غاب تحديداً عن القراءة رغم توفر
+      // الإجمالي — نفس نسبة التقريب المستخدَمة في الإدخال اليدوي القياسي.
+      final vat = widget.extractedData.vatTotal ?? double.parse((total - total / 1.15).toStringAsFixed(2));
       final beforeTax = double.parse((total - vat).toStringAsFixed(2));
 
       final invoice = Invoice(
         hotelId: widget.hotel.id!,
-        invoiceNumber: '',
+        invoiceNumber: widget.extractedData.invoiceNumber ?? '',
         date: _invoiceDateStr,
         companyName: sellerName,
         taxNumber: taxNumber,
@@ -223,7 +240,8 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (widget.qrData.invoiceTotal == null || widget.qrData.vatNumber == null) _buildMissingDataNotice(),
+                  if (widget.extractedData.source == InvoiceExtractionSource.localOcr) _buildLowAccuracyNotice(),
+                  if (widget.extractedData.invoiceTotal == null || widget.extractedData.vatNumber == null) _buildMissingDataNotice(),
                   _buildSummaryCard(),
                   const SizedBox(height: AppSizes.md),
                   _buildCategorySection(),
@@ -233,6 +251,27 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
               ),
             ),
       bottomNavigationBar: _isLoading ? null : _buildActionButtons(),
+    );
+  }
+
+  Widget _buildLowAccuracyNotice() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: AppSizes.md),
+      padding: const EdgeInsets.all(AppSizes.sm),
+      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(AppRadius.md)),
+      child: const Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, color: Colors.amber, size: 18),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "تعذّر الاتصال بالإنترنت — تمت القراءة محلياً وقد تكون دقتها أقل. راجع البيانات جيداً قبل التأكيد.",
+              style: TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -248,7 +287,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              "الرقم الضريبي أو المبلغ غير موجودين داخل هذا الرمز — استخدم \"تعديل\" لإكمال البيانات يدوياً",
+              "الرقم الضريبي أو المبلغ غير موجودين — استخدم \"تعديل\" لإكمال البيانات يدوياً",
               style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
             ),
           ),
@@ -262,13 +301,9 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
     return AppCard(
       child: Column(
         children: [
-          _summaryRow("🏢", "المورد", _matchedSupplier?.officialName ?? widget.qrData.sellerName ?? "—"),
+          _summaryRow("🏢", "المورد", _matchedSupplier?.officialName ?? widget.extractedData.sellerName ?? "—"),
           const Divider(height: 20),
-          _summaryRow("🧾", "الرقم الضريبي", widget.qrData.vatNumber ?? "—"),
-          const Divider(height: 20),
-          _summaryRow("📅", "تاريخ الفاتورة", _invoiceDateStr),
-          const Divider(height: 20),
-          _summaryRow("💰", "الإجمالي", widget.qrData.invoiceTotal != null ? "${fmt.format(widget.qrData.invoiceTotal)} ريال" : "—"),
+          _summaryRow("💰", "المبلغ", widget.extractedData.invoiceTotal != null ? "${fmt.format(widget.extractedData.invoiceTotal)} ريال" : "—"),
         ],
       ),
     );

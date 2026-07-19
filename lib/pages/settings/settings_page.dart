@@ -14,6 +14,7 @@ import '../dashboard/pages/hotels_page.dart';
 import '../login/pin_login_page.dart';
 import '../login/security_setup_page.dart';
 import 'about_page.dart';
+import 'ai_invoice_ocr_settings_page.dart';
 import 'data_info_page.dart';
 import 'support_page.dart';
 
@@ -119,6 +120,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("البيانات"),
                 _buildLinkCard(icon: Icons.storage_outlined, title: "معلومات البيانات المخزَّنة", subtitle: "حجم قاعدة البيانات وعدد السجلات (للعرض فقط)", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DataInfoPage()))),
+                const SizedBox(height: AppSizes.lg),
+                _buildSectionTitle("القراءة الذكية للفواتير"),
+                _buildLinkCard(
+                  icon: Icons.auto_awesome_outlined,
+                  title: "الذكاء الاصطناعي لقراءة الفواتير",
+                  subtitle: "اختيار المزوّد ومفتاح API لقراءة الفواتير بلا رمز QR",
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AiInvoiceOcrSettingsPage())),
+                ),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("🎓 وضع التدريب"),
                 _buildTrainingModeSection(),

@@ -84,4 +84,19 @@ class SecurityService {
   Future<void> clearAll() async {
     await _storage.deleteAll();
   }
+
+  // ---------------- مفاتيح API لمزوّدي الذكاء الاصطناعي (قراءة الفواتير) ----------------
+
+  /// مفتاح API حسّاس لمزوّد ذكاء اصطناعي واحد (`providerId`: 'claude' |
+  /// 'openai' | 'gemini') — يُخزَّن عبر التخزين الآمن نفسه المستخدَم لرمز
+  /// PIN، وليس AppPreferences (غير آمنة لبيانات حسّاسة). كل مزوّد له مفتاحه
+  /// الخاص المستقل، بحيث يمكن حفظ عدة مفاتيح والتبديل بين المزوّدين من
+  /// الإعدادات بلا فقدان أي مفتاح محفوظ سابقاً.
+  Future<String?> getAiApiKey(String providerId) async {
+    return await _storage.read(key: 'ai_api_key_$providerId');
+  }
+
+  Future<void> setAiApiKey(String providerId, String key) async {
+    await _storage.write(key: 'ai_api_key_$providerId', value: key);
+  }
 }

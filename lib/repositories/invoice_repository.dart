@@ -53,8 +53,9 @@ class InvoiceRepository {
   }
 
   /// يبحث عن فاتورة موجودة مسبقاً لنفس المورد (بالرقم الضريبي) بنفس رقم
-  /// الفاتورة — يُستخدم حصراً في مسار الفاتورة القادمة من مسح رمز QR
-  /// (ScanInvoiceQrPage) تفادياً لتسجيل نفس الفاتورة مرتين عن طريق الخطأ؛
+  /// الفاتورة — يُستخدم حصراً في مسار الفاتورة القادمة من قراءة تلقائية
+  /// (QR أو ذكاء اصطناعي أو OCR محلي، راجع QuickInvoiceReviewPage/
+  /// AddInvoicePage) تفادياً لتسجيل نفس الفاتورة مرتين عن طريق الخطأ؛
   /// لا يُستدعى من مسار الإدخال اليدوي العادي.
   Future<Invoice?> findDuplicate({required int hotelId, required String taxNumber, required String invoiceNumber}) async {
     final map = await _dbService.findDuplicateInvoice(hotelId, taxNumber, invoiceNumber);

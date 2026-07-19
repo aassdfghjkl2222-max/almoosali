@@ -11,14 +11,13 @@ import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
-import '../../services/zatca_qr_parser.dart';
 import '../../widgets/common/app_drawer.dart';
 import '../expenses/manage_categories_page.dart';
 import 'add_invoice_page.dart';
+import 'invoice_capture_processing_page.dart';
+import 'invoice_capture_sheet.dart';
 import 'invoice_details_page.dart';
 import 'invoice_reports_page.dart';
-import 'quick_invoice_review_page.dart';
-import 'scan_invoice_qr_page.dart';
 
 enum _HotelScope { current, all, custom }
 
@@ -262,23 +261,17 @@ class _InvoicesPageState extends State<InvoicesPage> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceReportsPage(hotel: widget.hotel)));
   }
 
-  /// يفتح شاشة مسح رمز QR. عند نجاح القراءة تُرجِع [ZatcaInvoiceData] فنفتح
-  /// شاشة المراجعة السريعة (QuickInvoiceReviewPage) بدل "إضافة فاتورة"
-  /// الكاملة مباشرة — تلك تبقى متاحة من داخل المراجعة عبر زر "تعديل". عند
-  /// اختيار "إدخال يدوي" داخل شاشة المسح (بعد فشل قراءة) تستبدل تلك الشاشة
-  /// نفسها بـAddInvoicePage فارغة مباشرة، فتُرجِع القيمة `true` مباشرة إلى
-  /// هنا عند نجاح الحفظ هناك. أما الإلغاء ببساطة (زر الرجوع) فيُرجِع null
-  /// ولا يفتح أي شاشة إضافية.
-  Future<void> _openQrScan() async {
-    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => ScanInvoiceQrPage(hotel: widget.hotel)));
-    if (!mounted || result == null) return;
+  /// يفتح ورقة اختيار مصدر مسح الفاتورة (تصوير/معرض/PDF)، ثم شاشة معالجة
+  /// موجزة تُجري خط الأنابيب الكامل تلقائياً (QR على الصورة الثابتة، وإلا
+  /// ذكاء اصطناعي سحابي، وإلا OCR محلي) وتنتهي إما بـQuickInvoiceReviewPage
+  /// مباشرة أو بحفظ فعلي (`true`) عبر "إدخال يدوي" من شاشة المعالجة نفسها
+  /// عند فشل القراءة كلياً.
+  Future<void> _openInvoiceCapture() async {
+    final source = await showInvoiceCaptureSheet(context, hotel: widget.hotel);
+    if (!mounted || source == null) return;
 
-    if (result is ZatcaInvoiceData) {
-      final saved = await Navigator.push(context, MaterialPageRoute(builder: (_) => QuickInvoiceReviewPage(hotel: widget.hotel, qrData: result)));
-      if (saved != true) return;
-    } else if (result != true) {
-      return;
-    }
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => InvoiceCaptureProcessingPage(hotel: widget.hotel, source: source)));
+    if (result != true) return;
 
     await _reloadFilterOptions();
     await _reload();
@@ -685,11 +678,11 @@ class _InvoicesPageState extends State<InvoicesPage> {
           children: [
             FloatingActionButton.extended(
               heroTag: 'scan_invoice_qr_fab',
-              onPressed: _openQrScan,
+              onPressed: _openInvoiceCapture,
               backgroundColor: Colors.white,
               foregroundColor: _identityColor,
               icon: const Icon(Icons.qr_code_scanner),
-              label: const Text("مسح الباركود"),
+              label: const Text("الباركود"),
             ),
             FloatingActionButton.extended(
               heroTag: 'add_invoice_fab',
@@ -782,7 +775,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
     ];
 
     return SizedBox(
-      height: 108,
+      height: 116,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),

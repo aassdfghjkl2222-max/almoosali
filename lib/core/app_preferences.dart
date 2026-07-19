@@ -39,6 +39,12 @@ class AppPreferences {
   // بعد)، محفوظة وجاهزة ليقرأها main.dart فور توفر ملفات ترجمة إضافية.
   static const keyAppLocale = 'pref_app_locale';
 
+  // القراءة الذكية للفواتير (ذكاء اصطناعي سحابي) — مفتاح API الفعلي حسّاس
+  // ويُخزَّن عبر SecurityService.getAiApiKey/setAiApiKey (FlutterSecureStorage)،
+  // وليس هنا. هذان المفتاحان لإعدادات غير حسّاسة فقط.
+  static const keyAiOcrEnabled = 'pref_ai_ocr_enabled';
+  static const keyAiOcrProvider = 'pref_ai_ocr_provider'; // 'claude' | 'openai' | 'gemini'
+
   static Future<bool> getBool(String key, {bool defaultValue = false}) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(key) ?? defaultValue;

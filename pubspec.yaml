@@ -45,6 +45,12 @@ dependencies:
   # مسح رمز QR (فواتير ZATCA الضريبية)
   mobile_scanner: ^7.0.0
 
+  # القراءة الذكية للفواتير (ذكاء اصطناعي سحابي + OCR محلي احتياطي)
+  http: ^1.2.0
+  google_mlkit_text_recognition: ^0.15.0
+  connectivity_plus: ^6.1.0
+  image: ^4.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

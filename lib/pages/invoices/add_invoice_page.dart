@@ -8,6 +8,7 @@ import '../../core/app_text_styles.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/expense_category.dart';
+import '../../models/extracted_invoice_data.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../models/invoice_audit_log_entry.dart';
@@ -16,7 +17,6 @@ import '../../repositories/expense_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../repositories/supplier_repository.dart';
-import '../../services/zatca_qr_parser.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/app_text_field.dart';
@@ -59,13 +59,13 @@ class AddInvoicePage extends StatefulWidget {
   final Hotel hotel;
   final Invoice? invoice;
 
-  /// بيانات مُستخرَجة من مسح رمز QR لفاتورة ZATCA (راجع ScanInvoiceQrPage) —
-  /// عند توفرها (ووضع الإضافة فقط، ليس التعديل) تُعبَّأ الحقول المتاحة
-  /// تلقائياً في _bootstrap. لا تأثير لها إطلاقاً على مسار الإدخال اليدوي
-  /// العادي عندما تكون null (الحالة الافتراضية).
-  final ZatcaInvoiceData? qrPrefill;
+  /// بيانات مُستخرَجة (QR أو ذكاء اصطناعي سحابي أو OCR محلي — راجع
+  /// InvoiceCaptureProcessingPage) — عند توفرها (ووضع الإضافة فقط، ليس
+  /// التعديل) تُعبَّأ الحقول المتاحة تلقائياً في _bootstrap. لا تأثير لها
+  /// إطلاقاً على مسار الإدخال اليدوي العادي عندما تكون null (الحالة الافتراضية).
+  final ExtractedInvoiceData? extractedPrefill;
 
-  const AddInvoicePage({super.key, required this.hotel, this.invoice, this.qrPrefill});
+  const AddInvoicePage({super.key, required this.hotel, this.invoice, this.extractedPrefill});
 
   @override
   State<AddInvoicePage> createState() => _AddInvoicePageState();
@@ -145,11 +145,12 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   bool _isSaving = false;
   int _savedCount = 0;
 
-  /// true فقط عندما جاءت هذه الفاتورة من مسح رمز QR (widget.qrPrefill) —
-  /// يفعّل التحقق من التكرار عند الحفظ ودقة الضريبة القادمة من الرمز
-  /// مباشرة. يبقى false دوماً لمسار الإدخال اليدوي فلا يتأثر بأي منهما.
-  bool _isFromQrScan = false;
-  ZatcaInvoiceData? _qrData;
+  /// true فقط عندما جاءت هذه الفاتورة من قراءة تلقائية (widget.extractedPrefill:
+  /// QR أو ذكاء اصطناعي أو OCR محلي) — يفعّل التحقق من التكرار عند الحفظ
+  /// ودقة الضريبة القادمة من القراءة مباشرة. يبقى false دوماً لمسار الإدخال
+  /// اليدوي فلا يتأثر بأي منهما.
+  bool _isFromExtraction = false;
+  ExtractedInvoiceData? _extractedData;
 
   @override
   void initState() {
@@ -188,34 +189,34 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
       return;
     }
 
-    final qr = widget.qrPrefill;
-    _selectedDate = qr?.timestamp ?? DateTime.now();
+    final extracted = widget.extractedPrefill;
+    _selectedDate = extracted?.timestamp ?? DateTime.now();
     _dateController.text = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
-    if (qr != null) {
-      _isFromQrScan = true;
-      _qrData = qr;
-      // رقم الفاتورة ليس ضمن بيانات رمز QR الأساسي إطلاقاً (ليس جزءاً من
-      // معيار ZATCA المبسّط) — يبقى فارغاً عمداً بدل الرقم التسلسلي
-      // الافتراضي، ليكتبه المستخدم من الفاتورة الورقية/PDF نفسها.
-      _invoiceNumberController.text = '';
+    if (extracted != null) {
+      _isFromExtraction = true;
+      _extractedData = extracted;
+      // رقم الفاتورة: يُعبَّأ إن استُخرِج فعلياً (ممكن من الذكاء الاصطناعي/OCR،
+      // غير ممكن أبداً من QR — ليس جزءاً من معيار ZATCA المبسّط)، وإلا يبقى
+      // فارغاً عمداً (بدل الرقم التسلسلي الافتراضي) ليكتبه المستخدم يدوياً.
+      _invoiceNumberController.text = extracted.invoiceNumber ?? '';
 
-      if (qr.invoiceTotal != null) {
-        _amountController.text = NumberFormat("#,##0.##").format(qr.invoiceTotal);
+      if (extracted.invoiceTotal != null) {
+        _amountController.text = NumberFormat("#,##0.##").format(extracted.invoiceTotal);
       }
 
-      if (qr.vatNumber != null) {
-        final existingSupplier = await _supplierRepository.getSupplierByTaxNumber(widget.hotel.id!, qr.vatNumber!);
+      if (extracted.vatNumber != null) {
+        final existingSupplier = await _supplierRepository.getSupplierByTaxNumber(widget.hotel.id!, extracted.vatNumber!);
         if (existingSupplier != null) {
           _selectedSupplier = existingSupplier;
           _supplierConfirmed = true;
         } else {
           _isNewSupplierFlow = true;
-          _officialNameController.text = qr.sellerName ?? '';
-          _taxNumberController.text = qr.vatNumber!;
+          _officialNameController.text = extracted.sellerName ?? '';
+          _taxNumberController.text = extracted.vatNumber!;
         }
-      } else if (qr.sellerName != null) {
-        _companySearchController.text = qr.sellerName!;
+      } else if (extracted.sellerName != null) {
+        _companySearchController.text = extracted.sellerName!;
       }
     } else {
       final count = await _invoiceRepository.getAllInvoices(widget.hotel.id!);
@@ -370,13 +371,13 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
 
     double beforeTax;
     double vat;
-    // إن كان المبلغ المُدخَل مطابقاً للإجمالي القادم من رمز QR (لم يُعدِّله
-    // المستخدم يدوياً)، تُستخدم قيمة الضريبة الفعلية من الرمز مباشرة —
-    // أدق من افتراض 15%. أي تعديل يدوي على المبلغ يُعيد الحساب بالطريقة
-    // القياسية القديمة نفسها بلا أي تغيير.
-    final qr = _qrData;
-    if (qr != null && qr.invoiceTotal != null && qr.vatTotal != null && (qr.invoiceTotal! - total).abs() < 0.01) {
-      vat = double.parse(qr.vatTotal!.toStringAsFixed(2));
+    // إن كان المبلغ المُدخَل مطابقاً للإجمالي القادم من القراءة التلقائية
+    // (لم يُعدِّله المستخدم يدوياً)، تُستخدم قيمة الضريبة الفعلية منها
+    // مباشرة — أدق من افتراض 15%. أي تعديل يدوي على المبلغ يُعيد الحساب
+    // بالطريقة القياسية القديمة نفسها بلا أي تغيير.
+    final extracted = _extractedData;
+    if (extracted != null && extracted.invoiceTotal != null && extracted.vatTotal != null && (extracted.invoiceTotal! - total).abs() < 0.01) {
+      vat = double.parse(extracted.vatTotal!.toStringAsFixed(2));
       beforeTax = double.parse((total - vat).toStringAsFixed(2));
     } else {
       beforeTax = double.parse((total / 1.15).toStringAsFixed(2));
@@ -404,27 +405,33 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   Future<void> _performSave(double total, double beforeTax, double vat) async {
     setState(() => _isSaving = true);
     try {
-      if (_isFromQrScan && !_isEditMode) {
+      if (_isFromExtraction && !_isEditMode) {
         final invoiceNumber = _invoiceNumberController.text.trim();
-        final duplicate = invoiceNumber.isEmpty
-            ? await _invoiceRepository.findDuplicateByContent(
-                hotelId: widget.hotel.id!,
-                taxNumber: _selectedSupplier!.taxNumber,
-                date: DateFormat('yyyy-MM-dd').format(_selectedDate),
-                totalAmount: total,
-              )
-            : await _invoiceRepository.findDuplicate(
-                hotelId: widget.hotel.id!,
-                taxNumber: _selectedSupplier!.taxNumber,
-                invoiceNumber: invoiceNumber,
-              );
+        // يعتمد على أكثر من عنصر معاً (البند سابعاً): رقم الفاتورة + الرقم
+        // الضريبي إن توفّر رقم الفاتورة، وأيضاً الرقم الضريبي + التاريخ +
+        // المبلغ دوماً (بديل ضروري إذ QR لا يتضمّن رقم الفاتورة أصلاً).
+        Invoice? duplicate;
+        if (invoiceNumber.isNotEmpty) {
+          duplicate = await _invoiceRepository.findDuplicate(
+            hotelId: widget.hotel.id!,
+            taxNumber: _selectedSupplier!.taxNumber,
+            invoiceNumber: invoiceNumber,
+          );
+        }
+        duplicate ??= await _invoiceRepository.findDuplicateByContent(
+          hotelId: widget.hotel.id!,
+          taxNumber: _selectedSupplier!.taxNumber,
+          date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+          totalAmount: total,
+        );
         if (duplicate != null && mounted) {
           bool proceed = false;
           await AppDialog.confirmAction(
             context: context,
             title: "فاتورة مكرَّرة",
-            message: "هذه الفاتورة مسجلة مسبقاً، هل تريد المتابعة؟",
-            confirmLabel: "متابعة",
+            message: "يبدو أن هذه الفاتورة موجودة مسبقاً.",
+            confirmLabel: "متابعة رغم ذلك",
+            cancelLabel: "إلغاء",
             onConfirm: () async => proceed = true,
           );
           if (!proceed) return;
@@ -533,9 +540,9 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
       _computedVat = null;
       _computedBeforeTax = null;
       // الفاتورة التالية في نفس جلسة الإدخال السريع تعود دائماً لمسار
-      // الإدخال اليدوي العادي (لا تحمل بيانات QR سابقة ولا تخضع لتحقق التكرار).
-      _isFromQrScan = false;
-      _qrData = null;
+      // الإدخال اليدوي العادي (لا تحمل بيانات مستخرَجة سابقة ولا تخضع لتحقق التكرار).
+      _isFromExtraction = false;
+      _extractedData = null;
     });
     FocusScope.of(context).requestFocus(_companySearchFocus);
   }

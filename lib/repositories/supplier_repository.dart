@@ -60,9 +60,9 @@ class SupplierRepository {
     return Supplier.fromMap(map);
   }
 
-  /// بحث بالرقم الضريبي — يُستخدم عند تعبئة فاتورة تلقائياً من مسح رمز QR
-  /// (ZATCA يعطي الرقم الضريبي بدقة، بخلاف اسم المورد الذي قد يختلف شكلاً
-  /// بسيطاً عن الاسم الرسمي المحفوظ). راجع ScanInvoiceQrPage/AddInvoicePage.
+  /// بحث بالرقم الضريبي — يُستخدم عند تعبئة فاتورة تلقائياً من قراءة تلقائية
+  /// (QR غالباً يعطي الرقم الضريبي بدقة، بخلاف اسم المورد الذي قد يختلف شكلاً
+  /// بسيطاً عن الاسم الرسمي المحفوظ). راجع QuickInvoiceReviewPage/AddInvoicePage.
   Future<Supplier?> getSupplierByTaxNumber(int hotelId, String taxNumber) async {
     final map = await _dbService.getSupplierByTaxNumber(hotelId, taxNumber);
     if (map == null) return null;
