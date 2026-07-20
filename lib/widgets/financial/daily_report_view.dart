@@ -135,6 +135,9 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
+  /// بلا أي عنوان للقسم عمداً — مجرد ظهور هذه البطاقة بعد "🏁 الإجمالي
+  /// الصافي" مباشرة يعني أنها مبالغ لم تخرج من خزنة الفندق (راجع تعليق
+  /// UnwithdrawnTemplateLine).
   Widget _buildUnwithdrawnCard(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(AppSizes.md),
@@ -146,29 +149,24 @@ class DailyReportView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("🏛️ المصروفات التي لم تُصرف من خزينة الفندق", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-          const SizedBox(height: AppSizes.sm),
-          for (final l in template.unwithdrawnLines)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                children: [
-                  Text(l.icon, style: const TextStyle(fontSize: 13)),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text(l.itemName, style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      l.label,
-                      style: const TextStyle(fontSize: 11, color: AppColors.warning, fontWeight: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                    ),
-                  ),
-                ],
-              ),
+          for (final l in template.unwithdrawnLines) ...[
+            Row(
+              children: [
+                Expanded(child: Text(l.itemName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 6),
+                Text(_currency.format(l.amount), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.warning)),
+              ],
             ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Text(l.icon, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 4),
+                Expanded(child: Text(l.label, style: const TextStyle(fontSize: 11, color: AppColors.warning), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+            if (l != template.unwithdrawnLines.last) const Divider(height: AppSizes.md),
+          ],
         ],
       ),
     );

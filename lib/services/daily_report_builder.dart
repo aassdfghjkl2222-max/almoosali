@@ -8,7 +8,13 @@ import '../models/financial_report.dart';
 /// تصنيف عرض فقط، بلا أي أثر على أي حساب). مصدر وحيد يُستخدم من كل من بناء
 /// القالب من الحالة الحيّة (FinancialSummaryPage) وبنائه من تقرير محفوظ سابقاً
 /// (buildTemplateFromSavedReport) — حتى لا يتكرر نفس المنطق في مكانين.
-({String icon, String label}) classifyUnwithdrawnSource(String method, String? supplierName) {
+///
+/// [fundedByHotelName] له الأولوية دوماً — يُمرَّر فقط للمصروفات المعلقة ذات
+/// funding_source_hotel_id حقيقي (اسم فندق مُستخرَج من قاعدة البيانات فعلياً،
+/// وليس تحليلاً نصياً لِـ[method] كما كان سابقاً)، ويُنشئ ذمة تلقائية فعلية
+/// في المركز المالي (راجع VaultRepository._postSpecialPendingExpenses).
+({String icon, String label}) classifyUnwithdrawnSource(String method, String? supplierName, {String? fundedByHotelName}) {
+  if (fundedByHotelName != null) return (icon: "🏨", label: fundedByHotelName);
   if (supplierName != null) return (icon: "🤝", label: "دين - $supplierName");
   if (method == "شبكة") return (icon: "💳", label: "شبكة");
   if (method == "تحويل بنكي") return (icon: "🏦", label: "تحويل بنكي");
@@ -97,10 +103,11 @@ DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport repor
   final unwithdrawnLines = <UnwithdrawnTemplateLine>[];
   for (final item in otherExpenses) {
     final method = item['method']?.toString() ?? '';
-    if (method == "نقد" || method == "مصروف خاص") continue;
+    final fundedByHotelName = item['funding_source_hotel_name']?.toString();
+    if (fundedByHotelName == null && (method == "نقد" || method == "مصروف خاص" || method == "مسحوبات المالك")) continue;
     final supplierName = item['supplier_name']?.toString();
-    final c = classifyUnwithdrawnSource(method, supplierName);
-    unwithdrawnLines.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: item['name']?.toString() ?? '', label: c.label));
+    final c = classifyUnwithdrawnSource(method, supplierName, fundedByHotelName: fundedByHotelName);
+    unwithdrawnLines.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: item['name']?.toString() ?? '', label: c.label, amount: asDouble(item['amount'])));
   }
 
   return buildDailyReportTemplate(

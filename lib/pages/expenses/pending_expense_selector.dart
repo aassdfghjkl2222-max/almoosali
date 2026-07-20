@@ -126,7 +126,9 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
         subtitle: Text(
           exp.isDeferredDebt && exp.supplierName != null
               ? "${exp.categoryName} • ${exp.paymentMethod} (${exp.supplierName}) • ${exp.amount}"
-              : "${exp.categoryName} • ${exp.paymentMethod} • ${exp.amount}",
+              : exp.isFundedByOtherHotel
+                  ? "${exp.categoryName} • ${exp.paymentMethod} • ${exp.amount} • 🏨 ممول خارجياً"
+                  : "${exp.categoryName} • ${exp.paymentMethod} • ${exp.amount}",
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,

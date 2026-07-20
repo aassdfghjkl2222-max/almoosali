@@ -22,12 +22,17 @@ typedef FundingSourceSelection = ({String paymentMethod, int? supplierId});
 /// أصيل)، أما للمصروفات فيبقى معطّلاً افتراضياً (لا تخلط مع تسميته الفرعية
 /// الظاهرة داخل نص المشاركة لاحقاً كمصدر "غير مسحوب من الصندوق").
 /// [allowDeferred] يُفعَّل فقط للمصروفات (آجل (دين) لا معنى له كمصدر إيراد).
+/// [showOtherHotelsFunding] يُعطَّل من `AddPendingExpensePage` تحديداً لأنها
+/// تملك حقل "مصدر التمويل" المخصَّص الحقيقي (funding_source_hotel_id) الذي
+/// يُنشئ ذمة فعلية بين المنشآت — القسم القديم هنا نص مدمَج بلا أي أثر مالي
+/// حقيقي، يبقى فقط لمن لا يزال يستخدم المسار القديم (بنود التقرير الحرة).
 Future<FundingSourceSelection?> showFundingSourcePicker(
   BuildContext context, {
   required int hotelId,
   required List<Hotel> otherHotels,
   bool allowDeferred = true,
   bool allowBankTransfer = false,
+  bool showOtherHotelsFunding = true,
 }) {
   return showModalBottomSheet<FundingSourceSelection>(
     context: context,
@@ -38,6 +43,7 @@ Future<FundingSourceSelection?> showFundingSourcePicker(
       otherHotels: otherHotels,
       allowDeferred: allowDeferred,
       allowBankTransfer: allowBankTransfer,
+      showOtherHotelsFunding: showOtherHotelsFunding,
     ),
   );
 }
@@ -47,12 +53,14 @@ class _FundingSourcePickerSheet extends StatelessWidget {
   final List<Hotel> otherHotels;
   final bool allowDeferred;
   final bool allowBankTransfer;
+  final bool showOtherHotelsFunding;
 
   const _FundingSourcePickerSheet({
     required this.hotelId,
     required this.otherHotels,
     required this.allowDeferred,
     required this.allowBankTransfer,
+    required this.showOtherHotelsFunding,
   });
 
   Future<void> _pickDeferred(BuildContext context) async {
@@ -80,7 +88,7 @@ class _FundingSourcePickerSheet extends StatelessWidget {
             _tile(context, Icons.money, "نقد", 'نقد'),
             _tile(context, Icons.credit_card, "شبكة", 'شبكة'),
             if (allowBankTransfer) _tile(context, Icons.account_balance, "تحويل بنكي", 'تحويل بنكي'),
-            if (otherHotels.isNotEmpty) ...[
+            if (showOtherHotelsFunding && otherHotels.isNotEmpty) ...[
               const Divider(height: 1),
               const Padding(
                 padding: EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, 4),
@@ -93,7 +101,7 @@ class _FundingSourcePickerSheet extends StatelessWidget {
             ],
             const Divider(height: 1),
             _tile(context, Icons.person_add_alt, "شخصي (من مال المالك)", 'شخصي'),
-            _tile(context, Icons.person_off_outlined, "مصروف خاص (لصالح المالك)", 'مصروف خاص'),
+            _tile(context, Icons.person_off_outlined, "مسحوبات المالك", PendingExpense.paymentMethodOwnerDrawing),
             if (allowDeferred) ...[
               const Divider(height: 1),
               ListTile(

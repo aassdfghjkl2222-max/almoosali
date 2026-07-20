@@ -21,7 +21,18 @@ class PendingExpense {
   final String? supplierName; // حقل عرض فقط من JOIN، لا يُكتب في toMap
   final String? dueDate; // تاريخ استحقاق الدين — اختياري
 
+  /// مصدر تمويل المبلغ فعلياً — null يعني هذا الفندق نفسه (الافتراضي، السلوك
+  /// القديم بلا تغيير). قيمة غير null = معرّف فندق آخر موَّل المبلغ فعلياً،
+  /// فلا يُخصَم من خزنة هذا الفندق عند الترحيل بل تُنشأ ذمة تلقائية بين
+  /// الفندقين (راجع FinancialEngine.recordTransaction وتعليقها). منفصل تماماً
+  /// عن [paymentMethod] (نقد/شبكة) الذي يبقى يجيب "كيف" بينما هذا يجيب "من أين".
+  final int? fundingSourceHotelId;
+
   static const fundingSourceDeferred = 'آجل (دين)';
+
+  /// الاسم المحاسبي لسحوبات المالك الشخصية — تُخصَم من الخزنة عند الترحيل
+  /// وتُنشئ تلقائياً ذمة على المالك (راجع FinancialEngine.recordOwnerDrawing).
+  static const paymentMethodOwnerDrawing = 'مسحوبات المالك';
 
   PendingExpense({
     this.id,
@@ -42,9 +53,15 @@ class PendingExpense {
     this.supplierId,
     this.supplierName,
     this.dueDate,
+    this.fundingSourceHotelId,
   });
 
   bool get isDeferredDebt => paymentMethod == fundingSourceDeferred;
+  bool get isOwnerDrawing => paymentMethod == paymentMethodOwnerDrawing;
+
+  /// هل المبلغ ممَّول فعلياً من فندق آخر (وليس هذا الفندق نفسه)؟ — يحدِّد
+  /// استبعاده من صافي الخزنة وإنشاء الذمة التلقائية بين المنشآت عند الترحيل.
+  bool get isFundedByOtherHotel => fundingSourceHotelId != null && fundingSourceHotelId != hotelId;
 
   Map<String, dynamic> toMap() {
     return {
@@ -62,6 +79,7 @@ class PendingExpense {
       'created_at': createdAt,
       'supplier_id': supplierId,
       'due_date': dueDate,
+      'funding_source_hotel_id': fundingSourceHotelId,
     };
   }
 
@@ -85,6 +103,7 @@ class PendingExpense {
       supplierId: map['supplier_id'] as int?,
       supplierName: map['supplier_name'] as String?,
       dueDate: map['due_date'] as String?,
+      fundingSourceHotelId: map['funding_source_hotel_id'] as int?,
     );
   }
 
@@ -107,8 +126,10 @@ class PendingExpense {
     int? supplierId,
     String? supplierName,
     String? dueDate,
+    int? fundingSourceHotelId,
     bool clearSupplier = false,
     bool clearDueDate = false,
+    bool clearFundingSource = false,
   }) {
     return PendingExpense(
       id: id ?? this.id,
@@ -129,6 +150,7 @@ class PendingExpense {
       supplierId: clearSupplier ? null : (supplierId ?? this.supplierId),
       supplierName: clearSupplier ? null : (supplierName ?? this.supplierName),
       dueDate: clearDueDate ? null : (dueDate ?? this.dueDate),
+      fundingSourceHotelId: clearFundingSource ? null : (fundingSourceHotelId ?? this.fundingSourceHotelId),
     );
   }
 }

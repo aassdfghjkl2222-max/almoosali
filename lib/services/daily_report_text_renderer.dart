@@ -58,10 +58,13 @@ String renderDailyReportAsText(DailyReportTemplate t) {
   if (t.unwithdrawnLines.isNotEmpty) {
     buffer
       ..writeln(_separator)
-      ..writeln()
-      ..writeln("🏛️ المصروفات التي لم تُصرف من خزينة الفندق");
+      ..writeln();
     for (final l in t.unwithdrawnLines) {
-      buffer.writeln("${l.itemName}: ${l.icon} ${l.label}");
+      buffer
+        ..writeln("${_currency.format(l.amount)} ريال")
+        ..writeln(l.itemName)
+        ..writeln("${l.icon} ${l.label}")
+        ..writeln();
     }
   }
 

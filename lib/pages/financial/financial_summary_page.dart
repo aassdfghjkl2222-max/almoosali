@@ -303,15 +303,20 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     double c2p = ThousandsSeparatorInputFormatter.parse(_cashToPosController.text) ?? 0;
 
     double oTotal = 0, oCash = 0, oBank = 0, oDebt = 0;
-    void process(double a, String m) {
+    void process(double a, String m, {bool isFundedByOtherHotel = false}) {
       oTotal += a;
-      if (m == "نقد" || m == "مصروف خاص") oCash += a;
+      // مموَّل من فندق آخر: يُحتسَب ضمن إجمالي المصروفات المعروض فقط، ولا
+      // يخصم من النقد/الشبكة ولا يؤثر على صافي الخزنة إطلاقاً (البند خامساً).
+      if (isFundedByOtherHotel) return;
+      if (m == "نقد" || m == PendingExpense.paymentMethodOwnerDrawing) oCash += a;
       else if (m == "شبكة") oBank += a;
       else oDebt += a;
     }
 
     for (var i in _otherExpenses) process(ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0, i.paymentMethod);
-    for (var e in _availablePendingExpenses) if (_selectedPendingIds.contains(e.id)) process(e.amount, e.paymentMethod);
+    for (var e in _availablePendingExpenses) {
+      if (_selectedPendingIds.contains(e.id)) process(e.amount, e.paymentMethod, isFundedByOtherHotel: e.isFundedByOtherHotel);
+    }
 
     // بنود الإيراد الحرة — تُضاف إلى صافي النقد/الشبكة حسب مصدرها، أو إلى
     // التحويل مباشرة لأي مصدر آخر (تحويل بنكي وأي مصدر مستقبلي).
@@ -797,7 +802,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   void _showDebtExpensesDetails() {
     Map<String, double> breakdown = {};
     void add(double a, String m) {
-      if (m == "نقد" || m == "شبكة" || m == "مصروف خاص") return;
+      if (m == "نقد" || m == "شبكة" || m == PendingExpense.paymentMethodOwnerDrawing) return;
       breakdown[m] = (breakdown[m] ?? 0) + a;
     }
     for (var i in _otherExpenses) add(double.tryParse(i.amountController.text) ?? 0, i.paymentMethod);
@@ -857,7 +862,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     ));
   }
 
-  /// شريحة مصدر تمويل كاملة (نقد/شبكة/فندق آخر/شخصي/مصروف خاص/آجل (دين)) عبر
+  /// شريحة مصدر تمويل كاملة (نقد/شبكة/فندق آخر/شخصي/مسحوبات المالك/آجل (دين)) عبر
   /// النافذة الموحّدة showFundingSourcePicker — تُستخدم للبنود الحرة داخل قسم
   /// المصروفات/الإيرادات (بخلاف _smallToggle الثنائي البسيط للإعاشة/الاسترداد).
   Widget _buildFundingSourceChip(String current, ValueChanged<String> onSelected, {bool locked = false}) {
@@ -963,10 +968,23 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           'is_pending_transferred': true,
           'pending_id': e.id!,
           if (e.supplierName != null) 'supplier_name': e.supplierName,
+          if (e.isFundedByOtherHotel) 'funding_source_hotel_name': _hotelNameForId(e.fundingSourceHotelId),
         });
       }
     }
     return otherDetails;
+  }
+
+  /// اسم فندق من [_otherHotels] بمعرّفه — يُخزَّن حرفياً داخل details_json
+  /// عند الحفظ (بدل الاكتفاء بالمعرّف) حتى يبقى التقرير المحفوظ مستقلاً
+  /// وقابلاً لإعادة العرض بشكل صحيح حتى لو تغيّر اسم الفندق أو حُذف لاحقاً.
+  String _hotelNameForId(int? hotelId) {
+    if (hotelId == null) return "فندق آخر";
+    for (final h in _otherHotels) {
+      if (h.id == hotelId) return h.arabicName;
+    }
+    if (hotelId == widget.hotel.id) return widget.hotel.arabicName;
+    return "فندق آخر";
   }
 
   /// يبني قائمة بنود الإيراد الحرة بنفس بنية `other` الخاصة بالمصروفات.
@@ -1189,18 +1207,25 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   /// تتطابق "التقارير السابقة" مع هذه الشاشة تماماً.
   List<UnwithdrawnTemplateLine> _collectUnwithdrawnLines() {
     final items = <UnwithdrawnTemplateLine>[];
-    void addIfNotCash(String name, String method, String? supplierName) {
-      if (method == "نقد" || method == "مصروف خاص") return;
-      final c = classifyUnwithdrawnSource(method, supplierName);
-      items.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: name, label: c.label));
+    void addIfNotCash(String name, double amount, String method, String? supplierName, {String? fundedByHotelName}) {
+      if (fundedByHotelName == null && (method == "نقد" || method == PendingExpense.paymentMethodOwnerDrawing)) return;
+      final c = classifyUnwithdrawnSource(method, supplierName, fundedByHotelName: fundedByHotelName);
+      items.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: name, label: c.label, amount: amount));
     }
 
     for (final e in _otherExpenses) {
-      addIfNotCash(e.nameController.text, e.paymentMethod, e.supplierName);
+      final amount = ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0;
+      addIfNotCash(e.nameController.text, amount, e.paymentMethod, e.supplierName);
     }
     for (final e in _availablePendingExpenses) {
       if (_selectedPendingIds.contains(e.id)) {
-        addIfNotCash("${e.categoryName}: ${e.statement}", e.paymentMethod, e.isDeferredDebt ? e.supplierName : null);
+        addIfNotCash(
+          "${e.categoryName}: ${e.statement}",
+          e.amount,
+          e.paymentMethod,
+          e.isDeferredDebt ? e.supplierName : null,
+          fundedByHotelName: e.isFundedByOtherHotel ? _hotelNameForId(e.fundingSourceHotelId) : null,
+        );
       }
     }
     return items;

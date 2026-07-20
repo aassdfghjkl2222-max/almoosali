@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 39, // Upgrade to v39 for suppliers.default_expense_category (auto-categorization for QR-scanned invoices)
+      version: 40, // Upgrade to v40 for pending_expenses.funding_source_hotel_id (owner drawings + inter-entity funded expenses)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -165,6 +165,9 @@ class DatabaseService {
         }
         if (oldVersion < 39) {
           try { await db.execute('ALTER TABLE suppliers ADD COLUMN default_expense_category TEXT'); } catch (_) {}
+        }
+        if (oldVersion < 40) {
+          try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN funding_source_hotel_id INTEGER'); } catch (_) {}
         }
       },
     );
@@ -321,6 +324,9 @@ class DatabaseService {
       if (!await hasColumn('pending_expenses', 'due_date')) {
         await db.execute('ALTER TABLE pending_expenses ADD COLUMN due_date TEXT');
       }
+      if (!await hasColumn('pending_expenses', 'funding_source_hotel_id')) {
+        await db.execute('ALTER TABLE pending_expenses ADD COLUMN funding_source_hotel_id INTEGER');
+      }
       await db.execute(
         'CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)',
       );
@@ -366,7 +372,7 @@ class DatabaseService {
     // لتصنيفات المصروفات، يُقرأ منه: الفواتير الضريبية، المصروفات المعلقة، مركز التحليل، المركز المالي، التقارير.
     await db.execute('CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, short_code TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
-    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, funding_source_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
     // دين على المنشأة لمورد ناتج عن مصروف معلق بمصدر تمويل "آجل (دين)" — راجع
     // PendingExpenseDebt. مستقل عن supplier_debts (فواتير "شراء آجل" فقط)، وكلاهما
     // يُجمَّعان في "الذمم الدائنة" بمركز التحليل المالي (SupplierRepository.getAccountsPayableTotal).

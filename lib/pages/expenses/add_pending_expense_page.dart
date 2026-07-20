@@ -47,6 +47,11 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   Supplier? _selectedSupplier;
   bool _isLoading = true;
 
+  /// null = هذا الفندق (الافتراضي). قيمة أخرى = معرّف فندق مموِّل فعلي —
+  /// منفصل تماماً عن [_paymentMethod] (طريقة الدفع تبقى نقد/شبكة/... بلا
+  /// تغيير)؛ راجع PendingExpense.isFundedByOtherHotel وتعليقها.
+  int? _fundingSourceHotelId;
+
   List<PendingExpenseAttachment> _existingAttachments = [];
   final List<({String path, String name, String type})> _newAttachments = [];
 
@@ -71,6 +76,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       _dueDateController.text = edit.dueDate ?? "";
       attachments = await _repository.getAttachments(edit.id!);
       _paymentMethod = edit.paymentMethod;
+      _fundingSourceHotelId = edit.fundingSourceHotelId;
       if (edit.isDeferredDebt && edit.supplierId != null) {
         _selectedSupplier = await _supplierRepository.getSupplierById(edit.supplierId!);
       }
@@ -93,7 +99,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
 
   Future<void> _pickFundingSource() async {
     if (_isLocked) return;
-    final result = await showFundingSourcePicker(context, hotelId: widget.hotel.id!, otherHotels: _allHotels);
+    final result = await showFundingSourcePicker(context, hotelId: widget.hotel.id!, otherHotels: _allHotels, showOtherHotelsFunding: false);
     if (result == null) return;
     Supplier? supplier;
     if (result.supplierId != null) {
@@ -103,6 +109,49 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       _paymentMethod = result.paymentMethod;
       _selectedSupplier = supplier;
     });
+  }
+
+  /// اختيار الفندق المموِّل فعلياً — منفصل عن طريقة الدفع، ويحدِّد عند
+  /// الترحيل هل يُخصَم المبلغ من خزنة هذا الفندق (هذا الفندق نفسه) أم تُنشأ
+  /// ذمة تلقائية بين الفندقين بلا أي خصم من خزنة هذا الفندق إطلاقاً.
+  ///
+  /// `0` سنتينل لـ"هذا الفندق نفسه" (بدل null الذي يعني هنا "أُغلقت النافذة
+  /// بلا اختيار" — نفس اصطلاح LinkExistingDocumentsPage._pickHotelFilter).
+  Future<void> _pickFundingSourceHotel() async {
+    if (_isLocked) return;
+    final result = await showModalBottomSheet<int>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
+              child: Align(alignment: Alignment.centerRight, child: Text("مصدر التمويل", style: AppTextStyles.bodyBold)),
+            ),
+            const Divider(height: 1),
+            RadioListTile<int>(
+              title: Text(widget.hotel.arabicName),
+              subtitle: const Text("يُخصَم من خزنة هذا الفندق مباشرة", style: AppTextStyles.caption),
+              value: 0,
+              groupValue: _fundingSourceHotelId ?? 0,
+              onChanged: (v) => Navigator.pop(sheetContext, v),
+            ),
+            for (final h in _allHotels)
+              RadioListTile<int>(
+                title: Text(h.arabicName),
+                subtitle: const Text("لا يُخصَم من خزنة هذا الفندق — تُنشأ ذمة تلقائية بين الفندقين", style: AppTextStyles.caption),
+                value: h.id!,
+                groupValue: _fundingSourceHotelId ?? 0,
+                onChanged: (v) => Navigator.pop(sheetContext, v),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    setState(() => _fundingSourceHotelId = result == 0 ? null : result);
   }
 
   Future<void> _pickDueDate() async {
@@ -169,13 +218,20 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       createdAt: widget.editExpense?.createdAt ?? now.toIso8601String(),
       supplierId: _isDeferred ? _selectedSupplier!.id : null,
       dueDate: _isDeferred && _dueDateController.text.trim().isNotEmpty ? _dueDateController.text.trim() : null,
+      fundingSourceHotelId: _fundingSourceHotelId,
     );
 
     final reviewItems = [
       ReviewItem(label: "البيان", value: expense.statement),
       ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(expense.amount)} ريال", color: AppColors.danger),
       ReviewItem(label: "النوع", value: expense.categoryName ?? ""),
-      ReviewItem(label: "مصدر التمويل", value: expense.paymentMethod, color: Colors.blue),
+      ReviewItem(label: "طريقة الدفع", value: expense.paymentMethod, color: Colors.blue),
+      if (expense.isFundedByOtherHotel)
+        ReviewItem(
+          label: "مصدر التمويل",
+          value: _allHotels.firstWhere((h) => h.id == _fundingSourceHotelId, orElse: () => widget.hotel).arabicName,
+          color: Colors.teal,
+        ),
       if (_isDeferred) ReviewItem(label: "المورد", value: _selectedSupplier!.officialName, color: Colors.orange),
       if (_isDeferred && expense.dueDate != null) ReviewItem(label: "تاريخ الاستحقاق", value: expense.dueDate!),
     ];
@@ -250,6 +306,8 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
                     _buildMainCard(),
                     const SizedBox(height: AppSizes.lg),
                     _buildFundingSourceCard(),
+                    const SizedBox(height: AppSizes.lg),
+                    _buildFundingSourceHotelCard(),
                     const SizedBox(height: AppSizes.lg),
                     _buildAttachmentsCard(),
                     const SizedBox(height: AppSizes.xl),
@@ -351,7 +409,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
+          const Text("طريقة الدفع", style: AppTextStyles.bodyBold),
           const SizedBox(height: AppSizes.sm),
           InkWell(
             onTap: _isLocked ? null : _pickFundingSource,
@@ -377,6 +435,39 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
             ),
           ),
           if (_isDeferred) _buildDeferredDebtSection(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFundingSourceHotelCard() {
+    final label = _fundingSourceHotelId == null
+        ? widget.hotel.arabicName
+        : (_allHotels.firstWhere((h) => h.id == _fundingSourceHotelId, orElse: () => widget.hotel).arabicName);
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
+          const SizedBox(height: 4),
+          const Text("من دفع المبلغ فعلياً؟ إن كان فندقاً آخر، لا يُخصَم من خزنة هذا الفندق وتُنشأ ذمة تلقائية بين الفندقين.", style: AppTextStyles.caption),
+          const SizedBox(height: AppSizes.sm),
+          InkWell(
+            onTap: _isLocked ? null : _pickFundingSourceHotel,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(AppRadius.sm)),
+              child: Row(
+                children: [
+                  const Icon(Icons.apartment_outlined),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(label, style: AppTextStyles.bodyBold.copyWith(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const Icon(Icons.arrow_drop_down),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

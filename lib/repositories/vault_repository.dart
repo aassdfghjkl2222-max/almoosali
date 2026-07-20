@@ -1,6 +1,7 @@
 import '../core/database/database_service.dart';
 import '../models/vault_transaction.dart';
 import '../models/deposited_fund.dart';
+import '../models/pending_expense.dart';
 import '../models/personal_withdrawal.dart';
 import '../models/entity_loan.dart';
 import '../services/financial_engine.dart';
@@ -77,9 +78,10 @@ class VaultRepository {
       postedBy: "مدير النظام",
     );
     await updateDepositedFund(updatedFund);
-    
+
     if (updatedFund.isArchived) {
       await _dbService.updateById('financial_reports', {'is_posted': 1, 'is_locked': 1}, fund.reportId!);
+      await _postSpecialPendingExpenses(updatedFund);
     }
   }
 
@@ -106,6 +108,43 @@ class VaultRepository {
 
     if (updatedFund.isArchived) {
       await _dbService.updateById('financial_reports', {'is_posted': 1, 'is_locked': 1}, fund.reportId!);
+      await _postSpecialPendingExpenses(updatedFund);
+    }
+  }
+
+  /// يُنفَّذ فقط في لحظة اكتمال ترحيل التقرير بالكامل (isArchived يتحوّل لأول
+  /// مرة إلى true — إما من [transferCashToVault] أو [transferNetworkToBank]،
+  /// أيّهما يُتمِّم الترحيل، فلا يتكرر التنفيذ لأن الصندوق يختفي من "الأموال
+  /// غير المرحَّلة" بعدها). يبحث عن مصروفات معلقة مُرحَّلة (is_transferred=1)
+  /// بنفس تاريخ التقرير ولها أثر مالي خاص (مسحوبات مالك، أو مموَّلة من فندق
+  /// آخر)، وينشئ القيود التلقائية المقابلة في المركز المالي — أي مصروف نقد/
+  /// شبكة عادي مُغطّى أصلاً بالمبلغ الصافي المُرحَّل أعلاه، فلا يُعاد هنا.
+  Future<void> _postSpecialPendingExpenses(DepositedFund fund) async {
+    final rows = await _dbService.getPendingExpenses(hotelId: fund.hotelId, isTransferred: true);
+    final sameDay = rows.where((m) => m['date'] == fund.date);
+    for (final map in sameDay) {
+      final expense = PendingExpense.fromMap(map);
+      if (expense.isOwnerDrawing) {
+        await _financialEngine.recordOwnerDrawing(
+          hotelId: expense.hotelId,
+          amount: expense.amount,
+          paymentMethodCategory: 'cash',
+          description: "مسحوبات المالك: ${expense.statement}",
+          referenceId: expense.id,
+          referenceType: 'pending_expense',
+        );
+      } else if (expense.isFundedByOtherHotel) {
+        await _financialEngine.recordTransaction(
+          hotelId: expense.hotelId,
+          sourceCategory: 'entity_${expense.fundingSourceHotelId}',
+          amount: expense.amount,
+          type: 'expense',
+          description: "مصروف ممَّول من فندق آخر: ${expense.statement}",
+          referenceId: expense.id,
+          referenceType: 'pending_expense',
+          otherHotelId: expense.fundingSourceHotelId,
+        );
+      }
     }
   }
 

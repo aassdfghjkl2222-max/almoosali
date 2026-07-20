@@ -8,12 +8,15 @@ class ReportTemplateLine {
 
 /// بند واحد داخل "مصروفات لم تخصم من خزنة الفندق" — [icon] رمز تعبيري ثابت
 /// حسب نوع المصدر (🏦 شبكة، 📄 دين، 🏨 منشأة أخرى، 👤 مال المالك، ...)
-/// و[label] النص الكامل شاملاً اسم المورد/المنشأة إن وُجد.
+/// و[label] النص الكامل شاملاً اسم المورد/المنشأة إن وُجد. [amount] المبلغ
+/// الفعلي للبند — مطلوب لعرض بنود "مموَّل من فندق آخر" كاملة (المبلغ، البيان،
+/// مصدر التمويل، طريقة الدفع) دون أي عنوان للقسم نفسه.
 class UnwithdrawnTemplateLine {
   final String icon;
   final String itemName;
   final String label;
-  const UnwithdrawnTemplateLine({required this.icon, required this.itemName, required this.label});
+  final double amount;
+  const UnwithdrawnTemplateLine({required this.icon, required this.itemName, required this.label, this.amount = 0});
 }
 
 /// القالب الرسمي الموحّد للتقرير المالي اليومي — بنية عرض بحتة (DTO) بلا أي

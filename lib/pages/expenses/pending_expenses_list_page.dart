@@ -76,6 +76,17 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     });
   }
 
+  /// تعديل مباشر من القائمة — بديل المرور عبر شاشة اختيار المصروفات داخل
+  /// التقرير اليومي فقط. AddPendingExpensePage نفسها تمنع التعديل إن كان
+  /// المصروف مُرحَّلاً بالفعل (راجع _isLocked هناك).
+  Future<void> _editExpense(PendingExpense expense) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, editExpense: expense)),
+    );
+    if (result == true) _loadData();
+  }
+
   Widget _buildSourceTag(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -167,6 +178,7 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: AppSizes.md),
                             child: AppCard(
+                              onTap: () => _editExpense(expense),
                               child: Row(
                                 children: [
                                   Container(
@@ -209,6 +221,10 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
                                               const SizedBox(width: 8),
                                               _buildSourceTag("🟠 دين", Colors.orange),
                                             ],
+                                            if (expense.isFundedByOtherHotel) ...[
+                                              const SizedBox(width: 8),
+                                              _buildSourceTag("🏨 ممول خارجياً", Colors.teal),
+                                            ],
                                           ],
                                         ),
                                       ],
@@ -230,6 +246,8 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
                                       ),
                                     ],
                                   ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                                 ],
                               ),
                             ),

@@ -146,11 +146,9 @@ class PdfService {
           if (t.expenseLines.isNotEmpty) sectionCard("💸 المصروفات اليومية", t.expenseLines, "✅ إجمالي المصروفات", t.totalExpenses, PdfColors.red700),
           if (t.netLines.isNotEmpty) sectionCard("💵 صافي النقد", t.netLines, "🏁 الإجمالي الصافي", t.netTotal, PdfColors.blueGrey800),
           if (t.unwithdrawnLines.isNotEmpty) ...[
-            pw.Text("🏛️ المصروفات التي لم تُصرف من خزينة الفندق", style: pw.TextStyle(fontSize: 12, font: boldFont)),
-            pw.SizedBox(height: 6),
             pw.TableHelper.fromTextArray(
-              headers: ["البند", "السبب"],
-              data: t.unwithdrawnLines.map((l) => [l.itemName, "${l.icon} ${l.label}"]).toList(),
+              headers: ["البند", "المصدر", "المبلغ"],
+              data: t.unwithdrawnLines.map((l) => [l.itemName, "${l.icon} ${l.label}", currency.format(l.amount)]).toList(),
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, font: boldFont, fontSize: 10),
               headerDecoration: const pw.BoxDecoration(color: PdfColors.orange),
               cellStyle: const pw.TextStyle(fontSize: 10),

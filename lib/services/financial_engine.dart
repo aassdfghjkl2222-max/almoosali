@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../core/database/database_service.dart';
 import '../models/financial_account.dart';
-import '../models/financial_report.dart';
 
 class FinancialEngine {
   static final FinancialEngine _instance = FinancialEngine._internal();
@@ -68,111 +66,6 @@ class FinancialEngine {
       return int.tryParse(category.substring('entity_'.length));
     }
     return null;
-  }
-
-  Future<void> postReport(FinancialReport report) async {
-    if (report.isPosted) return;
-    final db = await _dbService.database;
-
-    await db.transaction((txn) async {
-      final details = jsonDecode(report.detailsJson ?? '{}');
-      final incomeDetails = details['income_details'] ?? {};
-      final expenseDetails = details['expense_details'] ?? {};
-      final adjustments = details['adjustments'] ?? {};
-
-      // 1. معالجة الإيرادات (النقد والبنك)
-      double cashIn = (double.tryParse(incomeDetails['cash']?.toString() ?? '0') ?? 0) +
-                      (double.tryParse(incomeDetails['parking_cash']?.toString() ?? '0') ?? 0);
-      double bankIn = (double.tryParse(incomeDetails['pos']?.toString() ?? '0') ?? 0) +
-                      (double.tryParse(incomeDetails['parking_pos']?.toString() ?? '0') ?? 0) +
-                      (double.tryParse(incomeDetails['transfer']?.toString() ?? '0') ?? 0);
-
-      if (cashIn > 0) await _updateAccount(txn, report.hotelId, 'cash', cashIn, 'income', 'إيراد تقرير يومي: ${report.date}', report.id, 'daily_report');
-      if (bankIn > 0) await _updateAccount(txn, report.hotelId, 'bank', bankIn, 'income', 'إيراد تقرير يومي (شبكة/تحويل): ${report.date}', report.id, 'daily_report');
-
-      // 2. معالجة المصروفات
-      final List otherExpenses = expenseDetails['other'] ?? [];
-      for (var exp in otherExpenses) {
-        double amt = (exp['amount'] as num).toDouble();
-        String method = exp['method'] ?? 'نقد';
-        
-        if (method == 'نقد') {
-          await _updateAccount(txn, report.hotelId, 'cash', amt, 'expense', "مصروف: ${exp['name']}", report.id, 'daily_report');
-        } else if (method == 'شبكة') {
-          await _updateAccount(txn, report.hotelId, 'bank', amt, 'expense', "مصروف: ${exp['name']}", report.id, 'daily_report');
-        } else if (method == 'شخصي') {
-          // المالك دفع من جيبه -> التزام على الفندق للمالك (زيادة رصيد المالك الدائن)
-          await _updateAccount(txn, report.hotelId, 'personal', amt, 'expense', "مصروف (دفع من المالك): ${exp['name']}", report.id, 'daily_report');
-        } else if (method == 'مصروف خاص') {
-          // الفندق دفع للمالك -> خصم من النقد/البنك وزيادة مديونية المالك (مدين)
-          String source = exp['private_source'] ?? 'cash'; 
-          await _updateAccount(txn, report.hotelId, source, amt, 'expense', "مصروف خاص (للمالك): ${exp['name']}", report.id, 'daily_report');
-          // حساب المالك (أصل هنا لأنه مدين للفندق)
-          await _updateAccount(txn, report.hotelId, 'person_owner_debt', amt, 'income', "مديونية مصروف خاص: ${exp['name']}", report.id, 'daily_report');
-        } else {
-          // فندق آخر (دين على هذه المنشأة لمنشأة أخرى) — يُربط تلقائياً بالمنشأة المحددة
-          final otherHotelRows = await txn.query('hotels', where: 'arabic_name = ?', whereArgs: [method], limit: 1);
-          if (otherHotelRows.isNotEmpty) {
-            final otherHotelId = otherHotelRows.first['id'] as int;
-            await _updateAccount(txn, report.hotelId, 'entity_$otherHotelId', amt, 'expense', "مصروف (عن طريق $method): ${exp['name']}", report.id, 'daily_report');
-            await _updateAccount(txn, otherHotelId, 'receivable_entity_${report.hotelId}', amt, 'income', "مستحقات (دفع مصروف عن فندق آخر): ${exp['name']}", report.id, 'inter_entity');
-          } else {
-            // احتياطي فقط في حال تعذر تحديد المنشأة (نادر) — يُسجَّل كدين غير مصنف بدلاً من فقدان البيانات
-            await _updateAccount(txn, report.hotelId, 'entity', amt, 'expense', "مصروف (عن طريق فندق زميل): ${exp['name']}", report.id, 'daily_report');
-          }
-        }
-      }
-
-      // مصروفات الإعاشة والاسترداد
-      double subsistence = double.tryParse(expenseDetails['subsistence']?.toString() ?? '0') ?? 0;
-      if (subsistence > 0) {
-        String method = expenseDetails['subsistence_method'] ?? 'نقد';
-        String accCat = method == 'نقد' ? 'cash' : 'bank';
-        await _updateAccount(txn, report.hotelId, accCat, subsistence, 'expense', 'إعاشة تقرير يومي: ${report.date}', report.id, 'daily_report');
-      }
-      
-      double refund = double.tryParse(expenseDetails['refund']?.toString() ?? '0') ?? 0;
-      if (refund > 0) {
-        String method = expenseDetails['refund_method'] ?? 'نقد';
-        String accCat = method == 'نقد' ? 'cash' : 'bank';
-        await _updateAccount(txn, report.hotelId, accCat, refund, 'expense', 'استرداد (Refund) تقرير يومي: ${report.date}', report.id, 'daily_report');
-      }
-
-      // تحويل نقد لشبكة
-      double cashToPos = double.tryParse(expenseDetails['cash_to_pos']?.toString() ?? '0') ?? 0;
-      if (cashToPos > 0) {
-        await _updateAccount(txn, report.hotelId, 'cash', cashToPos, 'expense', 'تحويل نقد لشبكة (خروج)', report.id, 'daily_report');
-        await _updateAccount(txn, report.hotelId, 'bank', cashToPos, 'income', 'تحويل نقد لشبكة (دخول)', report.id, 'daily_report');
-      }
-
-      // 3. الزيادة والنقص
-      double increase = double.tryParse(adjustments['increase']?.toString() ?? '0') ?? 0;
-      if (increase > 0) {
-        String method = adjustments['increase_effect'] == 'نقد' ? 'cash' : 'bank';
-        await _updateAccount(txn, report.hotelId, method, increase, 'income', 'زيادة في العهدة: ${report.date}', report.id, 'daily_report');
-      }
-      
-      double shortage = double.tryParse(adjustments['shortage']?.toString() ?? '0') ?? 0;
-      if (shortage > 0) {
-        String method = adjustments['shortage_effect'] == 'نقد' ? 'cash' : 'bank';
-        await _updateAccount(txn, report.hotelId, method, shortage, 'expense', 'عجز في العهدة: ${report.date}', report.id, 'daily_report');
-      }
-
-      // 4. إنشاء سجل في الأموال المودعة (لغرض الأرشفة)
-      await txn.insert('deposited_funds', {
-        'hotel_id': report.hotelId,
-        'report_id': report.id,
-        'date': report.date,
-        'cash_amount': cashIn - (double.tryParse(expenseDetails['cash_to_pos']?.toString() ?? '0') ?? 0), // تقريبي للأرشفة
-        'network_amount': bankIn,
-        'cash_status': 'transferred',
-        'network_status': 'transferred',
-        'is_archived': 1,
-      });
-
-      // 5. تحديث حالة التقرير وإقفاله
-      await txn.update('financial_reports', {'is_posted': 1, 'is_locked': 1}, where: 'id = ?', whereArgs: [report.id]);
-    });
   }
 
   Future<void> addPerson(int hotelId, String name) async {
@@ -290,6 +183,27 @@ class FinancialEngine {
     });
   }
 
+  /// "مسحوبات المالك" — سحب مبلغ من خزنة الفندق (نقد/شبكة) لصالح المالك
+  /// شخصياً: خصم من [paymentMethodCategory] ('cash' أو 'bank') + قيد مقابل
+  /// على حساب `owner_debt` (أصل: المالك مدين للفندق) بنفس المبلغ، ذرّياً.
+  /// عكس اتجاه حساب 'personal' (التزام: الفندق مدين للمالك) عمداً — مفهومان
+  /// مختلفان، لا يجوز خلطهما. يُستدعى فقط عند الترحيل الفعلي، بنفس لحظة
+  /// ترحيل أي نقد/شبكة عادي — راجع VaultRepository.
+  Future<void> recordOwnerDrawing({
+    required int hotelId,
+    required double amount,
+    required String paymentMethodCategory,
+    required String description,
+    int? referenceId,
+    String? referenceType,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _updateAccount(txn, hotelId, paymentMethodCategory, amount, 'expense', description, referenceId, referenceType);
+      await _updateAccount(txn, hotelId, 'owner_debt', amount, 'income', description, referenceId, referenceType);
+    });
+  }
+
   Future<FinancialAccount> _getAccount(dynamic txn, int hotelId, String category) async {
     final results = await txn.query('financial_accounts', where: 'hotel_id = ? AND category = ?', whereArgs: [hotelId, category], limit: 1);
     if (results.isEmpty) {
@@ -310,6 +224,7 @@ class FinancialEngine {
       case 'personal': return 'حساب المالك';
       case 'entity': return 'ديون لمنشآت أخرى';
       case 'receivable_entity': return 'مستحقات من منشآت أخرى';
+      case 'owner_debt': return 'مسحوبات المالك (مستحقة)';
       default: return category;
     }
   }
@@ -318,7 +233,7 @@ class FinancialEngine {
     if (category.startsWith('receivable_entity_')) return 'asset';
     if (category.startsWith('entity_')) return 'liability';
     if (category == 'cash' || category == 'bank' || category == 'receivable_entity' || category == 'client') return 'asset';
-    if (category.startsWith('person_')) return 'asset';
+    if (category.startsWith('person_') || category == 'owner_debt') return 'asset';
     if (category == 'personal' || category == 'entity' || category == 'supplier') return 'liability';
     return 'asset';
   }
