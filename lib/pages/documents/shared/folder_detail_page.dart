@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
 import '../../../core/app_colors.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
@@ -11,12 +16,14 @@ import '../../../models/hotel.dart';
 import '../../../repositories/document_repository.dart';
 import '../../../repositories/employee_repository.dart';
 import '../../../repositories/hotel_repository.dart';
+import '../../../services/document_merge_service.dart';
 import '../../dashboard/pages/hotel_document_edit_page.dart';
 import '../../dashboard/widgets/document_card.dart';
 import 'create_document_for_folder_page.dart';
 import 'document_hotel_label.dart';
 import 'employee_picker_sheet.dart';
 import 'link_existing_documents_page.dart';
+import 'selectable_document_card.dart';
 
 /// "داخل المجلد" — عامة لأي مجلد (نوع مرجعي) بغض النظر عن دورة حياته
 /// (دائم/موسمي/مستندات موظفين/أي نوع مستقبلي)، تعرض كل المستندات المرتبطة
@@ -56,6 +63,15 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   int? _selectedEmployeeId;
   _StatusFilter _statusFilter = _StatusFilter.all;
   String _query = '';
+
+  bool _selectionMode = false;
+  // List وليس Set عمداً — يحفظ ترتيب اختيار المستخدم الفعلي، وهو ما يُستخدم
+  // حرفياً كترتيب صفحات الدمج (البند خامس عشر): "متابعة" لا "إعادة فرز".
+  final List<int> _selectedIds = [];
+  bool _isBusy = false;
+  // آخر قائمة مستندات مُحمَّلة فعلياً (بعد الفلاتر) — تحتاجها أزرار المشاركة/
+  // الدمج في AppBar وضع التحديد، وهي خارج نطاق FutureBuilder نفسه.
+  List<Document> _lastLoadedDocuments = [];
 
   late Future<List<Document>> _future;
 
@@ -116,7 +132,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     final status = DocumentStatus.fromExpiryDate(d.expiryDate).label;
     return name.contains(q) ||
         (d.documentNumber?.contains(q) ?? false) ||
-        (d.issuingAuthority?.contains(q) ?? false) ||
         status.contains(q) ||
         (_isEmployeeFolder && _employeeLabel(d).contains(q));
   }
@@ -213,12 +228,108 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
   }
 
   Future<void> _openDocument(Document document) async {
-    final hotel = _hotels.firstWhere((h) => h.id == document.hotelId, orElse: () => const Hotel(arabicName: '', englishName: '', city: ''));
+    // مستند عام (hotelId=null) يُعدَّل بلا أي فندق — لا حاجة لإيجاد/اختلاق
+    // فندق له؛ HotelDocumentEditPage تدعم hotel=null وتستخدم الثيم الافتراضي.
+    Hotel? hotel;
+    if (document.hotelId != null) {
+      for (final h in _hotels) {
+        if (h.id == document.hotelId) {
+          hotel = h;
+          break;
+        }
+      }
+    }
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => HotelDocumentEditPage(hotel: hotel, document: document)),
     );
     if (result == true && mounted) _reload();
+  }
+
+  // ---------------- التحديد المتعدد ----------------
+
+  void _enterSelectionMode(Document document) {
+    if (document.id == null) return;
+    setState(() {
+      _selectionMode = true;
+      _selectedIds
+        ..clear()
+        ..add(document.id!);
+    });
+  }
+
+  void _toggleSelection(Document document) {
+    if (document.id == null) return;
+    setState(() {
+      if (_selectedIds.contains(document.id)) {
+        _selectedIds.remove(document.id);
+      } else {
+        _selectedIds.add(document.id!);
+      }
+      if (_selectedIds.isEmpty) _selectionMode = false;
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  /// المستندات المحدَّدة بترتيب اختيارها الفعلي (وليس ترتيب عرضها في القائمة).
+  List<Document> _selectedDocumentsInOrder(List<Document> allDocuments) {
+    final byId = {for (final d in allDocuments) if (d.id != null) d.id!: d};
+    return [for (final id in _selectedIds) if (byId.containsKey(id)) byId[id]!];
+  }
+
+  Future<void> _shareSelected(List<Document> allDocuments) async {
+    final selected = _selectedDocumentsInOrder(allDocuments);
+    if (selected.isEmpty || _isBusy) return;
+    setState(() => _isBusy = true);
+    try {
+      final files = <XFile>[];
+      for (final doc in selected) {
+        if (doc.id == null) continue;
+        final attachments = await _documentRepository.getAttachments(doc.id!);
+        for (final attachment in attachments) {
+          if (await File(attachment.filePath).exists()) files.add(XFile(attachment.filePath));
+        }
+      }
+      if (!mounted) return;
+      if (files.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("لا توجد مرفقات للمستندات المحددة")));
+        return;
+      }
+      await Share.shareXFiles(files);
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  /// دمج مرفقات المستندات المحدَّدة في ملف PDF واحد — بترتيب الاختيار
+  /// بالضبط (راجع DocumentMergeService وحدّها الواقعي المُفصَح عنه: ترقيم
+  /// بصري وليس دمجاً متجهياً). الناتج يُعرض فوراً عبر ورقة مشاركة — لا يُنشئ
+  /// أي سجل مستند جديد في قاعدة البيانات.
+  Future<void> _mergeSelected(List<Document> allDocuments) async {
+    final selected = _selectedDocumentsInOrder(allDocuments);
+    if (selected.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("اختر مستندَين على الأقل للدمج")));
+      return;
+    }
+    if (_isBusy) return;
+    setState(() => _isBusy = true);
+    try {
+      final bytes = await DocumentMergeService.mergeDocuments(selected, _documentRepository);
+      final tempDir = await getTemporaryDirectory();
+      final path = "${tempDir.path}/merged_documents_${DateTime.now().millisecondsSinceEpoch}.pdf";
+      await File(path).writeAsBytes(bytes);
+      if (mounted) await Share.shareXFiles([XFile(path)], text: "مستندات مدموجة");
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("تعذّر الدمج: $e")));
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
   }
 
   /// إزالة مرجع المستند من هذا المجلد فقط — لا يحذف المستند نفسه ولا مرفقاته
@@ -291,11 +402,30 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(widget.folder.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: _selectionMode
+          ? AppBar(
+              leading: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: _exitSelectionMode),
+              title: Text("${_selectedIds.length} محدَّد", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+              centerTitle: true,
+              iconTheme: const IconThemeData(color: Colors.white),
+              actions: [
+                IconButton(
+                  icon: _isBusy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.share_outlined, color: Colors.white),
+                  tooltip: "مشاركة",
+                  onPressed: _isBusy ? null : () => _shareSelected(_lastLoadedDocuments),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.merge_type, color: Colors.white),
+                  tooltip: "دمج",
+                  onPressed: _isBusy ? null : () => _mergeSelected(_lastLoadedDocuments),
+                ),
+              ],
+            )
+          : AppBar(
+              title: Text(widget.folder.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+              centerTitle: true,
+              iconTheme: const IconThemeData(color: Colors.white),
+            ),
       body: Column(
         children: [
           Padding(
@@ -304,7 +434,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
               controller: _searchController,
               onChanged: (v) => setState(() => _query = v),
               decoration: InputDecoration(
-                hintText: "بحث بالاسم أو رقم المستند أو الجهة المصدرة أو الحالة",
+                hintText: "بحث بالاسم أو رقم المستند أو الحالة",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _query.isEmpty
                     ? null
@@ -353,6 +483,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 }
 
                 final documents = (snapshot.data ?? []).where(_matchesStatusFilter).where(_matchesSearch).toList();
+                _lastLoadedDocuments = documents;
                 if (documents.isEmpty) {
                   return Center(
                     child: Text(
@@ -390,23 +521,32 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          Stack(
-                            children: [
-                              DocumentCard(document: document, onTap: () => _openDocument(document)),
-                              Positioned(
-                                left: 4,
-                                top: 4,
-                                child: GestureDetector(
-                                  onTap: () => _unlinkDocument(document),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(3),
-                                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                                    child: const Icon(Icons.link_off, color: Colors.white, size: 15),
+                          _selectionMode
+                              ? SelectableDocumentCard(
+                                  document: document,
+                                  selected: _selectedIds.contains(document.id),
+                                  onTap: () => _toggleSelection(document),
+                                )
+                              : GestureDetector(
+                                  onLongPress: () => _enterSelectionMode(document),
+                                  child: Stack(
+                                    children: [
+                                      DocumentCard(document: document, onTap: () => _openDocument(document)),
+                                      Positioned(
+                                        left: 4,
+                                        top: 4,
+                                        child: GestureDetector(
+                                          onTap: () => _unlinkDocument(document),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(3),
+                                            decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                            child: const Icon(Icons.link_off, color: Colors.white, size: 15),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
                         ],
                       ),
                     );
@@ -417,11 +557,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddOptions,
-        icon: const Icon(Icons.add),
-        label: const Text("إضافة مستند"),
-      ),
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showAddOptions,
+              icon: const Icon(Icons.add),
+              label: const Text("إضافة مستند"),
+            ),
     );
   }
 

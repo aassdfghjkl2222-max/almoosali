@@ -76,7 +76,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
     return _DocumentsPageBundle(hotelDocuments: hotelDocs, employeeDocuments: employeeDocs, employeeNames: employeeNames);
   }
 
-  /// بحث فوري في اسم المستند، رقم المستند، الجهة المصدرة، ونص الحالة.
+  /// بحث فوري في اسم المستند، رقم المستند، ونص الحالة.
   bool _matchesSearch(Document d) {
     if (_query.trim().isEmpty) return true;
     final q = _query.trim();
@@ -84,7 +84,6 @@ class _DocumentsPageState extends State<DocumentsPage> {
     final status = DocumentStatus.fromExpiryDate(d.expiryDate).label;
     return name.contains(q) ||
         (d.documentNumber?.contains(q) ?? false) ||
-        (d.issuingAuthority?.contains(q) ?? false) ||
         status.contains(q);
   }
 

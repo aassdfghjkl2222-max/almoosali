@@ -2,6 +2,7 @@ import '../core/database/database_service.dart';
 import '../core/document_status.dart';
 import '../models/document.dart';
 import '../models/document_attachment.dart';
+import '../services/document_notification_service.dart';
 
 class DocumentRepository {
   final DatabaseService _databaseService = DatabaseService();
@@ -46,6 +47,36 @@ class DocumentRepository {
     return map != null ? Document.fromMap(map) : null;
   }
 
+  /// كل مستندات النظام بلا فلترة — لمزامنة تنبيهات الانتهاء الشاملة فقط
+  /// (DocumentNotificationService)، وليس لأي شاشة عرض.
+  Future<List<Document>> getAllDocuments() async {
+    final maps = await _databaseService.getAllDocuments();
+    return maps.map((map) => Document.fromMap(map)).toList();
+  }
+
+  /// كل المستندات "العامة" — مُرتَّبة حسب أولوية حالة الانتهاء كبقية الشاشات
+  /// (منتهٍ أولاً)، بخلاف [getGeneralAndHotelDocuments] التي تحافظ على ترتيب
+  /// المجموعتين (عامة ثم فندق) عمداً.
+  Future<List<Document>> getGeneralDocuments() async {
+    final maps = await _databaseService.getGeneralDocuments();
+    return _sortedByStatusPriority(maps);
+  }
+
+  /// المستندات العامة أولاً ثم مستندات فندق واحد فقط — **بلا** إعادة فرز
+  /// حسب حالة الانتهاء (خلافاً لبقية دوال هذا المستودع) لأن ترتيب
+  /// "عامة ثم فندق" جزء من المتطلَّب نفسه، لا تفصيل عرض ثانوي.
+  Future<List<Document>> getGeneralAndHotelDocuments(int hotelId) async {
+    final maps = await _databaseService.getGeneralAndHotelDocuments(hotelId);
+    return maps.map((map) => Document.fromMap(map)).toList();
+  }
+
+  /// بحث/فلترة عبر "المستندات الخاصة" بالكامل (كل المجلدات معاً) — يُغذّي
+  /// شاشة البحث الموحّدة في مركز المستندات.
+  Future<List<Document>> searchDocumentsAdvanced({String? query, List<int>? hotelIds, int? documentTypeId}) async {
+    final maps = await _databaseService.searchDocumentsAdvanced(query: query, hotelIds: hotelIds, documentTypeId: documentTypeId);
+    return _sortedByStatusPriority(maps);
+  }
+
   /// بحث بالاسم عبر كل مستندات النظام — أساس "ربط مستند موجود" (مرجع لمستند
   /// حالي داخل مجلد آخر، بلا نسخ للملف أو للسجل). فلترة اختيارية بمجموعة
   /// فنادق (نفس منطق [getDocumentsInFolder])، ومُرتَّبة حسب أولوية حالة
@@ -82,18 +113,26 @@ class DocumentRepository {
     return await _databaseService.getDocumentHotelIdsBatch(documentIds);
   }
 
+  /// نقطة الإنشاء الوحيدة — تُعيد جدولة تنبيهات الانتهاء تلقائياً (30/10/5/0
+  /// يوم) فتغطي كل شاشات الإنشاء بلا أي استدعاء إضافي متفرّق.
   Future<int> addDocument(Document document) async {
-    return await _databaseService.insertDocument(document.toMap());
+    final id = await _databaseService.insertDocument(document.toMap());
+    await DocumentNotificationService.rescheduleForDocument(document.copyWith(id: id));
+    return id;
   }
 
+  /// نقطة التعديل الوحيدة — تُعيد جدولة تنبيهات الانتهاء (تُلغي القديمة أولاً)
+  /// فتغطي أي تغيير في تاريخ الانتهاء تلقائياً.
   Future<void> updateDocument(Document document) async {
     if (document.id != null) {
       await _databaseService.updateById('documents', document.toMap(), document.id!);
+      await DocumentNotificationService.rescheduleForDocument(document);
     }
   }
 
   Future<void> deleteDocument(int id) async {
     await _databaseService.deleteById('documents', id);
+    await DocumentNotificationService.cancelForDocument(id);
   }
 
   /// يُعيد تزويد كل الفنادق فوراً بنسخة فارغة من أي نوع مرجعي ناقص — يُستدعى

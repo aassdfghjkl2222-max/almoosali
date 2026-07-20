@@ -46,7 +46,7 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
   List<Hotel> _hotels = [];
   List<DocumentCategory> _categories = [];
   String _scope = 'all';
-  Set<int> _selectedHotelIds = {};
+  int? _selectedHotelId;
 
   String? _nameError;
   bool _isLoading = true;
@@ -68,7 +68,8 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
       _descriptionController.text = folder.description ?? '';
       _scope = folder.scope;
       if (widget.showHotelScope && _scope == 'specific') {
-        _selectedHotelIds = (await _repository.getHotelsForType(folder.id!)).toSet();
+        final ids = await _repository.getHotelsForType(folder.id!);
+        _selectedHotelId = ids.isEmpty ? null : ids.first;
       }
     }
 
@@ -88,8 +89,8 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
       setState(() => _nameError = "اسم المجلد إجباري");
       return;
     }
-    if (widget.showHotelScope && _scope == 'specific' && _selectedHotelIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار فندق واحد على الأقل")));
+    if (widget.showHotelScope && _scope == 'specific' && _selectedHotelId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار الفندق")));
       return;
     }
 
@@ -113,7 +114,7 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
         setState(() => _isSaving = true);
         final description = _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim();
         final scope = widget.showHotelScope ? _scope : 'all';
-        final hotelIds = widget.showHotelScope && scope == 'specific' ? _selectedHotelIds.toList() : <int>[];
+        final hotelIds = widget.showHotelScope && scope == 'specific' && _selectedHotelId != null ? [_selectedHotelId!] : <int>[];
 
         if (_isEditMode) {
           await _repository.updateType(
@@ -197,14 +198,14 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
           Text("نطاق المجلد", style: AppTextStyles.bodyBold),
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
-            title: const Text("جميع الفنادق"),
+            title: const Text("لجميع الفنادق"),
             value: 'all',
             groupValue: _scope,
             onChanged: (v) => setState(() => _scope = v!),
           ),
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
-            title: const Text("فنادق محددة"),
+            title: const Text("خاص بفندق واحد"),
             value: 'specific',
             groupValue: _scope,
             onChanged: (v) => setState(() => _scope = v!),
@@ -215,19 +216,12 @@ class _AddEditDocumentFolderPageState extends State<AddEditDocumentFolderPage> {
             if (_hotels.isEmpty)
               const Padding(padding: EdgeInsets.symmetric(vertical: AppSizes.sm), child: Text("لا توجد فنادق مسجَّلة", style: AppTextStyles.caption))
             else
-              ..._hotels.map((h) => CheckboxListTile(
+              ..._hotels.map((h) => RadioListTile<int>(
                     contentPadding: EdgeInsets.zero,
                     title: Text(h.arabicName),
-                    value: _selectedHotelIds.contains(h.id),
-                    onChanged: (checked) {
-                      setState(() {
-                        if (checked == true) {
-                          _selectedHotelIds.add(h.id!);
-                        } else {
-                          _selectedHotelIds.remove(h.id);
-                        }
-                      });
-                    },
+                    value: h.id!,
+                    groupValue: _selectedHotelId,
+                    onChanged: (v) => setState(() => _selectedHotelId = v),
                   )),
           ],
         ],

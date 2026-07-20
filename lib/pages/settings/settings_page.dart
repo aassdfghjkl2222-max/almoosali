@@ -8,6 +8,8 @@ import '../../core/app_theme_controller.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/training_mode_controller.dart';
+import '../../repositories/document_repository.dart';
+import '../../services/document_notification_service.dart';
 import '../../services/security_service.dart';
 import '../../services/training_mode_service.dart';
 import '../dashboard/pages/hotels_page.dart';
@@ -530,7 +532,7 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               Icon(Icons.info_outline, size: 16, color: AppColors.info),
               SizedBox(width: 8),
-              Expanded(child: Text("لا يرسل التطبيق إشعارات فعلية بعد — هذه التفضيلات محفوظة وجاهزة لتفعيل نظام الإشعارات مستقبلاً.", style: TextStyle(fontSize: 11, color: AppColors.info))),
+              Expanded(child: Text("عند التفعيل، يُرسِل التطبيق تذكيرات محلية بانتهاء المستندات (قبل 30 و10 و5 أيام ويوم الانتهاء).", style: TextStyle(fontSize: 11, color: AppColors.info))),
             ],
           ),
         ),
@@ -544,6 +546,9 @@ class _SettingsPageState extends State<SettingsPage> {
               await AppPreferences.setBool(AppPreferences.keyNotificationsEnabled, v);
               if (!mounted) return;
               setState(() => _notificationsEnabled = v);
+              if (v) await DocumentNotificationService.requestPermissionIfNeeded();
+              final documents = await DocumentRepository().getAllDocuments();
+              await DocumentNotificationService.rescheduleAll(documents);
             },
           ),
           const Divider(height: 1, indent: 50),

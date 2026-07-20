@@ -42,7 +42,6 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
 
   final _nameController = TextEditingController();
   final _numberController = TextEditingController();
-  final _issueDateController = TextEditingController();
   final _expiryDateController = TextEditingController();
   final _notesController = TextEditingController();
 
@@ -50,7 +49,7 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
 
   List<Hotel> _hotels = [];
   String _hotelScope = Document.hotelScopeAll;
-  final Set<int> _selectedHotelIds = {};
+  int? _selectedHotelId;
 
   List<Employee> _employees = [];
   Employee? _selectedEmployee;
@@ -100,7 +99,6 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
   void dispose() {
     _nameController.dispose();
     _numberController.dispose();
-    _issueDateController.dispose();
     _expiryDateController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -144,8 +142,8 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار الموظف")));
       return;
     }
-    if (!_isEmployeeOwner && _hotelScope == Document.hotelScopeSpecific && _selectedHotelIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار فندق واحد على الأقل")));
+    if (!_isEmployeeOwner && _hotelScope == Document.hotelScopeSingle && _selectedHotelId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار الفندق")));
       return;
     }
     if (widget.folder.requiresRenewal && _expiryDateController.text.trim().isEmpty) {
@@ -173,13 +171,12 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
             documentTypeId: widget.folder.id,
             name: name,
             documentNumber: _numberController.text.trim().isEmpty ? null : _numberController.text.trim(),
-            issueDate: _issueDateController.text.trim().isEmpty ? null : _issueDateController.text.trim(),
             expiryDate: _expiryDateController.text.trim(),
             notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             createdAt: DateTime.now().toIso8601String(),
           );
         } else {
-          final primaryHotelId = _hotelScope == Document.hotelScopeSpecific && _selectedHotelIds.isNotEmpty ? _selectedHotelIds.first : null;
+          final primaryHotelId = _hotelScope == Document.hotelScopeSingle ? _selectedHotelId : null;
           documentHotelId = primaryHotelId;
           document = Document(
             hotelId: primaryHotelId,
@@ -189,7 +186,6 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
             documentTypeId: widget.folder.id,
             name: name,
             documentNumber: _numberController.text.trim().isEmpty ? null : _numberController.text.trim(),
-            issueDate: _issueDateController.text.trim().isEmpty ? null : _issueDateController.text.trim(),
             expiryDate: _expiryDateController.text.trim(),
             notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             createdAt: DateTime.now().toIso8601String(),
@@ -198,9 +194,6 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
 
         final documentId = await _documentRepository.addDocument(document);
         await _documentRepository.linkDocumentToFolder(documentId, widget.folder.id!);
-        if (!_isEmployeeOwner && _hotelScope == Document.hotelScopeSpecific) {
-          await _documentRepository.setDocumentHotels(documentId, _selectedHotelIds.toList());
-        }
 
         if (_pickedFile != null && _pickedFileType != null) {
           await _documentRepository.addAttachment(DocumentAttachment(
@@ -255,8 +248,6 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
                       AppTextField(controller: _numberController, hint: "رقم المستند (اختياري)", icon: Icons.numbers_outlined),
                       const SizedBox(height: AppSizes.md),
                       _buildFileTypeIndicator(),
-                      const SizedBox(height: AppSizes.md),
-                      _buildDateField("تاريخ الإصدار (اختياري)", _issueDateController),
                       const SizedBox(height: AppSizes.md),
                       _buildDateField(
                         widget.folder.requiresRenewal ? "تاريخ الانتهاء (إجباري)" : "تاريخ الانتهاء (اختياري)",
@@ -348,45 +339,42 @@ class _CreateDocumentForFolderPageState extends State<CreateDocumentForFolderPag
     );
   }
 
+  /// يحدِّد هل المستند "عام" (لا يتبع فندقاً، hotelId=null) أو "خاص بفندق
+  /// واحد" فقط — خيار ثنائي بسيط بدل نطاقات متعددة الفنادق القديمة، حتى
+  /// يطابق مبدأ "عام أو خاص بفندق واحد" في تصميم النظام الجديد.
   Widget _buildScopeSection() {
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("نطاق ظهور المستند", style: AppTextStyles.bodyBold),
+          Text("هل هذا المستند عام أم خاص بفندق؟", style: AppTextStyles.bodyBold),
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
-            title: const Text("جميع الفنادق"),
+            title: const Text("عام (لا يتبع فندقاً)"),
+            subtitle: const Text("يخص الشركة بالكامل، مثل السجل التجاري أو العنوان الوطني", style: AppTextStyles.caption),
             value: Document.hotelScopeAll,
             groupValue: _hotelScope,
             onChanged: (v) => setState(() => _hotelScope = v!),
           ),
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
-            title: const Text("فنادق محددة"),
-            value: Document.hotelScopeSpecific,
+            title: const Text("خاص بفندق واحد"),
+            value: Document.hotelScopeSingle,
             groupValue: _hotelScope,
             onChanged: (v) => setState(() => _hotelScope = v!),
           ),
-          if (_hotelScope == Document.hotelScopeSpecific) ...[
+          if (_hotelScope == Document.hotelScopeSingle) ...[
             const Divider(height: 1),
             const SizedBox(height: AppSizes.sm),
             if (_hotels.isEmpty)
               const Padding(padding: EdgeInsets.symmetric(vertical: AppSizes.sm), child: Text("لا توجد فنادق مسجَّلة", style: AppTextStyles.caption))
             else
-              ..._hotels.map((h) => CheckboxListTile(
+              ..._hotels.map((h) => RadioListTile<int>(
                     contentPadding: EdgeInsets.zero,
                     title: Text(h.arabicName),
-                    value: _selectedHotelIds.contains(h.id),
-                    onChanged: (checked) {
-                      setState(() {
-                        if (checked == true) {
-                          _selectedHotelIds.add(h.id!);
-                        } else {
-                          _selectedHotelIds.remove(h.id);
-                        }
-                      });
-                    },
+                    value: h.id!,
+                    groupValue: _selectedHotelId,
+                    onChanged: (v) => setState(() => _selectedHotelId = v),
                   )),
           ],
         ],

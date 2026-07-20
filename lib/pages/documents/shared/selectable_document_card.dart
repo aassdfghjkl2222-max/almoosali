@@ -14,6 +14,7 @@ class SelectableDocumentCard extends StatelessWidget {
   final Document document;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final String? hotelLabel;
 
   const SelectableDocumentCard({
@@ -21,6 +22,7 @@ class SelectableDocumentCard extends StatelessWidget {
     required this.document,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
     this.hotelLabel,
   });
 
@@ -41,6 +43,7 @@ class SelectableDocumentCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           child: Row(

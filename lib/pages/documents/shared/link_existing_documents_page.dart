@@ -6,6 +6,7 @@ import '../../../models/document.dart';
 import '../../../models/document_type.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/document_repository.dart';
+import '../../../repositories/document_type_repository.dart';
 import '../../../repositories/hotel_repository.dart';
 import '../../../widgets/common/app_dialog.dart';
 import 'document_hotel_label.dart';
@@ -16,11 +17,12 @@ import 'selectable_document_card.dart';
 /// واحداً أو أكثر لإضافتها كمراجع فقط — بلا أي نسخ للملف أو للسجل (مبدأ
 /// References). عامة لأي مجلد بغض النظر عن دورة حياته.
 ///
-/// فلتر الفندق أعلى الشاشة (🏨 الفندق: جميع الفنادق افتراضياً، أو فندق واحد
-/// محدَّد) قاعدة تصميم موحّدة لكل شاشة تعرض مستندات عبر أكثر من فندق —
-/// راجع [documentHotelLabel] و[SelectableDocumentCard]. عند اختيار "جميع
-/// الفنادق" يظهر اسم فندق كل مستند داخل بطاقته؛ عند اختيار فندق محدَّد يُخفى
-/// (معروف مسبقاً من الفلتر)، والبحث يعمل داخل نطاق الفندق المُختار فقط.
+/// **مجلد مرتبط بفندق واحد بالضبط** ([DocumentType.scope] == 'specific' وله
+/// فندق واحد فقط): القائمة تُقفَل تلقائياً على (المستندات العامة + مستندات
+/// ذلك الفندق فقط) عبر [DocumentRepository.getGeneralAndHotelDocuments] —
+/// بلا فلتر فندق يدوي، وبلا ظهور مستندات أي فندق آخر إطلاقاً؛ اسم الفندق لا
+/// يظهر تحت كل بطاقة (معروف من السياق). **مجلد "لجميع الفنادق"**: يبقى
+/// السلوك القديم كاملاً (فلتر فندق يدوي + بحث عبر كل المستندات).
 ///
 /// [ownerTypeFilter] اختياري: عند تمريره (مثلاً [Document.ownerTypeEmployee]
 /// من مجلدات مستندات الموظفين) تُقصَر القائمة على مستندات نفس نوع المالك
@@ -36,11 +38,14 @@ class LinkExistingDocumentsPage extends StatefulWidget {
 
 class _LinkExistingDocumentsPageState extends State<LinkExistingDocumentsPage> {
   final _documentRepository = DocumentRepository();
+  final _documentTypeRepository = DocumentTypeRepository();
   final _hotelRepository = HotelRepository();
   final _searchController = TextEditingController();
 
   List<Hotel> _hotels = [];
-  int? _selectedHotelId; // null = جميع الفنادق
+  int? _selectedHotelId; // فلتر يدوي — يُستخدم فقط عندما لا يكون المجلد مقفلاً على فندق واحد
+  int? _lockedHotelId; // مُشتَق تلقائياً من نطاق المجلد نفسه (scope == 'specific' بفندق واحد)
+  bool get _isLockedToOneHotel => _lockedHotelId != null;
 
   List<Document> _documents = [];
   Map<int, List<int>> _specificHotelLinks = {};
@@ -66,6 +71,10 @@ class _LinkExistingDocumentsPageState extends State<LinkExistingDocumentsPage> {
 
   Future<void> _bootstrap() async {
     _hotels = await _hotelRepository.getAllHotels();
+    if (widget.folder.scope == 'specific') {
+      final ids = await _documentTypeRepository.getHotelsForType(widget.folder.id!);
+      if (ids.length == 1) _lockedHotelId = ids.first;
+    }
     final linked = await _documentRepository.getDocumentsInFolder(widget.folder.id!, ownerType: widget.ownerTypeFilter);
     _alreadyLinkedIds = linked.map((d) => d.id!).toSet();
     _selectedIds.addAll(_alreadyLinkedIds);
@@ -75,11 +84,19 @@ class _LinkExistingDocumentsPageState extends State<LinkExistingDocumentsPage> {
 
   Future<void> _loadDocuments() async {
     setState(() => _isLoadingDocuments = true);
-    final documents = await _documentRepository.searchDocumentsByName(
-      '',
-      ownerType: widget.ownerTypeFilter,
-      hotelIds: _selectedHotelId == null ? null : [_selectedHotelId!],
-    );
+    List<Document> documents;
+    if (_isLockedToOneHotel) {
+      documents = await _documentRepository.getGeneralAndHotelDocuments(_lockedHotelId!);
+      if (widget.ownerTypeFilter != null) {
+        documents = documents.where((d) => d.ownerType == widget.ownerTypeFilter).toList();
+      }
+    } else {
+      documents = await _documentRepository.searchDocumentsByName(
+        '',
+        ownerType: widget.ownerTypeFilter,
+        hotelIds: _selectedHotelId == null ? null : [_selectedHotelId!],
+      );
+    }
     final specificIds = documents.where((d) => d.hotelScope == Document.hotelScopeSpecific && d.id != null).map((d) => d.id!).toList();
     _specificHotelLinks = await _documentRepository.getDocumentHotelIdsBatch(specificIds);
     if (mounted) {
@@ -189,17 +206,26 @@ class _LinkExistingDocumentsPageState extends State<LinkExistingDocumentsPage> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      onPressed: _pickHotelFilter,
-                      icon: const Icon(Icons.apartment_outlined, size: 16),
-                      label: Text("🏨 $hotelFilterLabel", overflow: TextOverflow.ellipsis),
+                if (_isLockedToOneHotel)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text("المستندات العامة ومستندات هذا الفندق فقط", style: AppTextStyles.caption),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: _pickHotelFilter,
+                        icon: const Icon(Icons.apartment_outlined, size: 16),
+                        label: Text("🏨 $hotelFilterLabel", overflow: TextOverflow.ellipsis),
+                      ),
                     ),
                   ),
-                ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
                   child: TextField(
@@ -231,7 +257,9 @@ class _LinkExistingDocumentsPageState extends State<LinkExistingDocumentsPage> {
                                 return SelectableDocumentCard(
                                   document: doc,
                                   selected: isSelected,
-                                  hotelLabel: _selectedHotelId == null ? documentHotelLabel(doc, hotels: _hotels, specificHotelLinks: _specificHotelLinks) : null,
+                                  hotelLabel: (!_isLockedToOneHotel && _selectedHotelId == null)
+                                      ? documentHotelLabel(doc, hotels: _hotels, specificHotelLinks: _specificHotelLinks)
+                                      : null,
                                   onTap: () {
                                     setState(() {
                                       if (isSelected) {

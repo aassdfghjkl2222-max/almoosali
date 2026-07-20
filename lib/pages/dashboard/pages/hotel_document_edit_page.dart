@@ -23,9 +23,12 @@ import '../../../widgets/common/app_text_field.dart';
 /// "البيانات المرجعية"). المستندات القديمة غير المرتبطة بنوع (من قبل هذه
 /// الميزة) تُحرَّر بشكل مبسَّط (الاسم/التاريخ فقط) وتبقى قابلة للحذف.
 class HotelDocumentEditPage extends StatefulWidget {
-  final Hotel hotel;
+  /// null للمستندات "العامة" (hotelId=null) التي تُعدَّل مباشرة من داخل
+  /// "المستندات الدائمة" بلا الحاجة للدخول لأي فندق — الشاشة تستخدم الثيم
+  /// الافتراضي للتطبيق في هذه الحالة بدل هوية فندق بصرية.
+  final Hotel? hotel;
   final Document document;
-  const HotelDocumentEditPage({super.key, required this.hotel, required this.document});
+  const HotelDocumentEditPage({super.key, this.hotel, required this.document});
 
   @override
   State<HotelDocumentEditPage> createState() => _HotelDocumentEditPageState();
@@ -37,9 +40,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
 
   final _nameController = TextEditingController();
   final _documentNumberController = TextEditingController();
-  final _issueDateController = TextEditingController();
   final _expiryDateController = TextEditingController();
-  final _issuingAuthorityController = TextEditingController();
   final _notesController = TextEditingController();
 
   List<DocumentAttachment> _attachments = [];
@@ -54,9 +55,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
     _document = widget.document;
     _nameController.text = _document.typeName ?? _document.name;
     _documentNumberController.text = _document.documentNumber ?? '';
-    _issueDateController.text = _document.issueDate ?? '';
     _expiryDateController.text = _document.expiryDate;
-    _issuingAuthorityController.text = _document.issuingAuthority ?? '';
     _notesController.text = _document.notes ?? '';
     _loadAttachments();
   }
@@ -65,9 +64,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
   void dispose() {
     _nameController.dispose();
     _documentNumberController.dispose();
-    _issueDateController.dispose();
     _expiryDateController.dispose();
-    _issuingAuthorityController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -113,9 +110,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
         final updated = _document.copyWith(
           name: _isLegacy ? _nameController.text.trim() : _document.name,
           documentNumber: _documentNumberController.text.trim().isEmpty ? null : _documentNumberController.text.trim(),
-          issueDate: _issueDateController.text.trim().isEmpty ? null : _issueDateController.text.trim(),
           expiryDate: _expiryDateController.text.trim(),
-          issuingAuthority: _issuingAuthorityController.text.trim().isEmpty ? null : _issuingAuthorityController.text.trim(),
           notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         );
         await _repository.updateDocument(updated);
@@ -168,7 +163,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
     for (final file in picked) {
       await _repository.addAttachment(DocumentAttachment(
         documentId: _document.id!,
-        hotelId: widget.hotel.id!,
+        hotelId: _document.hotelId ?? 0,
         filePath: file.path,
         fileType: 'image',
         fileName: file.name,
@@ -183,7 +178,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
     if (picked == null || _document.id == null) return;
     await _repository.addAttachment(DocumentAttachment(
       documentId: _document.id!,
-      hotelId: widget.hotel.id!,
+      hotelId: _document.hotelId ?? 0,
       filePath: picked.path,
       fileType: 'pdf',
       fileName: picked.name,
@@ -293,11 +288,7 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
                 ],
                 AppTextField(controller: _documentNumberController, hint: "رقم المستند (اختياري)", icon: Icons.numbers_outlined),
                 const SizedBox(height: AppSizes.md),
-                _buildDateField("تاريخ الإصدار (اختياري)", _issueDateController),
-                const SizedBox(height: AppSizes.md),
                 _buildDateField(_document.requiresRenewal ? "تاريخ الانتهاء (إجباري)" : "تاريخ الانتهاء (اختياري)", _expiryDateController),
-                const SizedBox(height: AppSizes.md),
-                AppTextField(controller: _issuingAuthorityController, hint: "الجهة المصدرة (اختياري)", icon: Icons.account_balance_outlined),
                 const SizedBox(height: AppSizes.md),
                 AppTextField(controller: _notesController, hint: "ملاحظات (اختياري)", icon: Icons.notes_outlined, maxLines: 3),
               ],

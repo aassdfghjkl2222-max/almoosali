@@ -9,6 +9,8 @@ import 'core/training_mode_controller.dart';
 import 'models/hotel.dart';
 import 'pages/login/security_setup_page.dart';
 import 'pages/login/pin_login_page.dart';
+import 'repositories/document_repository.dart';
+import 'services/document_notification_service.dart';
 import 'services/security_service.dart';
 
 void main() async {
@@ -19,6 +21,10 @@ void main() async {
   await TrainingModeController.bootstrap();
 
   runApp(ManazelApp(hasPin: hasPin));
+
+  // مزامنة شاملة صامتة لتنبيهات انتهاء المستندات عند كل إقلاع — بلا await
+  // عمداً حتى لا تُؤخِّر ظهور أول شاشة.
+  DocumentRepository().getAllDocuments().then(DocumentNotificationService.rescheduleAll);
 }
 
 class ManazelApp extends StatelessWidget {

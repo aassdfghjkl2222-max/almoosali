@@ -6,6 +6,7 @@ import '../../../models/document_type.dart';
 import '../../../repositories/document_type_repository.dart';
 import '../../document_types/add_edit_document_type_page.dart';
 import '../shared/folder_detail_page.dart';
+import 'folderless_document_list_page.dart';
 
 /// "المستندات الدائمة" — قائمة "المجلدات" (كل مجلد هو نوع مستند مرجعي
 /// بدورة حياة `DocumentType.lifecyclePermanent`، مثل البلدية والدفاع
@@ -62,23 +63,74 @@ class _PermanentDocumentsPageState extends State<PermanentDocumentsPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _folders.isEmpty
-              ? _buildEmptyState()
-              : GridView.builder(
-                  padding: const EdgeInsets.all(AppSizes.md),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: AppSizes.md,
-                    crossAxisSpacing: AppSizes.md,
-                    childAspectRatio: 1.1,
+          : ListView(
+              padding: const EdgeInsets.all(AppSizes.md),
+              children: [
+                _buildGeneralDocumentsEntry(),
+                const SizedBox(height: AppSizes.lg),
+                Text("المستندات الخاصة", style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: AppSizes.xs),
+                const Text("مجلدات مستندات الفنادق — أنشئ مستنداً عاماً أو خاصاً بفندق من داخل أي مجلد", style: AppTextStyles.caption),
+                const SizedBox(height: AppSizes.sm),
+                if (_folders.isEmpty)
+                  _buildEmptyState()
+                else
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: AppSizes.md,
+                      crossAxisSpacing: AppSizes.md,
+                      childAspectRatio: 1.1,
+                    ),
+                    itemCount: _folders.length,
+                    itemBuilder: (context, index) => _buildFolderCard(_folders[index]),
                   ),
-                  itemCount: _folders.length,
-                  itemBuilder: (context, index) => _buildFolderCard(_folders[index]),
-                ),
+              ],
+            ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createFolder,
         icon: const Icon(Icons.create_new_folder_outlined),
         label: const Text("مجلد جديد"),
+      ),
+    );
+  }
+
+  /// بطاقة دخول ثابتة لـ"المستندات العامة" — عرض حي (فلتر hotelId=null) وليس
+  /// مجلداً فعلياً، راجع FolderlessDocumentListPage وDocumentRepository
+  /// .getGeneralDocuments.
+  Widget _buildGeneralDocumentsEntry() {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg), side: BorderSide(color: Theme.of(context).dividerColor)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FolderlessDocumentListPage())),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSizes.md),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: primary.withOpacity(0.1), shape: BoxShape.circle),
+                child: Icon(Icons.corporate_fare_outlined, color: primary),
+              ),
+              const SizedBox(width: AppSizes.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("المستندات العامة", style: AppTextStyles.bodyBold),
+                    const Text("مستندات تخص الشركة بالكامل، لا تتبع فندقاً", style: AppTextStyles.caption),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios, size: 14),
+            ],
+          ),
+        ),
       ),
     );
   }

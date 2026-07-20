@@ -922,6 +922,91 @@ class DatabaseService {
     );
   }
 
+  /// كل مستندات النظام بلا أي فلترة — تُستخدم فقط لمزامنة تنبيهات انتهاء
+  /// المستندات الشاملة (DocumentNotificationService)، وليست لأي شاشة عرض.
+  Future<List<Map<String, dynamic>>> getAllDocuments() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      ''');
+  }
+
+  /// كل المستندات "العامة" (hotelId=null) في النظام بغض النظر عن أي مجلد
+  /// تظهر فيه — استعلام حي فقط (فلتر)، وليس عضوية مجلد فعلي: يطابق مبدأ
+  /// "لا نسخ" (مستند عام يظهر هنا تلقائياً حتى لو أُنشئ من داخل أي مجلد آخر).
+  Future<List<Map<String, dynamic>>> getGeneralDocuments() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      WHERE d.hotel_id IS NULL AND d.owner_type = 'hotel'
+      ORDER BY d.created_at DESC
+      ''');
+  }
+
+  /// المستندات العامة أولاً ثم مستندات فندق واحد بعينه فقط — لا مستندات أي
+  /// فندق آخر — تُستخدم عند اختيار مستندات لمجلد موسمي مرتبط بفندق واحد
+  /// (البند سابعاً). ترتيبان منفصلان مُتّصلان (وليس استعلاماً واحداً بترتيب
+  /// حسابي) حتى تبقى المجموعتان متمايزتين بوضوح للطبقة الأعلى.
+  Future<List<Map<String, dynamic>>> getGeneralAndHotelDocuments(int hotelId) async {
+    final general = await getGeneralDocuments();
+    final db = await database;
+    final hotelOnly = await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      WHERE d.hotel_id = ? AND d.owner_type = 'hotel'
+      ORDER BY d.created_at DESC
+      ''',
+      [hotelId],
+    );
+    return [...general, ...hotelOnly];
+  }
+
+  /// بحث/فلترة متقدّمة عبر كل مستندات "المستندات الخاصة" معاً (وليس داخل
+  /// مجلد واحد فقط) — فندق، مجلد (نوع مرجعي)، ونص بحث حر، كلها اختيارية
+  /// ومجتمعة بـAND. فلتر الحالة يبقى في طبقة العرض (يعتمد على تاريخ اليوم).
+  Future<List<Map<String, dynamic>>> searchDocumentsAdvanced({String? query, List<int>? hotelIds, int? documentTypeId}) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <dynamic>[];
+    if (query != null && query.trim().isNotEmpty) {
+      where.add('(d.name LIKE ? OR dt.name LIKE ? OR d.document_number LIKE ?)');
+      args.addAll(['%$query%', '%$query%', '%$query%']);
+    }
+    if (documentTypeId != null) {
+      where.add('d.document_type_id = ?');
+      args.add(documentTypeId);
+    }
+    if (hotelIds != null && hotelIds.isNotEmpty) {
+      where.add(_hotelScopeWhereClause(hotelIds, args));
+    }
+    final whereClause = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    return await db.rawQuery(
+      '''
+      SELECT d.*, dt.name as type_name, dt.description as type_description, dt.is_mandatory, dt.requires_renewal,
+             dc.name as category_name, dc.color_value as category_color, h.arabic_name as hotel_name
+      FROM documents d
+      LEFT JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      LEFT JOIN hotels h ON h.id = d.hotel_id
+      $whereClause
+      ORDER BY d.created_at DESC
+      ''',
+      args,
+    );
+  }
+
   Future<int> insertDocumentFolderLink(int documentId, int documentTypeId) async {
     final db = await database;
     return await db.insert('document_folder_links', {'document_id': documentId, 'document_type_id': documentTypeId}, conflictAlgorithm: ConflictAlgorithm.ignore);

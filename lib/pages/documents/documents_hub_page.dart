@@ -4,6 +4,7 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../widgets/common/coming_soon_page.dart';
+import 'documents_search_page.dart';
 import 'employees/employee_documents_hub_page.dart';
 import 'permanent/permanent_documents_page.dart';
 import 'seasonal/seasonal_documents_page.dart';
@@ -90,8 +91,9 @@ class DocumentsHubPage extends StatelessWidget {
       entries: [
         _DocumentsHubEntry(
           title: "البحث في جميع المستندات",
-          subtitle: "بحث موحّد عبر كل مستندات التطبيق بغض النظر عن الجهة المالكة",
+          subtitle: "بحث وفلاتر موحّدة عبر كل المستندات الخاصة بالفنادق",
           icon: Icons.search,
+          builder: (_) => const DocumentsSearchPage(),
         ),
         _DocumentsHubEntry(
           title: "المستندات المنتهية",

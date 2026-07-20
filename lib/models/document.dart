@@ -37,8 +37,6 @@ class Document {
   final String createdAt;
   final int? documentTypeId;
   final String? documentNumber;
-  final String? issueDate;
-  final String? issuingAuthority;
   final String? notes;
   final String ownerType;
   final int? ownerId;
@@ -60,8 +58,6 @@ class Document {
     required this.createdAt,
     this.documentTypeId,
     this.documentNumber,
-    this.issueDate,
-    this.issuingAuthority,
     this.notes,
     this.ownerType = ownerTypeHotel,
     this.ownerId,
@@ -86,8 +82,6 @@ class Document {
       'created_at': createdAt,
       'document_type_id': documentTypeId,
       'document_number': documentNumber,
-      'issue_date': issueDate,
-      'issuing_authority': issuingAuthority,
       'notes': notes,
       'owner_type': ownerType,
       'owner_id': ownerId,
@@ -104,8 +98,6 @@ class Document {
       createdAt: map['created_at'] as String,
       documentTypeId: map['document_type_id'] as int?,
       documentNumber: map['document_number'] as String?,
-      issueDate: map['issue_date'] as String?,
-      issuingAuthority: map['issuing_authority'] as String?,
       notes: map['notes'] as String?,
       ownerType: map['owner_type'] as String? ?? ownerTypeHotel,
       ownerId: map['owner_id'] as int?,
@@ -128,8 +120,6 @@ class Document {
     String? createdAt,
     int? documentTypeId,
     String? documentNumber,
-    String? issueDate,
-    String? issuingAuthority,
     String? notes,
     String? ownerType,
     int? ownerId,
@@ -150,8 +140,6 @@ class Document {
       createdAt: createdAt ?? this.createdAt,
       documentTypeId: documentTypeId ?? this.documentTypeId,
       documentNumber: documentNumber ?? this.documentNumber,
-      issueDate: issueDate ?? this.issueDate,
-      issuingAuthority: issuingAuthority ?? this.issuingAuthority,
       notes: notes ?? this.notes,
       ownerType: ownerType ?? this.ownerType,
       ownerId: ownerId ?? this.ownerId,
