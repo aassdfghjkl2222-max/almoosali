@@ -61,7 +61,11 @@ String _dayNameForDate(String isoDate) {
 /// يُعيد بناء القالب الرسمي من تقرير محفوظ سابقاً (details_json) — تُستخدم
 /// في "التقارير السابقة" لعرض/مشاركة/تصدير أي تقرير قديم بنفس القالب
 /// المعتمد تماماً، دون الحاجة لإعادة تحميله داخل شاشة التعديل الحيّة.
-DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport report, required String hotelName}) {
+DailyReportTemplate buildTemplateFromSavedReport({
+  required FinancialReport report,
+  required String hotelName,
+  List<SharedExpenseTemplateLine> sharedExpenseLines = const [],
+}) {
   final details = report.detailsJson != null ? jsonDecode(report.detailsJson!) as Map<String, dynamic> : <String, dynamic>{};
   final inc = (details['income_details'] as Map?) ?? {};
   final exp = (details['expense_details'] as Map?) ?? {};
@@ -122,5 +126,6 @@ DailyReportTemplate buildTemplateFromSavedReport({required FinancialReport repor
     rawNetLines: netLines,
     netTotal: netCash + netPos + transfer + incTransfer,
     unwithdrawnLines: unwithdrawnLines,
+    sharedExpenseLines: sharedExpenseLines,
   );
 }

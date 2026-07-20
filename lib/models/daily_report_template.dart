@@ -19,6 +19,17 @@ class UnwithdrawnTemplateLine {
   const UnwithdrawnTemplateLine({required this.icon, required this.itemName, required this.label, this.amount = 0});
 }
 
+/// حصة هذا الفندق من "مصروف مشترك" بنفس تاريخ التقرير — عرض معلوماتي فقط
+/// (القيد المحاسبي نُفِّذ فوراً عند حفظ المصروف المشترك نفسه، راجع
+/// FinancialEngine.recordSharedExpense)، لا يدخل في أي مجموع بهذا التقرير.
+class SharedExpenseTemplateLine {
+  final String description;
+  final String fundingHotelName;
+  final double amount;
+  final bool isFundingHotel;
+  const SharedExpenseTemplateLine({required this.description, required this.fundingHotelName, required this.amount, required this.isFundingHotel});
+}
+
 /// القالب الرسمي الموحّد للتقرير المالي اليومي — بنية عرض بحتة (DTO) بلا أي
 /// منطق حسابي؛ كل الأرقام تصل إليه جاهزة من FinancialSummaryPage (المصدر
 /// الوحيد للحساب، دون أي تغيير). يُستهلَك من 3 مُخرجات بنفس الترتيب والمحتوى
@@ -42,6 +53,8 @@ class DailyReportTemplate {
 
   final List<UnwithdrawnTemplateLine> unwithdrawnLines;
 
+  final List<SharedExpenseTemplateLine> sharedExpenseLines;
+
   const DailyReportTemplate({
     required this.hotelName,
     required this.dayName,
@@ -54,6 +67,7 @@ class DailyReportTemplate {
     required this.netLines,
     required this.netTotal,
     required this.unwithdrawnLines,
+    this.sharedExpenseLines = const [],
   });
 }
 
@@ -71,6 +85,7 @@ DailyReportTemplate buildDailyReportTemplate({
   required List<ReportTemplateLine> rawNetLines,
   required double netTotal,
   required List<UnwithdrawnTemplateLine> unwithdrawnLines,
+  List<SharedExpenseTemplateLine> sharedExpenseLines = const [],
 }) {
   bool nonZero(ReportTemplateLine l) => l.amount.abs() >= 0.01;
   return DailyReportTemplate(
@@ -85,5 +100,6 @@ DailyReportTemplate buildDailyReportTemplate({
     netLines: rawNetLines.where(nonZero).toList(),
     netTotal: netTotal,
     unwithdrawnLines: unwithdrawnLines,
+    sharedExpenseLines: sharedExpenseLines,
   );
 }

@@ -68,5 +68,14 @@ String renderDailyReportAsText(DailyReportTemplate t) {
     }
   }
 
+  if (t.sharedExpenseLines.isNotEmpty) {
+    buffer
+      ..writeln(_separator)
+      ..writeln("🤝 مصروفات مشترَكة (نُفِّذت فوراً، للعرض فقط)");
+    for (final l in t.sharedExpenseLines) {
+      buffer.writeln("${l.description}: ${_currency.format(l.amount)} — ${l.isFundingHotel ? 'مموِّل' : 'مموَّل من ${l.fundingHotelName}'}");
+    }
+  }
+
   return buffer.toString().trimRight();
 }

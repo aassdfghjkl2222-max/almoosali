@@ -5,6 +5,8 @@ import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../models/hotel.dart';
+import '../../../models/financial_account.dart';
+import '../../../repositories/hotel_repository.dart';
 import '../../../services/financial_engine.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
@@ -20,10 +22,15 @@ class InterEntityDebtsPage extends StatefulWidget {
 
 class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with SingleTickerProviderStateMixin {
   final _engine = FinancialEngine();
+  final _hotelRepository = HotelRepository();
   late TabController _tabController;
   bool _isLoading = true;
-  double _payables = 0;
-  double _receivables = 0;
+  List<Hotel> _allHotels = [];
+
+  // كل بند التزام (ديون على المنشأة) بفئة entity_<otherHotelId> — مرتَّبة حسب المنشأة الأخرى.
+  List<FinancialAccount> _payableAccounts = [];
+  // كل بند أصل (مستحقات للمنشأة) بفئة receivable_entity_<otherHotelId>.
+  List<FinancialAccount> _receivableAccounts = [];
   List<Map<String, dynamic>> _ledger = [];
 
   @override
@@ -33,12 +40,40 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
     _loadData();
   }
 
+  int? _otherHotelIdFromCategory(String category) {
+    if (category.startsWith('receivable_entity_')) return int.tryParse(category.substring('receivable_entity_'.length));
+    if (category.startsWith('entity_')) return int.tryParse(category.substring('entity_'.length));
+    return null;
+  }
+
+  String _hotelName(int? id) {
+    if (id == null) return "منشأة أخرى";
+    return _allHotels.firstWhere((h) => h.id == id, orElse: () => Hotel(id: id, arabicName: "منشأة #$id", englishName: '', city: '')).arabicName;
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    _payables = await _engine.getBalance(widget.hotel.id!, 'entity');
-    _receivables = await _engine.getBalance(widget.hotel.id!, 'receivable_entity');
-    _ledger = await _engine.getLedger(widget.hotel.id!, 'entity');
-    if (mounted) setState(() => _isLoading = false);
+    final hotels = await _hotelRepository.getAllHotels();
+    final liabilities = await _engine.getAccountsByType(widget.hotel.id!, 'liability');
+    final assets = await _engine.getAccountsByType(widget.hotel.id!, 'asset');
+    final payables = liabilities.where((a) => a.category.startsWith('entity_') && a.balance > 0).toList();
+    final receivables = assets.where((a) => a.category.startsWith('receivable_entity_') && a.balance > 0).toList();
+
+    final ledgerLists = await Future.wait([
+      for (final a in [...payables, ...receivables]) _engine.getLedger(widget.hotel.id!, a.category),
+    ]);
+    final mergedLedger = ledgerLists.expand((l) => l).toList()
+      ..sort((a, b) => "${b['date']} ${b['time']}".compareTo("${a['date']} ${a['time']}"));
+
+    if (mounted) {
+      setState(() {
+        _allHotels = hotels;
+        _payableAccounts = payables;
+        _receivableAccounts = receivables;
+        _ledger = mergedLedger;
+        _isLoading = false;
+      });
+    }
   }
 
   String _formatCurrency(double amount) {
@@ -64,7 +99,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
           ],
         ),
       ),
-      body: _isLoading 
+      body: _isLoading
         ? const Center(child: CircularProgressIndicator())
         : TabBarView(
             controller: _tabController,
@@ -77,48 +112,89 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
   }
 
   Widget _buildOverviewTab(Color identityColor) {
+    if (_payableAccounts.isEmpty && _receivableAccounts.isEmpty) {
+      return const Center(child: Text("لا توجد ذمم مع منشآت أخرى حالياً", style: AppTextStyles.caption));
+    }
     return ListView(
       padding: const EdgeInsets.all(AppSizes.md),
       children: [
-        _buildBalanceCard("ديون على المنشأة", _payables, Colors.deepOrange, "سداد الآن", identityColor, () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => SettleDebtPage(
-            hotel: widget.hotel,
-            debtCategory: 'entity',
-            currentBalance: _payables,
-          ))).then((_) => _loadData());
-        }),
-        const SizedBox(height: AppSizes.md),
-        _buildBalanceCard("مستحقات للمنشأة", _receivables, Colors.blue, "عرض التفاصيل", identityColor, () {}),
+        if (_payableAccounts.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(bottom: AppSizes.sm),
+            child: Text("ديون على المنشأة (يجب سدادها)", style: AppTextStyles.bodyBold),
+          ),
+          for (final account in _payableAccounts) ...[
+            _buildCounterpartyCard(
+              hotelName: _hotelName(_otherHotelIdFromCategory(account.category)),
+              amount: account.balance,
+              color: Colors.deepOrange,
+              btnLabel: "سداد الآن",
+              identityColor: identityColor,
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => SettleDebtPage(
+                  hotel: widget.hotel,
+                  debtCategory: account.category,
+                  currentBalance: account.balance,
+                ))).then((_) => _loadData());
+              },
+            ),
+            const SizedBox(height: AppSizes.sm),
+          ],
+          const SizedBox(height: AppSizes.md),
+        ],
+        if (_receivableAccounts.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(bottom: AppSizes.sm),
+            child: Text("مستحقات للمنشأة (على منشآت أخرى)", style: AppTextStyles.bodyBold),
+          ),
+          for (final account in _receivableAccounts) ...[
+            _buildCounterpartyCard(
+              hotelName: _hotelName(_otherHotelIdFromCategory(account.category)),
+              amount: account.balance,
+              color: Colors.blue,
+              btnLabel: null,
+              identityColor: identityColor,
+              onTap: null,
+            ),
+            const SizedBox(height: AppSizes.sm),
+          ],
+        ],
       ],
     );
   }
 
-  Widget _buildBalanceCard(String title, double amount, Color color, String btnLabel, Color identityColor, VoidCallback onTap) {
+  Widget _buildCounterpartyCard({
+    required String hotelName,
+    required double amount,
+    required Color color,
+    required String? btnLabel,
+    required Color identityColor,
+    required VoidCallback? onTap,
+  }) {
     return AppCard(
       identityAccent: identityColor,
-      child: Column(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: AppTextStyles.caption),
-                  Text(_formatCurrency(amount), style: AppTextStyles.title.copyWith(color: color, fontSize: 24)),
-                ],
-              ),
-              ElevatedButton(
-                onPressed: amount > 0 ? onTap : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-                ),
-                child: Text(btnLabel),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hotelName, style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(_formatCurrency(amount), style: AppTextStyles.title.copyWith(color: color, fontSize: 22)),
+              ],
+            ),
           ),
+          if (btnLabel != null)
+            ElevatedButton(
+              onPressed: onTap,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+              ),
+              child: Text(btnLabel),
+            ),
         ],
       ),
     );

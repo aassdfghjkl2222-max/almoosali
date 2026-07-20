@@ -6,6 +6,8 @@ import '../../core/app_sizes.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/financial_report.dart';
 import '../../models/hotel.dart';
+import '../../models/daily_report_template.dart';
+import '../../repositories/shared_expense_repository.dart';
 import '../../services/daily_report_builder.dart';
 import '../../services/daily_report_text_renderer.dart';
 import '../../services/pdf_service.dart';
@@ -14,16 +16,57 @@ import '../../widgets/financial/daily_report_view.dart';
 /// عرض تقرير محفوظ سابقاً (للقراءة فقط) — يُفتح من "التقارير السابقة"،
 /// بنفس القالب الرسمي الموحّد بالضبط (DailyReportView) مع إمكانية المشاركة/
 /// النسخ/تصدير PDF/الطباعة لهذا التقرير المحدَّد فقط.
-class SavedReportViewPage extends StatelessWidget {
+class SavedReportViewPage extends StatefulWidget {
   final Hotel hotel;
   final FinancialReport report;
 
   const SavedReportViewPage({super.key, required this.hotel, required this.report});
 
   @override
+  State<SavedReportViewPage> createState() => _SavedReportViewPageState();
+}
+
+class _SavedReportViewPageState extends State<SavedReportViewPage> {
+  final _sharedExpenseRepository = SharedExpenseRepository();
+  DailyReportTemplate? _template;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final shares = await _sharedExpenseRepository.getSharesForHotelAndDate(widget.hotel.id!, widget.report.date);
+    final template = buildTemplateFromSavedReport(
+      report: widget.report,
+      hotelName: widget.hotel.arabicName,
+      sharedExpenseLines: [
+        for (final s in shares)
+          SharedExpenseTemplateLine(
+            description: s.groupDescription ?? '',
+            fundingHotelName: s.fundingHotelName ?? '',
+            amount: s.amount,
+            isFundingHotel: s.isFundingHotel,
+          ),
+      ],
+    );
+    if (mounted) setState(() => _template = template);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final hotel = widget.hotel;
+    final report = widget.report;
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
-    final template = buildTemplateFromSavedReport(report: report, hotelName: hotel.arabicName);
+    final template = _template;
+    if (template == null) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(backgroundColor: identityColor),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,

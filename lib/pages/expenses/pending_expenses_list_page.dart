@@ -11,6 +11,7 @@ import '../../repositories/expense_repository.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import 'add_pending_expense_page.dart';
+import 'add_shared_expense_page.dart';
 import 'expense_reports_page.dart';
 
 class PendingExpensesListPage extends StatefulWidget {
@@ -115,6 +116,17 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
         backgroundColor: identityColor,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.call_split),
+            tooltip: "مصروف مشترك",
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)),
+              );
+              if (result == true) _loadData();
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.bar_chart),
             onPressed: () {

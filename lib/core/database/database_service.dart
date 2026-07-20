@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 40, // Upgrade to v40 for pending_expenses.funding_source_hotel_id (owner drawings + inter-entity funded expenses)
+      version: 41, // Upgrade to v41 for shared_expense_groups/shared_expense_shares (المصروف المشترك)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -168,6 +168,18 @@ class DatabaseService {
         }
         if (oldVersion < 40) {
           try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN funding_source_hotel_id INTEGER'); } catch (_) {}
+        }
+        if (oldVersion < 41) {
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
         }
       },
     );
@@ -344,6 +356,13 @@ class DatabaseService {
       if (!await hasColumn('deposited_funds', 'posted_by')) {
         await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_by TEXT');
       }
+
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
       // بالحد الأدنى، وتُعاد المحاولة تلقائياً عند فتح التطبيق مرة أخرى.
@@ -378,6 +397,11 @@ class DatabaseService {
     // يُجمَّعان في "الذمم الدائنة" بمركز التحليل المالي (SupplierRepository.getAccountsPayableTotal).
     await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, pending_expense_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, statement TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT "غير مسدد", created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id), FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS pending_expense_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pending_expense_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (pending_expense_id) REFERENCES pending_expenses (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    // "المصروف المشترك": مصروف واحد تدفعه منشأة (funding_hotel_id) بالكامل، ويُوزَّع
+    // على عدة منشآت مشارِكة عبر shared_expense_shares — القيود المحاسبية تُنفَّذ فوراً
+    // عند الحفظ عبر FinancialEngine.recordSharedExpense، وهذان الجدولان للتتبع/العرض فقط.
+    await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     // كتالوج بنود التقرير المالي اليومي الدائمة (إيراد/مصروف) — راجع
     // FinancialReportItemRepository. لا تظهر تلقائياً في الشاشة، فقط عبر
     // منتقي "إضافة بند" — التقارير المحفوظة سابقاً تحتفظ بنسخة كاملة داخل
@@ -728,6 +752,23 @@ class DatabaseService {
 
   Future<int> insertPendingExpenseAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('pending_expense_attachments', data); }
   Future<List<Map<String, dynamic>>> getPendingExpenseAttachments(int pendingExpenseId) async { final db = await database; return await db.query('pending_expense_attachments', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId], orderBy: 'created_at DESC'); }
+
+  // ---------------- المصروف المشترك (shared_expense_groups/shared_expense_shares) ----------------
+
+  Future<int> insertSharedExpenseGroup(Map<String, dynamic> data) async { final db = await database; return await db.insert('shared_expense_groups', data); }
+  Future<int> insertSharedExpenseShare(Map<String, dynamic> data) async { final db = await database; return await db.insert('shared_expense_shares', data); }
+  Future<List<Map<String, dynamic>>> getSharedExpenseSharesForHotelAndDate(int hotelId, String date) async {
+    final db = await database;
+    return await db.rawQuery(
+      'SELECT s.*, g.description as group_description, g.total_amount as group_total_amount, g.payment_method as group_payment_method, '
+      'g.funding_hotel_id as group_funding_hotel_id, g.date as group_date, h.arabic_name as funding_hotel_name '
+      'FROM shared_expense_shares s '
+      'JOIN shared_expense_groups g ON g.id = s.shared_expense_group_id '
+      'JOIN hotels h ON h.id = g.funding_hotel_id '
+      'WHERE s.hotel_id = ? AND g.date = ? ORDER BY g.created_at DESC',
+      [hotelId, date],
+    );
+  }
 
   // ---------------- كتالوج بنود التقرير المالي اليومي (financial_report_items) ----------------
 

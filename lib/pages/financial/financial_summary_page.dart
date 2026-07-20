@@ -21,7 +21,9 @@ import '../../repositories/financial_repository.dart';
 import '../../repositories/expense_repository.dart';
 import '../../repositories/financial_report_item_repository.dart';
 import '../../repositories/vault_repository.dart';
+import '../../repositories/shared_expense_repository.dart';
 import '../../models/deposited_fund.dart';
+import '../../models/shared_expense_share.dart';
 import '../../models/daily_report_template.dart';
 import '../../services/daily_report_builder.dart';
 import '../../services/daily_report_text_renderer.dart';
@@ -141,6 +143,9 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   List<PendingExpense> _availablePendingExpenses = [];
   final Set<int> _selectedPendingIds = {};
 
+  final _sharedExpenseRepository = SharedExpenseRepository();
+  List<SharedExpenseShare> _sharedExpenseShares = [];
+
   double _totalIncome = 0;
   double _totalExpenses = 0;
   double _totalDebtExpenses = 0;
@@ -206,6 +211,8 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     final repository = FinancialRepository();
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final reports = await repository.getFinancialReportsInRange(hotelId: widget.hotel.id, startDate: dateStr, endDate: dateStr);
+    final sharedShares = await _sharedExpenseRepository.getSharesForHotelAndDate(widget.hotel.id!, dateStr);
+    if (mounted) setState(() => _sharedExpenseShares = sharedShares);
 
     if (reports.isNotEmpty) {
       final report = reports.first;
@@ -1284,6 +1291,15 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       rawNetLines: netLines,
       netTotal: _finalBalance,
       unwithdrawnLines: _collectUnwithdrawnLines(),
+      sharedExpenseLines: [
+        for (final s in _sharedExpenseShares)
+          SharedExpenseTemplateLine(
+            description: s.groupDescription ?? '',
+            fundingHotelName: s.fundingHotelName ?? '',
+            amount: s.amount,
+            isFundingHotel: s.isFundingHotel,
+          ),
+      ],
     );
   }
 

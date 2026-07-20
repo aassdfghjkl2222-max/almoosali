@@ -59,6 +59,10 @@ class DailyReportView extends StatelessWidget {
           const SizedBox(height: AppSizes.md),
           _buildUnwithdrawnCard(context),
         ],
+        if (template.sharedExpenseLines.isNotEmpty) ...[
+          const SizedBox(height: AppSizes.md),
+          _buildSharedExpenseCard(context),
+        ],
       ],
     );
   }
@@ -166,6 +170,42 @@ class DailyReportView extends StatelessWidget {
               ],
             ),
             if (l != template.unwithdrawnLines.last) const Divider(height: AppSizes.md),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// عرض معلوماتي فقط — حصص هذا الفندق من "مصروف مشترك" بنفس التاريخ، القيد
+  /// المحاسبي نُفِّذ فوراً عند حفظ المصروف المشترك نفسه (لا يدخل ضمن أي مجموع
+  /// بهذا التقرير، راجع SharedExpenseTemplateLine).
+  Widget _buildSharedExpenseCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSizes.md),
+      decoration: BoxDecoration(
+        color: Colors.teal.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: Colors.teal.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("🤝 مصروفات مشترَكة (نُفِّذت فوراً، للعرض فقط)", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal)),
+          const SizedBox(height: AppSizes.sm),
+          for (final l in template.sharedExpenseLines) ...[
+            Row(
+              children: [
+                Expanded(child: Text(l.description, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 6),
+                Text(_currency.format(l.amount), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              l.isFundingHotel ? "مموِّل — دُفع المبلغ الإجمالي كاملاً من هذا الفندق" : "مموَّل من ${l.fundingHotelName}",
+              style: const TextStyle(fontSize: 11, color: Colors.teal),
+            ),
+            if (l != template.sharedExpenseLines.last) const Divider(height: AppSizes.md),
           ],
         ],
       ),

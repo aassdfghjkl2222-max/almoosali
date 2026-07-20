@@ -155,6 +155,19 @@ class PdfService {
               cellAlignment: pw.Alignment.centerRight,
             ),
           ],
+          if (t.sharedExpenseLines.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            pw.Text("🤝 مصروفات مشترَكة (نُفِّذت فوراً، للعرض فقط)", style: pw.TextStyle(fontSize: 11, font: boldFont, color: PdfColors.teal700)),
+            pw.SizedBox(height: 4),
+            pw.TableHelper.fromTextArray(
+              headers: ["البيان", "المصدر", "المبلغ"],
+              data: t.sharedExpenseLines.map((l) => [l.description, l.isFundingHotel ? "مموِّل" : "مموَّل من ${l.fundingHotelName}", currency.format(l.amount)]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, font: boldFont, fontSize: 10),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.teal),
+              cellStyle: const pw.TextStyle(fontSize: 10),
+              cellAlignment: pw.Alignment.centerRight,
+            ),
+          ],
         ],
       ),
     );

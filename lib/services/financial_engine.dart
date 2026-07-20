@@ -204,6 +204,36 @@ class FinancialEngine {
     });
   }
 
+  /// "المصروف المشترك" — منشأة واحدة (fundingHotelId) تدفع مبلغاً إجمالياً
+  /// بالكامل، ويُوزَّع الأثر المحاسبي على عدة منشآت مشارِكة عبر [otherShares]
+  /// (hotelId → حصته، بلا المموِّل نفسه). يُنفَّذ فوراً عند الحفظ (بخلاف
+  /// "مسحوبات المالك"/التمويل الأحادي التي تنتظر الترحيل) لأن المصروف
+  /// المشترك مبلغ دُفع فعلياً بالكامل من طرف واحد. القيد: خصم كامل
+  /// [totalAmount] من [paymentMethodCategory] للمموِّل، ثم لكل حصة زيادة
+  /// `entity_$fundingHotelId` (التزام) على حساب المشارِك + `receivable_entity_<hotelId>`
+  /// (أصل) على حساب المموِّل — نفس الزوج الذي ينشئه [recordTransaction] تلقائياً
+  /// لحالة الفندق الواحد، مُكرَّراً هنا صراحة داخل معاملة واحدة بدل N استدعاء
+  /// منفصل (كل استدعاء لـ recordTransaction يفتح معاملته الخاصة).
+  Future<void> recordSharedExpense({
+    required int fundingHotelId,
+    required double totalAmount,
+    required String paymentMethodCategory,
+    required Map<int, double> otherShares,
+    required String description,
+    int? referenceId,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _updateAccount(txn, fundingHotelId, paymentMethodCategory, totalAmount, 'expense', description, referenceId, 'shared_expense');
+      for (final entry in otherShares.entries) {
+        final otherHotelId = entry.key;
+        final share = entry.value;
+        await _updateAccount(txn, otherHotelId, 'entity_$fundingHotelId', share, 'expense', 'مصروف مشترك: $description', referenceId, 'shared_expense');
+        await _updateAccount(txn, fundingHotelId, 'receivable_entity_$otherHotelId', share, 'income', 'مصروف مشترك (مستحق): $description', referenceId, 'shared_expense');
+      }
+    });
+  }
+
   Future<FinancialAccount> _getAccount(dynamic txn, int hotelId, String category) async {
     final results = await txn.query('financial_accounts', where: 'hotel_id = ? AND category = ?', whereArgs: [hotelId, category], limit: 1);
     if (results.isEmpty) {
