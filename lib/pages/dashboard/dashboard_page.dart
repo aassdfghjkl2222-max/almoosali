@@ -26,7 +26,6 @@ import 'widgets/hotel_info_card.dart';
 /// دالة بناء الصفحة المقصودة، بترتيب [_sections] الثابت المطلوب (لا يتغير).
 class _DashboardSection {
   final String title;
-  final String description;
   final IconData icon;
   final Color Function(HotelIdentity identity) color;
   final int Function(_DashboardPageState state)? badgeCount;
@@ -34,7 +33,6 @@ class _DashboardSection {
 
   const _DashboardSection({
     required this.title,
-    required this.description,
     required this.icon,
     required this.color,
     required this.builder,
@@ -45,7 +43,6 @@ class _DashboardSection {
 final List<_DashboardSection> _sections = [
   _DashboardSection(
     title: "العمليات المالية المعلقة",
-    description: "مصروفات وعمليات بانتظار الترحيل والاعتماد",
     icon: Icons.pending_actions_rounded,
     color: (_) => AppColors.warning,
     badgeCount: (state) => state._pendingCount,
@@ -53,49 +50,42 @@ final List<_DashboardSection> _sections = [
   ),
   _DashboardSection(
     title: "التقرير المالي",
-    description: "إدخال وعرض التقارير المالية اليومية",
     icon: Icons.account_balance_rounded,
     color: (_) => AppColors.success,
     builder: (context, hotel) => FinancialSummaryPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "المركز المالي",
-    description: "الخزنة والأرصدة وحركة الأموال",
     icon: Icons.account_balance_wallet_rounded,
     color: (identity) => identity.primary,
     builder: (context, hotel) => VaultDashboardPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "مستندات الفندق",
-    description: "التراخيص والمستندات الرسمية للفندق",
     icon: Icons.description_rounded,
     color: (_) => AppColors.info,
     builder: (context, hotel) => DocumentsPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "مركز التحليل",
-    description: "تحليلات وإحصائيات أداء الفندق",
     icon: Icons.analytics_rounded,
     color: (_) => const Color(0xFF6A1B9A),
     builder: (context, hotel) => AnalysisCenterPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "الفواتير الضريبية",
-    description: "فواتير الموردين وضريبة القيمة المضافة",
     icon: Icons.receipt_long_rounded,
     color: (_) => AppColors.secondary,
     builder: (context, hotel) => InvoicesPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "الموظفون",
-    description: "بيانات وملفات موظفي الفندق",
     icon: Icons.people_alt_rounded,
     color: (_) => const Color(0xFF00897B),
     builder: (context, hotel) => EmployeesPage(hotel: hotel),
   ),
   _DashboardSection(
     title: "المزيد",
-    description: "أقسام إضافية للفندق",
     icon: Icons.apps_rounded,
     color: (_) => const Color(0xFF616161),
     builder: (context, hotel) => MoreModulesPage(hotel: hotel),
@@ -243,7 +233,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                       DashboardSectionCard(
                         icon: _sections[i].icon,
                         title: _sections[i].title,
-                        description: _sections[i].description,
                         color: _sections[i].color(identity),
                         badgeCount: _sections[i].badgeCount?.call(this) ?? 0,
                         onTap: () async {

@@ -6,12 +6,13 @@ import '../../../core/app_text_styles.dart';
 
 /// بطاقة قسم أفقية بعرض الشاشة تقريباً — تحل محل بطاقات الشبكة القديمة
 /// (عنصرين في الصف). أيقونة كبيرة داخل حاوية دائرية بلون مميّز للقسم، اسم
-/// القسم، وصف مختصر أسفله، شارة عددية اختيارية، وسهم دخول — كلها بظل خفيف
-/// جداً وحواف دائرية كبيرة (راجع AppRadius.lg) لمظهر حديث وفاخر.
+/// القسم فقط (بلا وصف فرعي — تصميم مبسَّط ومختصر)، شارة عددية اختيارية،
+/// وسهم دخول — كلها بظل خفيف جداً وحواف دائرية كبيرة (راجع AppRadius.lg)
+/// لمظهر حديث وفاخر. يُعاد استخدامها في لوحة تحكم الفندق وشاشة العمليات
+/// المالية المعلقة لضمان تطابق الشكل بينهما.
 class DashboardSectionCard extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String description;
   final Color color;
   final int badgeCount;
   final VoidCallback onTap;
@@ -20,7 +21,6 @@ class DashboardSectionCard extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.description,
     required this.color,
     required this.onTap,
     this.badgeCount = 0,
@@ -53,14 +53,7 @@ class DashboardSectionCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: AppTextStyles.bodyBold.copyWith(fontSize: 15)),
-                      const SizedBox(height: 3),
-                      Text(description, style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ],
-                  ),
+                  child: Text(title, style: AppTextStyles.bodyBold.copyWith(fontSize: 15)),
                 ),
                 if (badgeCount > 0) ...[
                   const SizedBox(width: 8),

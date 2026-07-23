@@ -32,7 +32,22 @@ class PendingExpense {
 
   /// الاسم المحاسبي لسحوبات المالك الشخصية — تُخصَم من الخزنة عند الترحيل
   /// وتُنشئ تلقائياً ذمة على المالك (راجع FinancialEngine.recordOwnerDrawing).
+  /// [مُستبدَل بقسم "مسحوبات المالك" المستقل والفوري — يبقى فقط لعرض/تعديل
+  /// أي مصروفات معلّقة قديمة أُنشئت بهذا المسار قبل الاستبدال، بلا أي مسار
+  /// إضافة جديد يستخدمه بعد الآن.]
   static const paymentMethodOwnerDrawing = 'مسحوبات المالك';
+
+  /// "عهدة الفندق" — المالك يموِّل مصروفاً حقيقياً للفندق من ماله الخاص:
+  /// مصروف تشغيلي فعلي للفندق، لا يُخصَم أي نقد/شبكة/خزنة من الفندق، وتُنشأ
+  /// تلقائياً ذمة (التزام) على الفندق لصالح المالك عبر حساب 'personal' عند
+  /// الترحيل (راجع VaultRepository._postSpecialPendingExpenses).
+  static const paymentMethodHotelAdvance = 'شخصي';
+
+  /// "الخزنة" — مصدر تمويل فوري (خصم مباشر من رصيد الخزنة المتراكم عند
+  /// الترحيل) بخلاف "نقد" الذي يُخصم من إيراد اليوم نفسه قبل الإيداع. كلاهما
+  /// يؤول لنفس حساب FinancialEngine الداخلي ('cash') — الفرق توقيت/مصدر
+  /// الخصم فقط، لا الحساب المحاسبي. راجع VaultRepository._postSpecialPendingExpenses.
+  static const paymentMethodSafe = 'الخزنة';
 
   PendingExpense({
     this.id,
@@ -58,6 +73,7 @@ class PendingExpense {
 
   bool get isDeferredDebt => paymentMethod == fundingSourceDeferred;
   bool get isOwnerDrawing => paymentMethod == paymentMethodOwnerDrawing;
+  bool get isHotelAdvance => paymentMethod == paymentMethodHotelAdvance;
 
   /// هل المبلغ ممَّول فعلياً من فندق آخر (وليس هذا الفندق نفسه)؟ — يحدِّد
   /// استبعاده من صافي الخزنة وإنشاء الذمة التلقائية بين المنشآت عند الترحيل.

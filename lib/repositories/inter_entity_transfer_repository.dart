@@ -3,10 +3,18 @@ import '../models/inter_entity_transfer.dart';
 import '../services/financial_engine.dart';
 
 /// إنشاء واستعلام "التحويل بين المنشآت" — مبلغ يرسله فندق مباشرة إلى فندق
-/// آخر بلا مصروف مرتبط. القيد المحاسبي فوري عند الحفظ عبر
-/// [FinancialEngine.recordTransaction] بنفس آلية entity_/receivable_entity
-/// المستخدمة أصلاً لحالة "مصروف مموَّل من فندق آخر" — ذمة فقط، بلا أي أثر على
-/// أرصدة نقد/شبكة أي من الطرفين (نفس منطق النظام الحالي، بلا تغيير).
+/// آخر بلا مصروف مرتبط.
+///
+/// عندما تُفتح الشاشة من الفندق **المرسِل** (يُمرَّر [fundingSourceCategory])،
+/// يُستخدم [FinancialEngine.recordSharedExpense] — نفس الأسلوب المُستخدم أصلاً
+/// لـ"المصروف المشترك": يخصم مصدر التمويل المُختار فعلياً من أصول المرسِل
+/// (نقد/خزنة/شبكة) **و** ينشئ ذمة (المستقبِل مدين للمرسِل) في خطوة واحدة —
+/// حركة نقدية حقيقية + ذمة، وليس ذمة فقط.
+///
+/// عندما تُفتح من الفندق **المستقبِل** ([fundingSourceCategory] فارغ، لأن
+/// قرار تمويل الطرف المرسِل غير معروف من هذه الشاشة)، يبقى السلوك القديم:
+/// [FinancialEngine.recordTransaction] بآلية entity_/receivable_entity —
+/// ذمة فقط، بلا أثر على أي رصيد فعلي (نفس منطق "مصروف مموَّل من فندق آخر").
 class InterEntityTransferRepository {
   final _dbService = DatabaseService();
   final _financialEngine = FinancialEngine();
@@ -16,6 +24,7 @@ class InterEntityTransferRepository {
     required int toHotelId,
     required double amount,
     required String statement,
+    String? fundingSourceCategory,
   }) async {
     final now = DateTime.now();
     final transfer = InterEntityTransfer(
@@ -29,18 +38,29 @@ class InterEntityTransferRepository {
     );
     final id = await _dbService.insertInterEntityTransfer(transfer.toMap());
 
-    // المستقبِل (toHotelId) يصبح مديناً للمرسِل (fromHotelId) — نفس اتجاه
-    // "مصروف مموَّل من فندق آخر" تماماً (راجع VaultRepository._postSpecialPendingExpenses).
-    await _financialEngine.recordTransaction(
-      hotelId: toHotelId,
-      sourceCategory: 'entity_$fromHotelId',
-      amount: amount,
-      type: 'expense',
-      description: "تحويل بين المنشآت: $statement",
-      referenceId: id,
-      referenceType: 'inter_entity_transfer',
-      otherHotelId: fromHotelId,
-    );
+    if (fundingSourceCategory != null) {
+      // المرسِل يدفع فعلياً: خصم حقيقي من أصوله + ذمة على المستقبِل، معاً.
+      await _financialEngine.recordSharedExpense(
+        fundingHotelId: fromHotelId,
+        totalAmount: amount,
+        paymentMethodCategory: fundingSourceCategory,
+        otherShares: {toHotelId: amount},
+        description: "تحويل بين المنشآت: $statement",
+        referenceId: id,
+      );
+    } else {
+      // المستقبِل يُنشئ القيد: ذمة فقط، بلا معرفة مصدر تمويل المرسِل الفعلي.
+      await _financialEngine.recordTransaction(
+        hotelId: toHotelId,
+        sourceCategory: 'entity_$fromHotelId',
+        amount: amount,
+        type: 'expense',
+        description: "تحويل بين المنشآت: $statement",
+        referenceId: id,
+        referenceType: 'inter_entity_transfer',
+        otherHotelId: fromHotelId,
+      );
+    }
 
     return id;
   }

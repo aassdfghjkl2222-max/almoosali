@@ -17,7 +17,8 @@ import '../models/financial_report.dart';
   if (fundedByHotelName != null) return (icon: "🏨", label: fundedByHotelName);
   if (supplierName != null) return (icon: "🤝", label: "دين - $supplierName");
   if (method == "شبكة") return (icon: "💳", label: "شبكة");
-  if (method == "شخصي") return (icon: "👤", label: "مال المالك");
+  if (method == "الخزنة") return (icon: "🔒", label: "الخزنة");
+  if (method == "شخصي") return (icon: "👤", label: "عهدة الفندق");
   if (method.contains(" - ")) {
     final parts = method.split(" - ");
     return (icon: "🏨", label: "منشأة أخرى (${parts.first}) - ${parts.sublist(1).join(' - ')}");

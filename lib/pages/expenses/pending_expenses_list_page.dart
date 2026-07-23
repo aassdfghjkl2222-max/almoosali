@@ -19,13 +19,14 @@ import '../../services/financial_engine.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
-import 'add_advance_page.dart';
+import '../dashboard/widgets/dashboard_section_card.dart';
 import 'add_inter_entity_transfer_page.dart';
+import 'add_owner_withdrawal_page.dart';
 import 'add_pending_expense_page.dart';
 import 'add_shared_expense_page.dart';
 import 'expense_reports_page.dart';
 
-enum _OpCategory { expenses, shared, advance, ownerDrawing, transfer }
+enum _OpCategory { expenses, shared, hotelAdvance, ownerWithdrawal, transfer }
 
 class _CategoryMeta {
   final _OpCategory type;
@@ -39,20 +40,19 @@ class _CategoryMeta {
 const _categoryMetas = <_CategoryMeta>[
   _CategoryMeta(_OpCategory.expenses, "المصروفات", "إضافة مصروف", Icons.receipt_long_outlined, Color(0xFF7B1E3A)),
   _CategoryMeta(_OpCategory.shared, "المصروفات المشتركة", "إضافة مصروف مشترك", Icons.call_split, Color(0xFF1E63C7)),
-  _CategoryMeta(_OpCategory.advance, "العهد", "إضافة عهدة", Icons.account_balance_wallet_outlined, Color(0xFF1B8A5A)),
-  _CategoryMeta(_OpCategory.ownerDrawing, "مسحوبات المالك", "إضافة مسحوب", Icons.person_outline, Color(0xFFB8860B)),
+  _CategoryMeta(_OpCategory.hotelAdvance, "عهدة الفندق", "إضافة عهدة الفندق", Icons.account_balance_wallet_outlined, Color(0xFF1B8A5A)),
+  _CategoryMeta(_OpCategory.ownerWithdrawal, "مسحوبات المالك", "إضافة مسحوب", Icons.person_outline, Color(0xFFB8860B)),
   _CategoryMeta(_OpCategory.transfer, "التحويل بين المنشآت", "إضافة تحويل", Icons.swap_horiz, Color(0xFF6A3EA1)),
 ];
 
-/// بيانات عرض موحَّدة لبطاقة عملية — تُبنى من أي من النماذج الخمسة المختلفة
-/// (PendingExpense / SharedExpenseGroup / AdvanceWithdrawal / InterEntityTransfer)
-/// لتُعرض ببطاقة واحدة موحَّدة الشكل (راجع _buildOpCard).
+/// بيانات عرض موحَّدة لبطاقة عملية — تُبنى من أي من النماذج المختلفة لتُعرض
+/// ببطاقة واحدة موحَّدة الشكل (راجع _buildOpCard في _CategoryOperationsPage).
 class _OpCardData {
   final String statement;
   final String hotelName;
   final String date;
   final String time;
-  final String? paymentMethod;
+  final String? fundingSource;
   final String status;
   final Color statusColor;
   final double amount;
@@ -62,7 +62,7 @@ class _OpCardData {
     required this.hotelName,
     required this.date,
     required this.time,
-    this.paymentMethod,
+    this.fundingSource,
     required this.status,
     required this.statusColor,
     required this.amount,
@@ -70,6 +70,9 @@ class _OpCardData {
   });
 }
 
+/// الشاشة الرئيسية: قائمة عمودية من 5 بطاقات كبيرة (نفس شكل لوحة تحكم
+/// الفندق تماماً — راجع DashboardSectionCard)، كل بطاقة تفتح شاشتها المستقلة
+/// (_CategoryOperationsPage) عبر الضغط، بلا أي عرض لقوائم العمليات هنا.
 class PendingExpensesListPage extends StatefulWidget {
   final Hotel hotel;
   const PendingExpensesListPage({super.key, required this.hotel});
@@ -83,66 +86,49 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
   final _sharedRepo = SharedExpenseRepository();
   final _vaultRepo = VaultRepository();
   final _transferRepo = InterEntityTransferRepository();
-  final _hotelRepo = HotelRepository();
   final _financialEngine = FinancialEngine();
 
   bool _isLoading = true;
-  _OpCategory _activeCategory = _OpCategory.expenses;
-  final _searchController = TextEditingController();
-  String _searchQuery = '';
-  bool _showSearchBar = false;
-  String _sortBy = 'date'; // 'date' أو 'amount'
-
-  List<PendingExpense> _plainExpenses = [];
-  List<PendingExpense> _ownerDrawingExpenses = [];
-  List<SharedExpenseGroup> _sharedExpenses = [];
-  List<AdvanceWithdrawal> _advances = [];
-  List<InterEntityTransfer> _transfers = [];
-  Map<int, String> _hotelNames = {};
-
+  final Map<_OpCategory, int> _counts = {};
   double _ownerDebt = 0;
   List<FinancialAccount> _receivables = [];
+  Map<int, String> _hotelNames = {};
 
-  /// عتبة "ذمة كبيرة" لتنبيه المستخدم — قيمة افتراضية معقولة بانتظار تحديد
-  /// المستخدم لعتبة مخصَّصة لاحقاً إن رغب.
   static const double _largeBalanceThreshold = 50000;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadCounts();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadData() async {
+  Future<void> _loadCounts() async {
     setState(() => _isLoading = true);
     final hotelId = widget.hotel.id!;
 
     final allExpenses = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
     final sharedExpenses = await _sharedRepo.getSharedExpensesForFundingHotel(hotelId);
-    final advances = await _vaultRepo.getAdvanceWithdrawals(hotelId);
+    final ownerWithdrawals = await _vaultRepo.getAdvanceWithdrawals(hotelId);
     final transfers = await _transferRepo.getForHotel(hotelId);
-    final hotels = await _hotelRepo.getAllHotels();
     final ownerDebt = await _financialEngine.getBalance(hotelId, 'owner_debt');
     final receivableAccounts = await _financialEngine.getAccountsByType(hotelId, 'asset');
 
     if (!mounted) return;
+    final legacyOwnerDrawingCount = allExpenses.where((e) => e.isOwnerDrawing).length;
     setState(() {
-      _plainExpenses = allExpenses.where((e) => !e.isOwnerDrawing).toList();
-      _ownerDrawingExpenses = allExpenses.where((e) => e.isOwnerDrawing).toList();
-      _sharedExpenses = sharedExpenses;
-      _advances = advances;
-      _transfers = transfers;
-      _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
+      _counts[_OpCategory.expenses] = allExpenses.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance).length;
+      _counts[_OpCategory.shared] = sharedExpenses.length;
+      _counts[_OpCategory.hotelAdvance] = allExpenses.where((e) => e.isHotelAdvance).length;
+      _counts[_OpCategory.ownerWithdrawal] = ownerWithdrawals.length + legacyOwnerDrawingCount;
+      _counts[_OpCategory.transfer] = transfers.length;
       _ownerDebt = ownerDebt;
       _receivables = receivableAccounts.where((a) => a.balance > 0.01).toList();
       _isLoading = false;
     });
+
+    final hotelRepo = HotelRepository();
+    final hotels = await hotelRepo.getAllHotels();
+    if (mounted) setState(() => _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName});
   }
 
   int? _otherHotelIdFromReceivableCategory(String category) {
@@ -167,19 +153,162 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     return alerts;
   }
 
-  int _countFor(_OpCategory c) {
-    switch (c) {
+  Future<void> _openCategory(_CategoryMeta meta) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => _CategoryOperationsPage(hotel: widget.hotel, meta: meta)),
+    );
+    if (result == true) _loadCounts();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: HotelIdentityTitle(title: "العمليات المالية المعلقة", hotel: widget.hotel),
+        centerTitle: true,
+        backgroundColor: identityColor,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bar_chart),
+            tooltip: "التقارير والإحصائيات",
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ExpenseReportsPage(hotel: widget.hotel))),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadCounts,
+              child: ListView(
+                padding: const EdgeInsets.all(AppSizes.md),
+                children: [
+                  if (_largeBalanceAlerts.isNotEmpty) _buildAlertBanner(),
+                  for (final meta in _categoryMetas) ...[
+                    DashboardSectionCard(
+                      icon: meta.icon,
+                      title: meta.label,
+                      color: meta.color,
+                      badgeCount: _counts[meta.type] ?? 0,
+                      onTap: () => _openCategory(meta),
+                    ),
+                    const SizedBox(height: AppSizes.sm),
+                  ],
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildAlertBanner() {
+    final alerts = _largeBalanceAlerts;
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSizes.md),
+      padding: const EdgeInsets.all(AppSizes.sm),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 18),
+              SizedBox(width: 6),
+              Text("تنبيه: ذمم كبيرة", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ...alerts.map((a) => Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text("• $a", style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+/// شاشة عمليات قسم واحد — تُفتح من إحدى بطاقات [PendingExpensesListPage].
+/// نفس منطق البحث/التصفية/بطاقات العمليات المستخدَم سابقاً، لكن لقسم واحد
+/// فقط في كل مرة (بدل تبويبات أفقية داخل شاشة واحدة).
+class _CategoryOperationsPage extends StatefulWidget {
+  final Hotel hotel;
+  final _CategoryMeta meta;
+  const _CategoryOperationsPage({required this.hotel, required this.meta});
+
+  @override
+  State<_CategoryOperationsPage> createState() => _CategoryOperationsPageState();
+}
+
+class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
+  final _expenseRepo = ExpenseRepository();
+  final _sharedRepo = SharedExpenseRepository();
+  final _vaultRepo = VaultRepository();
+  final _transferRepo = InterEntityTransferRepository();
+  final _hotelRepo = HotelRepository();
+
+  bool _isLoading = true;
+  bool _changed = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _showSearchBar = false;
+  String _sortBy = 'date';
+
+  List<PendingExpense> _expenseRows = [];
+  List<SharedExpenseGroup> _sharedRows = [];
+  List<AdvanceWithdrawal> _ownerWithdrawalRows = [];
+  List<PendingExpense> _legacyOwnerDrawingRows = [];
+  List<InterEntityTransfer> _transferRows = [];
+  Map<int, String> _hotelNames = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    final hotelId = widget.hotel.id!;
+    switch (widget.meta.type) {
       case _OpCategory.expenses:
-        return _plainExpenses.length;
+        final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
+        _expenseRows = all.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance).toList();
+        final hotels = await _hotelRepo.getAllHotels();
+        _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
+        break;
       case _OpCategory.shared:
-        return _sharedExpenses.length;
-      case _OpCategory.advance:
-        return _advances.length;
-      case _OpCategory.ownerDrawing:
-        return _ownerDrawingExpenses.length;
+        _sharedRows = await _sharedRepo.getSharedExpensesForFundingHotel(hotelId);
+        break;
+      case _OpCategory.hotelAdvance:
+        final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
+        _expenseRows = all.where((e) => e.isHotelAdvance).toList();
+        break;
+      case _OpCategory.ownerWithdrawal:
+        _ownerWithdrawalRows = await _vaultRepo.getAdvanceWithdrawals(hotelId);
+        final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
+        _legacyOwnerDrawingRows = all.where((e) => e.isOwnerDrawing).toList();
+        break;
       case _OpCategory.transfer:
-        return _transfers.length;
+        _transferRows = await _transferRepo.getForHotel(hotelId);
+        final hotels = await _hotelRepo.getAllHotels();
+        _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
+        break;
     }
+    if (mounted) setState(() => _isLoading = false);
   }
 
   bool _matches(String text) {
@@ -187,10 +316,10 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     return text.toLowerCase().contains(_searchQuery.toLowerCase());
   }
 
-  List<_OpCardData> _cardsForActiveCategory() {
-    switch (_activeCategory) {
+  List<_OpCardData> _buildCards() {
+    switch (widget.meta.type) {
       case _OpCategory.expenses:
-        return _plainExpenses.where((e) => _matches(e.statement) || _matches(e.categoryName ?? '')).map((e) {
+        return _expenseRows.where((e) => _matches(e.statement) || _matches(e.categoryName ?? '')).map((e) {
           return _OpCardData(
             statement: e.statement,
             hotelName: e.isFundedByOtherHotel
@@ -198,7 +327,7 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
                 : widget.hotel.arabicName,
             date: e.date,
             time: e.time,
-            paymentMethod: e.paymentMethod,
+            fundingSource: e.paymentMethod,
             status: "بانتظار الترحيل",
             statusColor: Colors.orange,
             amount: e.amount,
@@ -206,49 +335,62 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
           );
         }).toList();
       case _OpCategory.shared:
-        return _sharedExpenses.where((g) => _matches(g.description)).map((g) {
+        return _sharedRows.where((g) => _matches(g.description)).map((g) {
           return _OpCardData(
             statement: g.description,
             hotelName: widget.hotel.arabicName,
             date: g.date,
             time: g.time,
-            paymentMethod: g.paymentMethod,
+            fundingSource: g.paymentMethod,
             status: "مُرحَّل فوراً",
             statusColor: Colors.green,
             amount: g.totalAmount,
-            onTap: () => _showDetail("مصروف مشترك", g.description, g.totalAmount, g.date, g.time, "دُفع بالكامل من ${widget.hotel.arabicName} فوراً، ويُوزَّع أثره على المنشآت المشارِكة دون انتظار الترحيل."),
+            onTap: () => _showDetail("مصروف مشترك", g.description, g.totalAmount, g.date, g.time,
+                "دُفع بالكامل من ${widget.hotel.arabicName} فوراً، ويُوزَّع أثره على المنشآت المشارِكة دون انتظار الترحيل."),
           );
         }).toList();
-      case _OpCategory.advance:
-        return _advances.where((a) => _matches(a.statement)).map((a) {
-          return _OpCardData(
-            statement: a.statement,
-            hotelName: widget.hotel.arabicName,
-            date: a.date,
-            time: a.time,
-            paymentMethod: a.method,
-            status: "مُرحَّل فوراً",
-            statusColor: Colors.green,
-            amount: a.amount,
-            onTap: () => _showDetail("عهدة", a.statement, a.amount, a.date, a.time, "سحب فوري لصالح المالك — تُنشئ ذمة على المالك تلقائياً."),
-          );
-        }).toList();
-      case _OpCategory.ownerDrawing:
-        return _ownerDrawingExpenses.where((e) => _matches(e.statement)).map((e) {
+      case _OpCategory.hotelAdvance:
+        return _expenseRows.where((e) => _matches(e.statement)).map((e) {
           return _OpCardData(
             statement: e.statement,
             hotelName: widget.hotel.arabicName,
             date: e.date,
             time: e.time,
-            paymentMethod: e.paymentMethod,
+            fundingSource: "المالك شخصياً",
             status: "بانتظار الترحيل",
             statusColor: Colors.orange,
             amount: e.amount,
-            onTap: () => _editExpense(e, lockToOwnerDrawing: true),
+            onTap: () => _editExpense(e, lockToHotelAdvance: true),
           );
         }).toList();
+      case _OpCategory.ownerWithdrawal:
+        final cards = <_OpCardData>[];
+        cards.addAll(_ownerWithdrawalRows.where((w) => _matches(w.statement)).map((w) => _OpCardData(
+              statement: w.statement,
+              hotelName: widget.hotel.arabicName,
+              date: w.date,
+              time: w.time,
+              fundingSource: w.method,
+              status: "مُنفَّذ",
+              statusColor: Colors.green,
+              amount: w.amount,
+              onTap: () => _showDetail("مسحوبات المالك", w.statement, w.amount, w.date, w.time,
+                  "دُفع للمالك فوراً من (${w.method}) — أصبح المالك مديناً للفندق بهذا المبلغ."),
+            )));
+        cards.addAll(_legacyOwnerDrawingRows.where((e) => _matches(e.statement)).map((e) => _OpCardData(
+              statement: e.statement,
+              hotelName: widget.hotel.arabicName,
+              date: e.date,
+              time: e.time,
+              fundingSource: "نقد (مسار قديم)",
+              status: "بانتظار الترحيل",
+              statusColor: Colors.orange,
+              amount: e.amount,
+              onTap: () => _editExpense(e, lockToOwnerDrawing: true),
+            )));
+        return cards;
       case _OpCategory.transfer:
-        return _transfers.where((t) => _matches(t.statement)).map((t) {
+        return _transferRows.where((t) => _matches(t.statement)).map((t) {
           final isOutgoing = t.fromHotelId == widget.hotel.id;
           final counterpart = _hotelNames[isOutgoing ? t.toHotelId : t.fromHotelId] ?? '—';
           return _OpCardData(
@@ -259,14 +401,21 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
             status: "مُنفَّذ",
             statusColor: Colors.green,
             amount: t.amount,
-            onTap: () => _showDetail("تحويل بين المنشآت", t.statement, t.amount, t.date, t.time, isOutgoing ? "أُرسل من ${widget.hotel.arabicName} إلى $counterpart — أصبح $counterpart مديناً لهذا الفندق." : "استُلم من $counterpart — أصبح ${widget.hotel.arabicName} مديناً له."),
+            onTap: () => _showDetail(
+              "تحويل بين المنشآت",
+              t.statement,
+              t.amount,
+              t.date,
+              t.time,
+              isOutgoing ? "أُرسل من ${widget.hotel.arabicName} إلى $counterpart — أصبح $counterpart مديناً لهذا الفندق." : "استُلم من $counterpart — أصبح ${widget.hotel.arabicName} مديناً له.",
+            ),
           );
         }).toList();
     }
   }
 
   List<_OpCardData> _sortedCards() {
-    final cards = _cardsForActiveCategory();
+    final cards = _buildCards();
     if (_sortBy == 'amount') {
       cards.sort((a, b) => b.amount.compareTo(a.amount));
     } else {
@@ -275,12 +424,22 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     return cards;
   }
 
-  Future<void> _editExpense(PendingExpense expense, {bool lockToOwnerDrawing = false}) async {
+  Future<void> _editExpense(PendingExpense expense, {bool lockToOwnerDrawing = false, bool lockToHotelAdvance = false}) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, editExpense: expense, lockToOwnerDrawing: lockToOwnerDrawing)),
+      MaterialPageRoute(
+        builder: (_) => AddPendingExpensePage(
+          hotel: widget.hotel,
+          editExpense: expense,
+          lockToOwnerDrawing: lockToOwnerDrawing,
+          lockToHotelAdvance: lockToHotelAdvance,
+        ),
+      ),
     );
-    if (result == true) _loadData();
+    if (result == true) {
+      _changed = true;
+      _loadData();
+    }
   }
 
   void _showDetail(String title, String statement, double amount, String date, String time, String note) {
@@ -318,24 +477,27 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
 
   Future<void> _openAdd() async {
     bool? result;
-    switch (_activeCategory) {
+    switch (widget.meta.type) {
       case _OpCategory.expenses:
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel)));
         break;
       case _OpCategory.shared:
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)));
         break;
-      case _OpCategory.advance:
-        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddAdvancePage(hotel: widget.hotel)));
+      case _OpCategory.hotelAdvance:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToHotelAdvance: true)));
         break;
-      case _OpCategory.ownerDrawing:
-        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToOwnerDrawing: true)));
+      case _OpCategory.ownerWithdrawal:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOwnerWithdrawalPage(hotel: widget.hotel)));
         break;
       case _OpCategory.transfer:
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInterEntityTransferPage(hotel: widget.hotel)));
         break;
     }
-    if (result == true) _loadData();
+    if (result == true) {
+      _changed = true;
+      _loadData();
+    }
   }
 
   void _openFilterSheet() {
@@ -388,159 +550,83 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
-    final activeMeta = _categoryMetas.firstWhere((m) => m.type == _activeCategory);
-
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: HotelIdentityTitle(title: "العمليات المالية المعلقة", hotel: widget.hotel),
-        centerTitle: true,
-        backgroundColor: identityColor,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bar_chart),
-            tooltip: "التقارير والإحصائيات",
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ExpenseReportsPage(hotel: widget.hotel))),
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: "بحث",
-            onPressed: () => setState(() => _showSearchBar = !_showSearchBar),
-          ),
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: "تصفية وترتيب",
-            onPressed: _openFilterSheet,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: Column(
-                children: [
-                  if (_largeBalanceAlerts.isNotEmpty) _buildAlertBanner(),
-                  _buildCategorySelector(),
-                  if (_showSearchBar)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
-                      child: TextField(
-                        controller: _searchController,
-                        autofocus: true,
-                        decoration: InputDecoration(
-                          hintText: "بحث في ${activeMeta.label}...",
-                          prefixIcon: const Icon(Icons.search, size: 20),
-                          isDense: true,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-                          filled: true,
-                          fillColor: Theme.of(context).cardColor,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) Navigator.pop(context, _changed);
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: HotelIdentityTitle(title: widget.meta.label, hotel: widget.hotel),
+          centerTitle: true,
+          backgroundColor: widget.meta.color,
+          iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: "بحث",
+              onPressed: () => setState(() => _showSearchBar = !_showSearchBar),
+            ),
+            IconButton(
+              icon: const Icon(Icons.tune),
+              tooltip: "تصفية وترتيب",
+              onPressed: _openFilterSheet,
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadData,
+                child: Column(
+                  children: [
+                    if (_showSearchBar)
+                      Padding(
+                        padding: const EdgeInsets.all(AppSizes.md),
+                        child: TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            hintText: "بحث في ${widget.meta.label}...",
+                            prefixIcon: const Icon(Icons.search, size: 20),
+                            isDense: true,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                            filled: true,
+                            fillColor: Theme.of(context).cardColor,
+                          ),
+                          onChanged: (v) => setState(() => _searchQuery = v),
                         ),
-                        onChanged: (v) => setState(() => _searchQuery = v),
                       ),
-                    ),
-                  Expanded(child: _buildActiveList(activeMeta)),
-                ],
+                    Expanded(child: _buildList()),
+                  ],
+                ),
               ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
+            child: AppButton(
+              text: widget.meta.addLabel,
+              icon: Icons.add,
+              onPressed: _openAdd,
+              backgroundColor: widget.meta.color,
             ),
-      bottomNavigationBar: _buildAddBar(activeMeta),
-    );
-  }
-
-  Widget _buildAlertBanner() {
-    final alerts = _largeBalanceAlerts;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, 0),
-      padding: const EdgeInsets.all(AppSizes.sm),
-      decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 18),
-              SizedBox(width: 6),
-              Text("تنبيه: ذمم كبيرة", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
-            ],
           ),
-          const SizedBox(height: 4),
-          ...alerts.map((a) => Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text("• $a", style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
-              )),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildCategorySelector() {
-    return SizedBox(
-      height: 104,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: 8),
-        itemCount: _categoryMetas.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final meta = _categoryMetas[i];
-          final selected = _activeCategory == meta.type;
-          final count = _countFor(meta.type);
-          return GestureDetector(
-            onTap: () => setState(() => _activeCategory = meta.type),
-            child: Container(
-              width: 112,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: selected ? meta.color.withValues(alpha: 0.12) : Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: selected ? meta.color : Colors.grey.shade300, width: selected ? 1.5 : 1),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Icon(meta.icon, color: meta.color, size: 20),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(color: meta.color, borderRadius: BorderRadius.circular(10)),
-                        child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    meta.label,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: selected ? meta.color : null),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildActiveList(_CategoryMeta activeMeta) {
+  Widget _buildList() {
     final cards = _sortedCards();
     if (cards.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(activeMeta.icon, size: 40, color: Colors.grey.shade400),
+            Icon(widget.meta.icon, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 8),
-            Text("لا توجد عمليات في \"${activeMeta.label}\"", style: AppTextStyles.caption),
+            Text("لا توجد عمليات في \"${widget.meta.label}\"", style: AppTextStyles.caption),
           ],
         ),
       );
@@ -548,12 +634,13 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.md),
       itemCount: cards.length,
-      itemBuilder: (context, index) => _buildOpCard(cards[index], activeMeta.color),
+      itemBuilder: (context, index) => _buildOpCard(cards[index]),
     );
   }
 
-  Widget _buildOpCard(_OpCardData d, Color accent) {
+  Widget _buildOpCard(_OpCardData d) {
     final format = NumberFormat("#,##0.##");
+    final accent = widget.meta.color;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSizes.sm),
       child: AppCard(
@@ -582,11 +669,11 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
                       const Icon(Icons.schedule, size: 12, color: Colors.grey),
                       const SizedBox(width: 3),
                       Text("${d.date} ${d.time}", style: AppTextStyles.caption.copyWith(fontSize: 10)),
-                      if (d.paymentMethod != null) ...[
+                      if (d.fundingSource != null) ...[
                         const SizedBox(width: 8),
-                        Icon(d.paymentMethod == 'نقد' ? Icons.money : Icons.credit_card, size: 12, color: Colors.grey),
+                        const Icon(Icons.account_balance_wallet_outlined, size: 12, color: Colors.grey),
                         const SizedBox(width: 3),
-                        Text(d.paymentMethod!, style: AppTextStyles.caption.copyWith(fontSize: 10)),
+                        Text(d.fundingSource!, style: AppTextStyles.caption.copyWith(fontSize: 10)),
                       ],
                     ],
                   ),
@@ -601,20 +688,6 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
               style: AppTextStyles.bodyBold.copyWith(fontSize: 13, color: accent),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAddBar(_CategoryMeta activeMeta) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
-        child: AppButton(
-          text: activeMeta.addLabel,
-          icon: Icons.add,
-          onPressed: _openAdd,
-          backgroundColor: activeMeta.color,
         ),
       ),
     );

@@ -41,6 +41,10 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
   /// الفندق مديناً له).
   bool _isSending = true;
 
+  /// مصدر التمويل مطلوب فقط عند الإرسال (هذا الفندق هو من يدفع فعلياً) —
+  /// راجع InterEntityTransferRepository.createTransfer.
+  String _fundingSource = 'نقد';
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +88,7 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
       ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(amount)} ريال", color: AppColors.danger),
       ReviewItem(label: "من", value: fromHotel.arabicName, color: Colors.purple),
       ReviewItem(label: "إلى", value: toHotel.arabicName, color: Colors.purple),
+      if (_isSending) ReviewItem(label: "مصدر التمويل", value: _fundingSource, color: Colors.blue),
     ];
 
     Navigator.push(
@@ -98,6 +103,7 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
               toHotelId: toHotel.id!,
               amount: amount,
               statement: statement,
+              fundingSourceCategory: _isSending ? (_fundingSource == 'شبكة' ? 'bank' : 'cash') : null,
             );
             if (mounted) {
               Navigator.pop(context); // Close Review
@@ -143,6 +149,29 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
                         ],
                       ),
                     ),
+                    if (_isSending) ...[
+                      const SizedBox(height: AppSizes.lg),
+                      AppCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
+                            const SizedBox(height: 4),
+                            const Text("هذا الفندق هو من يدفع فعلياً — يجب تحديد مصدر الخصم.", style: AppTextStyles.caption),
+                            const SizedBox(height: AppSizes.sm),
+                            Row(
+                              children: [
+                                Expanded(child: _fundingChip('نقد', Icons.money)),
+                                const SizedBox(width: 8),
+                                Expanded(child: _fundingChip('الخزنة', Icons.lock_outline)),
+                                const SizedBox(width: 8),
+                                Expanded(child: _fundingChip('شبكة', Icons.credit_card)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: AppSizes.lg),
                     AppCard(
                       child: Column(
@@ -162,6 +191,17 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _fundingChip(String label, IconData icon) {
+    final selected = _fundingSource == label;
+    return ChoiceChip(
+      label: Text(label, textAlign: TextAlign.center),
+      avatar: Icon(icon, size: 16),
+      selected: selected,
+      onSelected: (_) => setState(() => _fundingSource = label),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
     );
   }
 

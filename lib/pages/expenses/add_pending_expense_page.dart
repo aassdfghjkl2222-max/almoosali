@@ -24,13 +24,19 @@ class AddPendingExpensePage extends StatefulWidget {
   final Hotel hotel;
   final PendingExpense? editExpense;
 
-  /// true فقط عند الفتح من قسم "مسحوبات المالك" المخصَّص في شاشة العمليات
-  /// المالية المعلقة — يُقفل مصدر التمويل على [PendingExpense.paymentMethodOwnerDrawing]
-  /// ويُبسِّط الواجهة (بلا بطاقة مصدر تمويل كاملة)، بلا أي تغيير في منطق
-  /// الحفظ/الترحيل نفسه (نفس PendingExpense تماماً بمصدر تمويل ثابت).
+  /// true فقط عند تعديل مصروف معلّق قديم بمصدر تمويل "مسحوبات المالك" (مسار
+  /// قديم مُستبدَل — راجع [PendingExpense.paymentMethodOwnerDrawing]) — يُقفل
+  /// مصدر التمويل ويُبسِّط الواجهة. لا يوجد أي زر إضافة جديد يفتح بهذا الوضع
+  /// بعد الآن؛ يبقى فقط لعرض/تعديل مصروفات قديمة مُنشأة به قبل الاستبدال.
   final bool lockToOwnerDrawing;
 
-  const AddPendingExpensePage({super.key, required this.hotel, this.editExpense, this.lockToOwnerDrawing = false});
+  /// true عند الفتح من قسم "عهدة الفندق" المخصَّص — يُقفل مصدر التمويل على
+  /// [PendingExpense.paymentMethodHotelAdvance] ('شخصي': المالك يموِّل مصروف
+  /// الفندق من ماله الخاص) ويُبسِّط الواجهة (بلا بطاقة مصدر تمويل كاملة ولا
+  /// أي اختيار نقد/خزنة/شبكة — المالك هو مصدر التمويل الوحيد دائماً).
+  final bool lockToHotelAdvance;
+
+  const AddPendingExpensePage({super.key, required this.hotel, this.editExpense, this.lockToOwnerDrawing = false, this.lockToHotelAdvance = false});
 
   @override
   State<AddPendingExpensePage> createState() => _AddPendingExpensePageState();
@@ -88,6 +94,8 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       }
     } else if (widget.lockToOwnerDrawing) {
       _paymentMethod = PendingExpense.paymentMethodOwnerDrawing;
+    } else if (widget.lockToHotelAdvance) {
+      _paymentMethod = PendingExpense.paymentMethodHotelAdvance;
     }
 
     if (mounted) {
@@ -136,15 +144,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       _paymentMethod = PendingExpense.fundingSourceDeferred;
       _fundingSourceHotelId = null;
       _selectedSupplier = supplier;
-    });
-  }
-
-  void _selectOwnerDrawing() {
-    if (_isLocked) return;
-    setState(() {
-      _paymentMethod = PendingExpense.paymentMethodOwnerDrawing;
-      _fundingSourceHotelId = null;
-      _selectedSupplier = null;
     });
   }
 
@@ -286,9 +285,11 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(
-          title: widget.lockToOwnerDrawing
-              ? (widget.editExpense == null ? "إضافة مسحوب مالك" : "تعديل مسحوب مالك")
-              : (widget.editExpense == null ? "إضافة مصروف معلق" : "تعديل مصروف"),
+          title: widget.lockToHotelAdvance
+              ? (widget.editExpense == null ? "إضافة عهدة الفندق" : "تعديل عهدة الفندق")
+              : widget.lockToOwnerDrawing
+                  ? (widget.editExpense == null ? "إضافة مسحوب مالك" : "تعديل مسحوب مالك")
+                  : (widget.editExpense == null ? "إضافة مصروف معلق" : "تعديل مصروف"),
           hotel: widget.hotel,
         ),
         centerTitle: true,
@@ -304,7 +305,11 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
                     if (_isLocked) _buildLockedBanner(),
                     _buildMainCard(),
                     const SizedBox(height: AppSizes.lg),
-                    widget.lockToOwnerDrawing ? _buildOwnerDrawingFundingCard() : _buildFundingRow(),
+                    widget.lockToHotelAdvance
+                        ? _buildHotelAdvanceFundingCard()
+                        : widget.lockToOwnerDrawing
+                            ? _buildOwnerDrawingFundingCard()
+                            : _buildFundingRow(),
                     const SizedBox(height: AppSizes.lg),
                     _buildAttachmentsCard(),
                     const SizedBox(height: AppSizes.xl),
@@ -393,10 +398,12 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     );
   }
 
-  /// بطاقة "مصدر التمويل" الموحَّدة الجديدة — صف [نقد|شبكة|المالك] لتمويل هذا
-  /// الفندق نفسه، زر "مصدر آخر" يوسِّع قائمة كل الفنادق (كل فندق: اسمه +
-  /// [نقد][شبكة] أمامه مباشرة)، ثم رابطان يحافظان على وظيفتين قائمتين بلا أي
-  /// تغيير: "دين على مورد (آجل)" و"مسحوبات المالك" (راجع خطة إعادة التصميم).
+  /// بطاقة "مصدر التمويل" الموحَّدة — صف [نقد (Cash) | الخزنة (Safe) | شبكة
+  /// (Network)] لتمويل هذا الفندق نفسه (كل خيار أثر محاسبي مختلف تماماً —
+  /// راجع VaultRepository._postSpecialPendingExpenses وتعليقها)، زر "مصدر
+  /// آخر" يوسِّع قائمة كل الفنادق، ثم رابط "دين على مورد (آجل)". "عهدة
+  /// الفندق" و"مسحوبات المالك" لم يعودا خيارَي تمويل هنا — لكل منهما قسمه
+  /// المستقل الآن (راجع lockToHotelAdvance وقسم "مسحوبات المالك" الفوري).
   Widget _buildFundingRow() {
     return AppCard(
       child: Column(
@@ -408,9 +415,9 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
             children: [
               Expanded(child: _fundingChip("نقد", Icons.money, "نقد")),
               const SizedBox(width: 8),
-              Expanded(child: _fundingChip("شبكة", Icons.credit_card, "شبكة")),
+              Expanded(child: _fundingChip("الخزنة", Icons.lock_outline, PendingExpense.paymentMethodSafe)),
               const SizedBox(width: 8),
-              Expanded(child: _fundingChip("المالك", Icons.person_outline, "شخصي")),
+              Expanded(child: _fundingChip("شبكة", Icons.credit_card, "شبكة")),
             ],
           ),
           const SizedBox(height: 4),
@@ -431,7 +438,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
             spacing: 4,
             children: [
               TextButton(onPressed: _isLocked ? null : _pickDeferredSupplier, child: const Text("دين على مورد (آجل)")),
-              TextButton(onPressed: _isLocked ? null : _selectOwnerDrawing, child: const Text("مسحوبات المالك")),
             ],
           ),
           _buildCurrentSelectionSummary(),
@@ -442,8 +448,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   }
 
   /// بطاقة مبسَّطة تحل محل [_buildFundingRow] الكاملة عند [AddPendingExpensePage.lockToOwnerDrawing]
-  /// — مصدر التمويل مقفل مسبقاً على "مسحوبات المالك" (راجع _loadData)، فلا حاجة
-  /// لعرض شرائح نقد/شبكة/فندق آخر التي لا تنطبق هنا إطلاقاً.
+  /// — مسار قديم مُستبدَل (راجع تعليق الحقل)، تبقى فقط لتعديل مصروفات قديمة.
   Widget _buildOwnerDrawingFundingCard() {
     return AppCard(
       child: Row(
@@ -452,7 +457,27 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
           const SizedBox(width: AppSizes.sm),
           const Expanded(
             child: Text(
-              "مصدر التمويل: مسحوبات المالك — يُخصَم من خزنة الفندق عند الترحيل وتُنشأ ذمة على المالك تلقائياً.",
+              "مصدر التمويل: مسحوبات المالك (مسار قديم) — يُخصَم من خزنة الفندق عند الترحيل وتُنشأ ذمة على المالك تلقائياً.",
+              style: AppTextStyles.caption,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// بطاقة مبسَّطة تحل محل [_buildFundingRow] الكاملة عند [AddPendingExpensePage.lockToHotelAdvance]
+  /// — "عهدة الفندق": المالك هو مصدر التمويل الوحيد دائماً، فلا معنى لعرض
+  /// أي اختيار نقد/خزنة/شبكة (راجع البند 4 من متطلبات إعادة التصميم).
+  Widget _buildHotelAdvanceFundingCard() {
+    return AppCard(
+      child: Row(
+        children: [
+          const Icon(Icons.person_outline, color: Colors.teal),
+          const SizedBox(width: AppSizes.sm),
+          const Expanded(
+            child: Text(
+              "مصدر التمويل: المالك شخصياً — مصروف تشغيلي حقيقي للفندق، بلا خصم أي نقد/خزنة/شبكة من الفندق، وتُنشأ ذمة (التزام) على الفندق لصالح المالك تلقائياً عند الترحيل.",
               style: AppTextStyles.caption,
             ),
           ),
@@ -506,9 +531,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       final hotelName = _allHotels.firstWhere((h) => h.id == _fundingSourceHotelId, orElse: () => widget.hotel).arabicName;
       label = "مموَّل من $hotelName ($_paymentMethod) — لا يُخصَم من خزنة هذا الفندق";
       color = Colors.teal;
-    } else if (_paymentMethod == PendingExpense.paymentMethodOwnerDrawing) {
-      label = "مسحوبات المالك";
-      color = Colors.purple;
     } else if (_isDeferred) {
       label = "آجل (دين)${_selectedSupplier != null ? ' — ${_selectedSupplier!.officialName}' : ''}";
       color = Colors.orange;

@@ -11,9 +11,10 @@ class SharedExpenseRepository {
   final _dbService = DatabaseService();
   final _financialEngine = FinancialEngine();
 
-  /// طريقة الدفع النصية → فئة FinancialEngine ('cash'/'bank'). "نقد" فقط
-  /// نقدية؛ "شبكة" تُخصم من حساب البنك الموحّد داخلياً.
-  static String paymentMethodCategory(String paymentMethod) => paymentMethod == 'نقد' ? 'cash' : 'bank';
+  /// مصدر التمويل النصي → فئة FinancialEngine ('cash'/'bank'). "نقد" و"الخزنة"
+  /// كلاهما يؤولان لحساب النقد الموحّد داخلياً ('cash')؛ "شبكة" فقط تُخصم من
+  /// حساب الشبكة/البنك ('bank').
+  static String paymentMethodCategory(String paymentMethod) => paymentMethod == 'شبكة' ? 'bank' : 'cash';
 
   /// [shares] حصة كل منشأة مشارِكة (بما فيها المموِّلة نفسها، إن وُجدت في
   /// الخريطة بقيمة > 0) — المجموع يجب أن يساوي [group.totalAmount] (يُتحقَّق

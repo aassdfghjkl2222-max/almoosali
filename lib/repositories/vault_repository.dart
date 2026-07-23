@@ -145,16 +145,30 @@ class VaultRepository {
           referenceType: 'pending_expense',
           otherHotelId: expense.fundingSourceHotelId,
         );
-      } else if (expense.paymentMethod == 'شخصي') {
-        // المالك دفع المصروف من ماله الخاص عن المنشأة — بلا خصم أي نقد/شبكة
-        // (مُستبعَد أصلاً من oCash/oBank في _calculateTotals)، فقط زيادة التزام
-        // "حساب المالك" (المنشأة مدينة للمالك) — نفس آلية entity_ بفئة 'personal'.
+      } else if (expense.isHotelAdvance) {
+        // "عهدة الفندق": المالك دفع المصروف من ماله الخاص عن المنشأة — بلا خصم
+        // أي نقد/خزنة/شبكة (مُستبعَد أصلاً من oCash/oBank في _calculateTotals)،
+        // فقط زيادة التزام "حساب المالك" (المنشأة مدينة للمالك) — نفس آلية
+        // entity_ بفئة 'personal'.
         await _financialEngine.recordTransaction(
           hotelId: expense.hotelId,
           sourceCategory: 'personal',
           amount: expense.amount,
           type: 'expense',
-          description: "دفع شخصي من المالك: ${expense.statement}",
+          description: "عهدة الفندق (تمويل شخصي من المالك): ${expense.statement}",
+          referenceId: expense.id,
+          referenceType: 'pending_expense',
+        );
+      } else if (expense.paymentMethod == PendingExpense.paymentMethodSafe) {
+        // مصروف بتمويل "الخزنة": خصم فوري من رصيد الخزنة المتراكم (نفس فئة
+        // 'cash' الداخلية التي يستخدمها "نقد")، بخلاف "نقد" الذي يُخصم من
+        // إيراد اليوم نفسه (مُغطّى ضمن المبلغ الصافي المُرحَّل، لا يُعاد هنا).
+        await _financialEngine.recordTransaction(
+          hotelId: expense.hotelId,
+          sourceCategory: 'cash',
+          amount: expense.amount,
+          type: 'expense',
+          description: "مصروف من الخزنة: ${expense.statement}",
           referenceId: expense.id,
           referenceType: 'pending_expense',
         );
@@ -206,27 +220,29 @@ class VaultRepository {
     return await _dbService.insertEntityLoan(loan.toMap());
   }
 
-  // السلفة (Advance Withdrawals)
+  // مسحوبات المالك (Owner Withdrawals) — الجدول الداخلي لا يزال باسم advance_withdrawals
   Future<List<AdvanceWithdrawal>> getAdvanceWithdrawals(int? hotelId) async {
     if (hotelId == null) return [];
     final data = await _dbService.getAdvanceWithdrawals(hotelId);
     return data.map((e) => AdvanceWithdrawal.fromMap(e)).toList();
   }
 
-  /// "سلفة" — سحب فوري من نقد/شبكة الفندق لصالح المالك، ليست مصروفاً (بخلاف
-  /// "مسحوبات المالك" عبر مصروف معلّق التي تنتظر الترحيل). القيد المحاسبي
-  /// (خصم فوري + ذمة owner_debt) عبر [FinancialEngine.recordOwnerDrawing]
-  /// نفسها المُستخدَمة هناك — نفس الحساب المحاسبي بالضبط، فقط بابا دخول مختلف
-  /// وتوقيت فوري بدل مؤجَّل.
-  Future<int> addAdvanceWithdrawal(AdvanceWithdrawal advance) async {
+  /// "مسحوبات المالك" — سحب فوري من نقد/خزنة/شبكة الفندق لصالح المالك، ليست
+  /// مصروفاً: نقص في أصول الفندق وزيادة ذمة owner_debt المستحقة على المالك،
+  /// عبر [FinancialEngine.recordOwnerDrawing]. عكس "عهدة الفندق" (paymentMethodHotelAdvance)
+  /// تماماً في اتجاه القيد — هناك المالك يموِّل الفندق، هنا الفندق يدفع للمالك.
+  /// "نقد" و"الخزنة" كلاهما يؤولان لنفس فئة FinancialEngine الداخلية ('cash')
+  /// — الفرق نصّي/توثيقي فقط في هذا المسار الفوري (لا يوجد يوم تقرير يُنسَب
+  /// إليه الفرق بينهما هنا، بخلاف المصروف المعلّق العادي).
+  Future<int> addOwnerWithdrawal(AdvanceWithdrawal withdrawal) async {
     await _financialEngine.recordOwnerDrawing(
-      hotelId: advance.hotelId,
-      amount: advance.amount,
-      paymentMethodCategory: advance.method == 'شبكة' ? 'bank' : 'cash',
-      description: "سلفة: ${advance.statement}",
-      referenceType: 'advance_withdrawal',
+      hotelId: withdrawal.hotelId,
+      amount: withdrawal.amount,
+      paymentMethodCategory: withdrawal.method == 'شبكة' ? 'bank' : 'cash',
+      description: "مسحوبات المالك (${withdrawal.method}): ${withdrawal.statement}",
+      referenceType: 'owner_withdrawal',
     );
-    return await _dbService.insertAdvanceWithdrawal(advance.toMap());
+    return await _dbService.insertAdvanceWithdrawal(withdrawal.toMap());
   }
 
   Future<void> undoTransaction(VaultTransaction transaction) async {

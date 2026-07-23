@@ -13,23 +13,25 @@ import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../common/transaction_review_page.dart';
 
-/// "سلفة" — سحب فوري من نقد/شبكة الفندق لصالح المالك، ليست مصروفاً (راجع
-/// VaultRepository.addAdvanceWithdrawal). حقول مقصودة قليلة عمداً: البيان،
-/// المبلغ، طريقة السحب فقط — بلا مصدر تمويل ولا منشآت أخرى إطلاقاً.
-class AddAdvancePage extends StatefulWidget {
+/// "مسحوبات المالك" — الفندق يدفع مبلغاً للمالك (عكس "عهدة الفندق" تماماً):
+/// نقص فوري في أصول الفندق (نقد/خزنة/شبكة) وزيادة في ذمة مستحقة على المالك
+/// لصالح الفندق (راجع FinancialEngine.recordOwnerDrawing). بما أن الفندق هو
+/// من يدفع فعلياً، يجب اختيار مصدر التمويل دائماً (بخلاف عهدة الفندق التي
+/// لا تعرض أي اختيار لأن المالك هو المموِّل الثابت).
+class AddOwnerWithdrawalPage extends StatefulWidget {
   final Hotel hotel;
-  const AddAdvancePage({super.key, required this.hotel});
+  const AddOwnerWithdrawalPage({super.key, required this.hotel});
 
   @override
-  State<AddAdvancePage> createState() => _AddAdvancePageState();
+  State<AddOwnerWithdrawalPage> createState() => _AddOwnerWithdrawalPageState();
 }
 
-class _AddAdvancePageState extends State<AddAdvancePage> {
+class _AddOwnerWithdrawalPageState extends State<AddOwnerWithdrawalPage> {
   final _repository = VaultRepository();
   final _formKey = GlobalKey<FormState>();
   final _statementController = TextEditingController();
   final _amountController = TextEditingController();
-  String _method = 'نقد';
+  String _fundingSource = 'نقد';
 
   @override
   void dispose() {
@@ -47,30 +49,30 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
     }
 
     final now = DateTime.now();
-    final advance = AdvanceWithdrawal(
+    final withdrawal = AdvanceWithdrawal(
       hotelId: widget.hotel.id!,
       amount: amount,
       statement: _statementController.text.trim(),
-      method: _method,
+      method: _fundingSource,
       date: DateFormat('yyyy-MM-dd').format(now),
       time: DateFormat('HH:mm:ss').format(now),
       createdAt: now.toIso8601String(),
     );
 
     final reviewItems = [
-      ReviewItem(label: "البيان", value: advance.statement),
-      ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(advance.amount)} ريال", color: AppColors.danger),
-      ReviewItem(label: "طريقة السحب", value: advance.method, color: Colors.blue),
+      ReviewItem(label: "البيان", value: withdrawal.statement),
+      ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(withdrawal.amount)} ريال", color: AppColors.danger),
+      ReviewItem(label: "مصدر التمويل", value: withdrawal.method, color: Colors.blue),
     ];
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionReviewPage(
-          title: "مراجعة العهدة",
+          title: "مراجعة مسحوبات المالك",
           items: reviewItems,
           onConfirm: () async {
-            await _repository.addAdvanceWithdrawal(advance);
+            await _repository.addOwnerWithdrawal(withdrawal);
             if (mounted) {
               Navigator.pop(context); // Close Review
               Navigator.pop(context, true); // Close Add Page
@@ -86,7 +88,7 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: "إضافة عهدة", hotel: widget.hotel),
+        title: HotelIdentityTitle(title: "إضافة مسحوب مالك", hotel: widget.hotel),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -99,21 +101,23 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("تفاصيل العهدة", style: AppTextStyles.bodyBold),
+                    const Text("تفاصيل المسحوب", style: AppTextStyles.bodyBold),
                     const SizedBox(height: 4),
-                    const Text("سحب المالك مبلغاً من أموال الفندق — ليست مصروفاً، تُنشئ ذمة على المالك لصالح الفندق.", style: AppTextStyles.caption),
+                    const Text("الفندق يدفع مبلغاً للمالك — تنقص أصول الفندق وتُنشأ ذمة مستحقة على المالك لصالح الفندق.", style: AppTextStyles.caption),
                     const SizedBox(height: AppSizes.md),
                     AppTextField(controller: _statementController, hint: "البيان", icon: Icons.description),
                     const SizedBox(height: AppSizes.md),
                     AppTextField(controller: _amountController, hint: "المبلغ", icon: Icons.attach_money, formatThousands: true),
                     const SizedBox(height: AppSizes.md),
-                    const Text("طريقة السحب", style: AppTextStyles.bodyBold),
+                    const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
                     const SizedBox(height: AppSizes.sm),
                     Row(
                       children: [
-                        Expanded(child: _methodChip('نقد', Icons.money)),
+                        Expanded(child: _sourceChip('نقد', Icons.money)),
                         const SizedBox(width: 8),
-                        Expanded(child: _methodChip('شبكة', Icons.credit_card)),
+                        Expanded(child: _sourceChip('الخزنة', Icons.lock_outline)),
+                        const SizedBox(width: 8),
+                        Expanded(child: _sourceChip('شبكة', Icons.credit_card)),
                       ],
                     ),
                   ],
@@ -128,13 +132,13 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
     );
   }
 
-  Widget _methodChip(String label, IconData icon) {
-    final selected = _method == label;
+  Widget _sourceChip(String label, IconData icon) {
+    final selected = _fundingSource == label;
     return ChoiceChip(
       label: Text(label, textAlign: TextAlign.center),
       avatar: Icon(icon, size: 16),
       selected: selected,
-      onSelected: (_) => setState(() => _method = label),
+      onSelected: (_) => setState(() => _fundingSource = label),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
     );
   }

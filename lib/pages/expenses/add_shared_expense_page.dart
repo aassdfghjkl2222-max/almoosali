@@ -187,7 +187,7 @@ class _AddSharedExpensePageState extends State<AddSharedExpensePage> {
       ReviewItem(label: "النوع", value: _selectedCategory!.name),
       ReviewItem(label: "المبلغ الإجمالي", value: "${NumberFormat("#,##0.##").format(group.totalAmount)} ريال", color: AppColors.danger),
       ReviewItem(label: "مصدر التمويل", value: funder.arabicName, color: Colors.teal),
-      ReviewItem(label: "طريقة الدفع", value: group.paymentMethod, color: Colors.blue),
+      ReviewItem(label: "مصدر التمويل", value: group.paymentMethod, color: Colors.blue),
       ReviewItem(label: "عدد المنشآت المشارِكة", value: "$otherHotelsCount + المموِّل"),
       for (final id in _selectedHotelIds)
         ReviewItem(
@@ -305,7 +305,7 @@ class _AddSharedExpensePageState extends State<AddSharedExpensePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("مصدر التمويل وطريقة الدفع", style: AppTextStyles.bodyBold),
+          const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
           const SizedBox(height: 4),
           const Text("المنشأة التي تدفع كامل المبلغ فعلياً — يُخصَم منها المبلغ الإجمالي كاملاً.", style: AppTextStyles.caption),
           const SizedBox(height: AppSizes.sm),
@@ -327,6 +327,8 @@ class _AddSharedExpensePageState extends State<AddSharedExpensePage> {
           Row(
             children: [
               _paymentMethodChip("نقد", Icons.money),
+              const SizedBox(width: 8),
+              _paymentMethodChip("الخزنة", Icons.lock_outline),
               const SizedBox(width: 8),
               _paymentMethodChip("شبكة", Icons.credit_card),
             ],
