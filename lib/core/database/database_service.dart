@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 41, // Upgrade to v41 for shared_expense_groups/shared_expense_shares (المصروف المشترك)
+      version: 42, // Upgrade to v42 for advance_withdrawals (السلفة)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -178,6 +178,13 @@ class DatabaseService {
           try {
             await db.execute(
               'CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+        }
+        if (oldVersion < 42) {
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
             );
           } catch (_) {}
         }
@@ -363,6 +370,10 @@ class DatabaseService {
       await db.execute(
         'CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
       );
+
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
       // بالحد الأدنى، وتُعاد المحاولة تلقائياً عند فتح التطبيق مرة أخرى.
@@ -402,6 +413,11 @@ class DatabaseService {
     // عند الحفظ عبر FinancialEngine.recordSharedExpense، وهذان الجدولان للتتبع/العرض فقط.
     await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    // "السلفة": سحب فوري من نقد/شبكة الفندق لصالح المالك، ليست مصروفاً — القيد
+    // المحاسبي (خصم فوري + ذمة owner_debt على المالك) عبر FinancialEngine.recordOwnerDrawing
+    // مباشرة عند الحفظ، هذا الجدول للتتبع/العرض فقط (نفس شكل personal_withdrawals تماماً،
+    // لكنه جدول مستقل لأن الاتجاه المحاسبي مختلف تماماً — راجع تعليق recordOwnerDrawing).
+    await db.execute('CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     // كتالوج بنود التقرير المالي اليومي الدائمة (إيراد/مصروف) — راجع
     // FinancialReportItemRepository. لا تظهر تلقائياً في الشاشة، فقط عبر
     // منتقي "إضافة بند" — التقارير المحفوظة سابقاً تحتفظ بنسخة كاملة داخل
@@ -769,6 +785,11 @@ class DatabaseService {
       [hotelId, date],
     );
   }
+
+  // ---------------- السلفة (advance_withdrawals) ----------------
+
+  Future<int> insertAdvanceWithdrawal(Map<String, dynamic> data) async { final db = await database; return await db.insert('advance_withdrawals', data); }
+  Future<List<Map<String, dynamic>>> getAdvanceWithdrawals(int hotelId) async { final db = await database; return await db.query('advance_withdrawals', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC, time DESC'); }
 
   // ---------------- كتالوج بنود التقرير المالي اليومي (financial_report_items) ----------------
 

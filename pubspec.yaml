@@ -61,22 +61,15 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
 
-  # توليد أيقونة التطبيق من الشعار الرسمي (منازل البيت) — راجع flutter_launcher_icons أدناه.
-  flutter_launcher_icons: ^0.14.3
-
 flutter:
   uses-material-design: true
 
-# توليد أيقونة أندرويد (mipmap + Adaptive Icon + Monochrome) من الشعار
-# الرسمي في assets/images/app_icon.png — نسخة مربعة من الشعار الأصلي
-# (assets/images/logo.jpeg) بعد تمديد خلفيته السوداء الموجودة أصلاً لتصبح
-# مربعة، بلا أي تعديل على الشعار نفسه (لا تكبير/تصغير غير متناسب، لا تغيير
-# ألوان، لا إطار، لا نص). الخلفية المُعتمدة للـAdaptive Icon (#000000) هي
-# نفس خلفية الشعار الأصلية تماماً، وليست خلفية جديدة.
-flutter_launcher_icons:
-  android: "ic_launcher"
-  image_path: "assets/images/app_icon.png"
-  adaptive_icon_background: "#000000"
-  adaptive_icon_foreground: "assets/images/app_icon.png"
-  adaptive_icon_monochrome: "assets/images/app_icon_monochrome.png"
-  min_sdk_android: 21
+# أيقونة أندرويد: نسخة مطابقة تماماً بايت-لبايت (MD5 متطابق) من
+# assets/images/logi.jpeg موضوعة يدوياً في
+# android/app/src/main/res/mipmap-nodpi/ic_launcher.jpg — بلا أي تصغير/تكبير/
+# قص/هامش/تغيير ألوان/إعادة رسم من جانبنا (Pixel Perfect بطلب صريح من
+# المستخدم). عمداً بلا flutter_launcher_icons (كانت ستُصغِّر/تُقصّ الشعار عند
+# توليد كل حجم mipmap/Adaptive Icon) — mipmap-nodpi تعني عدم اختيار نسخة
+# مختلفة حسب كثافة الجهاز؛ نفس الملف الأصلي حرفياً يُستخدَم على كل الأجهزة.
+# لا تُشغِّل flutter_launcher_icons على هذا المشروع — سيُنشئ نُسخاً مُصغَّرة
+# جديدة ويُبطل هذا الإعداد اليدوي.

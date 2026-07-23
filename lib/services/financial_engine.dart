@@ -234,6 +234,24 @@ class FinancialEngine {
     });
   }
 
+  /// تحصيل ذمة أصل (receivable) لصالح المنشأة — عكس [settleDebt] تماماً:
+  /// هناك المنشأة تدفع لتخفيض التزام عليها؛ هنا المنشأة تستلم (يزيد النقد/
+  /// الشبكة) لتخفيض أصل لها (owner_debt، receivable_entity_*، ...). لا
+  /// تُستخدم لتسوية entity_/personal — تلك تبقى عبر settleDebt كما هي.
+  Future<void> collectReceivable({
+    required int hotelId,
+    required String receivableCategory,
+    required double amount,
+    required String depositTarget, // 'cash' أو 'bank'
+    required String description,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _updateAccount(txn, hotelId, depositTarget, amount, 'income', 'تحصيل: $description', null, 'debt_settlement');
+      await _updateAccount(txn, hotelId, receivableCategory, amount, 'expense', 'تحصيل ذمة: $description', null, 'debt_settlement');
+    });
+  }
+
   Future<FinancialAccount> _getAccount(dynamic txn, int hotelId, String category) async {
     final results = await txn.query('financial_accounts', where: 'hotel_id = ? AND category = ?', whereArgs: [hotelId, category], limit: 1);
     if (results.isEmpty) {

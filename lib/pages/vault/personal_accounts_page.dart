@@ -9,6 +9,7 @@ import '../../../models/financial_account.dart';
 import '../../../services/financial_engine.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
+import 'collect_receivable_page.dart';
 import 'personal_action_page.dart';
 
 class PersonalAccountsPage extends StatefulWidget {
@@ -23,6 +24,7 @@ class _PersonalAccountsPageState extends State<PersonalAccountsPage> {
   final _engine = FinancialEngine();
   bool _isLoading = true;
   FinancialAccount? _ownerAccount;
+  FinancialAccount? _ownerDebtAccount;
   List<FinancialAccount> _people = [];
 
   @override
@@ -33,7 +35,7 @@ class _PersonalAccountsPageState extends State<PersonalAccountsPage> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    
+
     // Fetch owner account
     final ownerBal = await _engine.getBalance(widget.hotel.id!, 'personal');
     _ownerAccount = FinancialAccount(
@@ -42,6 +44,16 @@ class _PersonalAccountsPageState extends State<PersonalAccountsPage> {
       type: 'liability',
       category: 'personal',
       balance: ownerBal,
+    );
+
+    // سلف المالك (owner_debt): المالك مدين للمنشأة — راجع FinancialEngine.recordOwnerDrawing.
+    final ownerDebtBal = await _engine.getBalance(widget.hotel.id!, 'owner_debt');
+    _ownerDebtAccount = FinancialAccount(
+      hotelId: widget.hotel.id!,
+      name: "سلف المالك (مستحقة)",
+      type: 'asset',
+      category: 'owner_debt',
+      balance: ownerDebtBal,
     );
 
     if (mounted) setState(() => _isLoading = false);
@@ -96,8 +108,12 @@ class _PersonalAccountsPageState extends State<PersonalAccountsPage> {
             padding: const EdgeInsets.all(AppSizes.md),
             children: [
               if (_ownerAccount != null) _buildAccountCard(_ownerAccount!, identityColor, identityColor: identityColor, isOwner: true),
+              if (_ownerDebtAccount != null) ...[
+                const SizedBox(height: AppSizes.md),
+                _buildOwnerDebtCard(_ownerDebtAccount!, identityColor),
+              ],
               const SizedBox(height: AppSizes.lg),
-              
+
               _buildSectionHeader("الحسابات الأخرى"),
               const SizedBox(height: AppSizes.md),
               
@@ -196,6 +212,52 @@ class _PersonalAccountsPageState extends State<PersonalAccountsPage> {
         ),
       ),
     );
+  }
+
+  /// "سلف المالك" — ما يدين به المالك للمنشأة (سحوبات "سلفة" ومسحوبات المالك
+  /// المُرحَّلة، راجع FinancialEngine.recordOwnerDrawing) — عكس بطاقة حساب
+  /// المالك أعلاه (المنشأة مدينة للمالك) تماماً.
+  Widget _buildOwnerDebtCard(FinancialAccount acc, Color identityColor) {
+    return AppCard(
+      identityAccent: identityColor,
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: Colors.deepOrange.withOpacity(0.1),
+            child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.deepOrange, size: 26),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("سلف المالك (مستحقة)", style: AppTextStyles.bodyBold),
+                Text(_formatCurrency(acc.balance), style: AppTextStyles.title.copyWith(color: Colors.deepOrange, fontSize: 20)),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: acc.balance > 0 ? () => _collectOwnerDebt(acc) : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+            ),
+            child: const Text("سداد"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _collectOwnerDebt(FinancialAccount acc) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => CollectReceivablePage(
+      hotel: widget.hotel,
+      receivableCategory: 'owner_debt',
+      receivableLabel: 'سلف المالك (مستحقة)',
+      currentBalance: acc.balance,
+    ))).then((_) => _loadData());
   }
 
   void _openAction(FinancialAccount account, String action) {

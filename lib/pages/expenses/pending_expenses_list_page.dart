@@ -8,8 +8,10 @@ import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
 import '../../models/pending_expense.dart';
 import '../../repositories/expense_repository.dart';
+import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import 'add_advance_page.dart';
 import 'add_pending_expense_page.dart';
 import 'add_shared_expense_page.dart';
 import 'expense_reports_page.dart';
@@ -116,17 +118,6 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
         backgroundColor: identityColor,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.call_split),
-            tooltip: "مصروف مشترك",
-            onPressed: () async {
-              final result = await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)),
-              );
-              if (result == true) _loadData();
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.bar_chart),
             onPressed: () {
@@ -269,22 +260,68 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AddPendingExpensePage(hotel: widget.hotel),
+      bottomNavigationBar: _buildBottomActionsBar(identityColor),
+    );
+  }
+
+  Future<void> _openAddExpense() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel)),
+    );
+    if (result == true) _loadData();
+  }
+
+  Future<void> _openSharedExpense() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)),
+    );
+    if (result == true) _loadData();
+  }
+
+  Future<void> _openAdvance() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddAdvancePage(hotel: widget.hotel)),
+    );
+    if (result == true) _loadData();
+  }
+
+  Widget _buildBottomActionsBar(Color identityColor) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: AppButton(
+                text: "إضافة مصروف",
+                icon: Icons.add,
+                onPressed: _openAddExpense,
+                backgroundColor: identityColor,
+              ),
             ),
-          );
-          if (result == true) {
-            _loadData();
-          }
-        },
-        label: const Text("إضافة مصروف"),
-        icon: const Icon(Icons.add),
-        backgroundColor: identityColor,
-        foregroundColor: Colors.white,
+            const SizedBox(width: AppSizes.sm),
+            Expanded(
+              child: AppButton(
+                text: "مصروف مشترك",
+                icon: Icons.call_split,
+                onPressed: _openSharedExpense,
+                backgroundColor: identityColor,
+              ),
+            ),
+            const SizedBox(width: AppSizes.sm),
+            Expanded(
+              child: AppButton(
+                text: "سلفة",
+                icon: Icons.account_balance_wallet_outlined,
+                onPressed: _openAdvance,
+                backgroundColor: identityColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

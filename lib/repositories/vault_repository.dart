@@ -4,6 +4,7 @@ import '../models/deposited_fund.dart';
 import '../models/pending_expense.dart';
 import '../models/personal_withdrawal.dart';
 import '../models/entity_loan.dart';
+import '../models/advance_withdrawal.dart';
 import '../services/financial_engine.dart';
 
 class VaultRepository {
@@ -144,6 +145,19 @@ class VaultRepository {
           referenceType: 'pending_expense',
           otherHotelId: expense.fundingSourceHotelId,
         );
+      } else if (expense.paymentMethod == 'شخصي') {
+        // المالك دفع المصروف من ماله الخاص عن المنشأة — بلا خصم أي نقد/شبكة
+        // (مُستبعَد أصلاً من oCash/oBank في _calculateTotals)، فقط زيادة التزام
+        // "حساب المالك" (المنشأة مدينة للمالك) — نفس آلية entity_ بفئة 'personal'.
+        await _financialEngine.recordTransaction(
+          hotelId: expense.hotelId,
+          sourceCategory: 'personal',
+          amount: expense.amount,
+          type: 'expense',
+          description: "دفع شخصي من المالك: ${expense.statement}",
+          referenceId: expense.id,
+          referenceType: 'pending_expense',
+        );
       }
     }
   }
@@ -190,6 +204,29 @@ class VaultRepository {
     );
 
     return await _dbService.insertEntityLoan(loan.toMap());
+  }
+
+  // السلفة (Advance Withdrawals)
+  Future<List<AdvanceWithdrawal>> getAdvanceWithdrawals(int? hotelId) async {
+    if (hotelId == null) return [];
+    final data = await _dbService.getAdvanceWithdrawals(hotelId);
+    return data.map((e) => AdvanceWithdrawal.fromMap(e)).toList();
+  }
+
+  /// "سلفة" — سحب فوري من نقد/شبكة الفندق لصالح المالك، ليست مصروفاً (بخلاف
+  /// "مسحوبات المالك" عبر مصروف معلّق التي تنتظر الترحيل). القيد المحاسبي
+  /// (خصم فوري + ذمة owner_debt) عبر [FinancialEngine.recordOwnerDrawing]
+  /// نفسها المُستخدَمة هناك — نفس الحساب المحاسبي بالضبط، فقط بابا دخول مختلف
+  /// وتوقيت فوري بدل مؤجَّل.
+  Future<int> addAdvanceWithdrawal(AdvanceWithdrawal advance) async {
+    await _financialEngine.recordOwnerDrawing(
+      hotelId: advance.hotelId,
+      amount: advance.amount,
+      paymentMethodCategory: advance.method == 'شبكة' ? 'bank' : 'cash',
+      description: "سلفة: ${advance.statement}",
+      referenceType: 'advance_withdrawal',
+    );
+    return await _dbService.insertAdvanceWithdrawal(advance.toMap());
   }
 
   Future<void> undoTransaction(VaultTransaction transaction) async {

@@ -17,7 +17,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
-import '../../widgets/financial/funding_source_picker.dart';
+import '../../widgets/suppliers/supplier_picker_sheet.dart';
 import '../common/transaction_review_page.dart';
 
 class AddPendingExpensePage extends StatefulWidget {
@@ -37,7 +37,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
 
   final _amountController = TextEditingController();
   final _statementController = TextEditingController();
-  final _notesController = TextEditingController();
   final _dueDateController = TextEditingController();
 
   List<ExpenseCategory> _categories = [];
@@ -46,6 +45,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   String? _paymentMethod;
   Supplier? _selectedSupplier;
   bool _isLoading = true;
+  bool _showOtherHotels = false;
 
   /// null = هذا الفندق (الافتراضي). قيمة أخرى = معرّف فندق مموِّل فعلي —
   /// منفصل تماماً عن [_paymentMethod] (طريقة الدفع تبقى نقد/شبكة/... بلا
@@ -72,7 +72,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     if (edit != null) {
       _amountController.text = NumberFormat("#,##0.##").format(edit.amount);
       _statementController.text = edit.statement;
-      _notesController.text = edit.notes ?? "";
       _dueDateController.text = edit.dueDate ?? "";
       attachments = await _repository.getAttachments(edit.id!);
       _paymentMethod = edit.paymentMethod;
@@ -97,61 +96,47 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     }
   }
 
-  Future<void> _pickFundingSource() async {
+  /// يضبط نقد/شبكة/المالك لهذا الفندق نفسه (مصدر التمويل = الفندق الحالي) —
+  /// يمسح أي اختيار سابق لفندق آخر أو دين مؤجَّل.
+  void _selectOwnFunding(String paymentMethod) {
     if (_isLocked) return;
-    final result = await showFundingSourcePicker(context, hotelId: widget.hotel.id!, otherHotels: _allHotels, showOtherHotelsFunding: false);
-    if (result == null) return;
-    Supplier? supplier;
-    if (result.supplierId != null) {
-      supplier = await _supplierRepository.getSupplierById(result.supplierId!);
-    }
     setState(() {
-      _paymentMethod = result.paymentMethod;
+      _paymentMethod = paymentMethod;
+      _fundingSourceHotelId = null;
+      _selectedSupplier = null;
+    });
+  }
+
+  /// اختيار فندق آخر كمصدر تمويل فعلي (عبر "مصدر آخر") بطريقة دفع محدَّدة —
+  /// يحدِّد عند الترحيل عدم الخصم من خزنة هذا الفندق وإنشاء ذمة تلقائية بين
+  /// الفندقين بدلاً من ذلك. راجع PendingExpense.isFundedByOtherHotel.
+  void _selectOtherHotelFunding(Hotel hotel, String paymentMethod) {
+    if (_isLocked) return;
+    setState(() {
+      _paymentMethod = paymentMethod;
+      _fundingSourceHotelId = hotel.id;
+      _selectedSupplier = null;
+    });
+  }
+
+  Future<void> _pickDeferredSupplier() async {
+    if (_isLocked) return;
+    final supplier = await showSupplierPicker(context, hotelId: widget.hotel.id!);
+    if (supplier == null || !mounted) return;
+    setState(() {
+      _paymentMethod = PendingExpense.fundingSourceDeferred;
+      _fundingSourceHotelId = null;
       _selectedSupplier = supplier;
     });
   }
 
-  /// اختيار الفندق المموِّل فعلياً — منفصل عن طريقة الدفع، ويحدِّد عند
-  /// الترحيل هل يُخصَم المبلغ من خزنة هذا الفندق (هذا الفندق نفسه) أم تُنشأ
-  /// ذمة تلقائية بين الفندقين بلا أي خصم من خزنة هذا الفندق إطلاقاً.
-  ///
-  /// `0` سنتينل لـ"هذا الفندق نفسه" (بدل null الذي يعني هنا "أُغلقت النافذة
-  /// بلا اختيار" — نفس اصطلاح LinkExistingDocumentsPage._pickHotelFilter).
-  Future<void> _pickFundingSourceHotel() async {
+  void _selectOwnerDrawing() {
     if (_isLocked) return;
-    final result = await showModalBottomSheet<int>(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
-              child: Align(alignment: Alignment.centerRight, child: Text("مصدر التمويل", style: AppTextStyles.bodyBold)),
-            ),
-            const Divider(height: 1),
-            RadioListTile<int>(
-              title: Text(widget.hotel.arabicName),
-              subtitle: const Text("يُخصَم من خزنة هذا الفندق مباشرة", style: AppTextStyles.caption),
-              value: 0,
-              groupValue: _fundingSourceHotelId ?? 0,
-              onChanged: (v) => Navigator.pop(sheetContext, v),
-            ),
-            for (final h in _allHotels)
-              RadioListTile<int>(
-                title: Text(h.arabicName),
-                subtitle: const Text("لا يُخصَم من خزنة هذا الفندق — تُنشأ ذمة تلقائية بين الفندقين", style: AppTextStyles.caption),
-                value: h.id!,
-                groupValue: _fundingSourceHotelId ?? 0,
-                onChanged: (v) => Navigator.pop(sheetContext, v),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (result == null) return;
-    setState(() => _fundingSourceHotelId = result == 0 ? null : result);
+    setState(() {
+      _paymentMethod = PendingExpense.paymentMethodOwnerDrawing;
+      _fundingSourceHotelId = null;
+      _selectedSupplier = null;
+    });
   }
 
   Future<void> _pickDueDate() async {
@@ -193,7 +178,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       return;
     }
     if (_paymentMethod == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار مصدر التمويل")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار طريقة الدفع")));
       return;
     }
     if (_isDeferred && _selectedSupplier == null) {
@@ -212,7 +197,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       categoryId: _selectedCategory!.id!,
       categoryName: _selectedCategory!.name,
       statement: _statementController.text.trim(),
-      notes: _notesController.text.trim(),
+      notes: null,
       date: widget.editExpense?.date ?? DateFormat('yyyy-MM-dd').format(now),
       time: widget.editExpense?.time ?? DateFormat('HH:mm:ss').format(now),
       createdAt: widget.editExpense?.createdAt ?? now.toIso8601String(),
@@ -305,9 +290,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
                     if (_isLocked) _buildLockedBanner(),
                     _buildMainCard(),
                     const SizedBox(height: AppSizes.lg),
-                    _buildFundingSourceCard(),
-                    const SizedBox(height: AppSizes.lg),
-                    _buildFundingSourceHotelCard(),
+                    _buildFundingRow(),
                     const SizedBox(height: AppSizes.lg),
                     _buildAttachmentsCard(),
                     const SizedBox(height: AppSizes.xl),
@@ -362,14 +345,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
             icon: Icons.description,
             readOnly: _isLocked,
           ),
-          const SizedBox(height: AppSizes.md),
-          AppTextField(
-            controller: _notesController,
-            hint: "الملاحظات (اختياري)",
-            icon: Icons.note_alt_outlined,
-            maxLines: 2,
-            readOnly: _isLocked,
-          ),
         ],
       ),
     );
@@ -404,70 +379,116 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     );
   }
 
-  Widget _buildFundingSourceCard() {
+  /// بطاقة "مصدر التمويل" الموحَّدة الجديدة — صف [نقد|شبكة|المالك] لتمويل هذا
+  /// الفندق نفسه، زر "مصدر آخر" يوسِّع قائمة كل الفنادق (كل فندق: اسمه +
+  /// [نقد][شبكة] أمامه مباشرة)، ثم رابطان يحافظان على وظيفتين قائمتين بلا أي
+  /// تغيير: "دين على مورد (آجل)" و"مسحوبات المالك" (راجع خطة إعادة التصميم).
+  Widget _buildFundingRow() {
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("طريقة الدفع", style: AppTextStyles.bodyBold),
+          const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
           const SizedBox(height: AppSizes.sm),
-          InkWell(
-            onTap: _isLocked ? null : _pickFundingSource,
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(AppRadius.sm)),
-              child: Row(
-                children: [
-                  const Icon(Icons.account_balance_wallet_outlined),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _paymentMethod ?? "اختيار مصدر التمويل",
-                      style: _paymentMethod == null ? AppTextStyles.caption : AppTextStyles.bodyBold.copyWith(fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const Icon(Icons.arrow_drop_down),
-                ],
-              ),
+          Row(
+            children: [
+              Expanded(child: _fundingChip("نقد", Icons.money, "نقد")),
+              const SizedBox(width: 8),
+              Expanded(child: _fundingChip("شبكة", Icons.credit_card, "شبكة")),
+              const SizedBox(width: 8),
+              Expanded(child: _fundingChip("المالك", Icons.person_outline, "شخصي")),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _isLocked ? null : () => setState(() => _showOtherHotels = !_showOtherHotels),
+              icon: Icon(_showOtherHotels ? Icons.expand_less : Icons.expand_more, size: 18),
+              label: const Text("مصدر آخر"),
             ),
           ),
+          if (_showOtherHotels) ...[
+            const Divider(height: 1),
+            for (final h in _allHotels) _buildOtherHotelRow(h),
+          ],
+          const Divider(height: 20),
+          Wrap(
+            spacing: 4,
+            children: [
+              TextButton(onPressed: _isLocked ? null : _pickDeferredSupplier, child: const Text("دين على مورد (آجل)")),
+              TextButton(onPressed: _isLocked ? null : _selectOwnerDrawing, child: const Text("مسحوبات المالك")),
+            ],
+          ),
+          _buildCurrentSelectionSummary(),
           if (_isDeferred) _buildDeferredDebtSection(),
         ],
       ),
     );
   }
 
-  Widget _buildFundingSourceHotelCard() {
-    final label = _fundingSourceHotelId == null
-        ? widget.hotel.arabicName
-        : (_allHotels.firstWhere((h) => h.id == _fundingSourceHotelId, orElse: () => widget.hotel).arabicName);
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _fundingChip(String label, IconData icon, String value) {
+    final selected = _paymentMethod == value && _fundingSourceHotelId == null;
+    return ChoiceChip(
+      label: Text(label, textAlign: TextAlign.center),
+      avatar: Icon(icon, size: 16),
+      selected: selected,
+      onSelected: _isLocked ? null : (_) => _selectOwnFunding(value),
+    );
+  }
+
+  Widget _buildOtherHotelRow(Hotel h) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
         children: [
-          const Text("مصدر التمويل", style: AppTextStyles.bodyBold),
-          const SizedBox(height: 4),
-          const Text("من دفع المبلغ فعلياً؟ إن كان فندقاً آخر، لا يُخصَم من خزنة هذا الفندق وتُنشأ ذمة تلقائية بين الفندقين.", style: AppTextStyles.caption),
-          const SizedBox(height: AppSizes.sm),
-          InkWell(
-            onTap: _isLocked ? null : _pickFundingSourceHotel,
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(AppRadius.sm)),
-              child: Row(
-                children: [
-                  const Icon(Icons.apartment_outlined),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(label, style: AppTextStyles.bodyBold.copyWith(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  const Icon(Icons.arrow_drop_down),
-                ],
-              ),
-            ),
+          Expanded(
+            flex: 2,
+            child: Text(h.arabicName, style: AppTextStyles.body.copyWith(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
+          _hotelMethodChip(h, "نقد"),
+          const SizedBox(width: 6),
+          _hotelMethodChip(h, "شبكة"),
+        ],
+      ),
+    );
+  }
+
+  Widget _hotelMethodChip(Hotel h, String method) {
+    final selected = _paymentMethod == method && _fundingSourceHotelId == h.id;
+    return ChoiceChip(
+      label: Text(method, style: const TextStyle(fontSize: 12)),
+      selected: selected,
+      visualDensity: VisualDensity.compact,
+      onSelected: _isLocked ? null : (_) => _selectOtherHotelFunding(h, method),
+    );
+  }
+
+  Widget _buildCurrentSelectionSummary() {
+    if (_paymentMethod == null) return const SizedBox.shrink();
+    String label;
+    Color color;
+    if (_fundingSourceHotelId != null) {
+      final hotelName = _allHotels.firstWhere((h) => h.id == _fundingSourceHotelId, orElse: () => widget.hotel).arabicName;
+      label = "مموَّل من $hotelName ($_paymentMethod) — لا يُخصَم من خزنة هذا الفندق";
+      color = Colors.teal;
+    } else if (_paymentMethod == PendingExpense.paymentMethodOwnerDrawing) {
+      label = "مسحوبات المالك";
+      color = Colors.purple;
+    } else if (_isDeferred) {
+      label = "آجل (دين)${_selectedSupplier != null ? ' — ${_selectedSupplier!.officialName}' : ''}";
+      color = Colors.orange;
+    } else {
+      label = "طريقة الدفع: $_paymentMethod (من هذا الفندق)";
+      color = Colors.blueGrey;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle, size: 14, color: color),
+          const SizedBox(width: 4),
+          Expanded(child: Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.bold))),
         ],
       ),
     );
