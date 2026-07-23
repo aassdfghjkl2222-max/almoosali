@@ -18,7 +18,7 @@ class VaultService {
     if (source == 'خارج النظام') return true;
 
     final balances = await _repository.getBalances(hotelId);
-    final balanceType = source == 'الحساب البنكي' ? 'bank' : 'cash';
+    final balanceType = source == 'شبكة' ? 'bank' : 'cash';
     double currentBalance = balances[balanceType] ?? 0;
 
     if (currentBalance < amount) {
@@ -45,7 +45,7 @@ class VaultService {
     if (source == 'خارج النظام') return;
 
     final balances = await _repository.getBalances(hotelId);
-    final balanceType = source == 'الحساب البنكي' ? 'bank' : 'cash';
+    final balanceType = source == 'شبكة' ? 'bank' : 'cash';
     double currentBalance = balances[balanceType] ?? 0;
     final newBalance = currentBalance - amount;
 

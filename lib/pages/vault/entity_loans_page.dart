@@ -243,7 +243,7 @@ class _AddLoanSheetState extends State<AddLoanSheet> {
               children: [
                 Expanded(child: _buildSourceButton("نقد", Icons.money)),
                 const SizedBox(width: AppSizes.md),
-                Expanded(child: _buildSourceButton("حساب بنكي", Icons.account_balance)),
+                Expanded(child: _buildSourceButton("شبكة", Icons.credit_card)),
               ],
             ),
             const SizedBox(height: AppSizes.xl),

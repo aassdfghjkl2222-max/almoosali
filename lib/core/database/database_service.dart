@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 42, // Upgrade to v42 for advance_withdrawals (السلفة)
+      version: 43, // Upgrade to v43: توحيد وسيلة الدفع "بنك/حساب بنكي/تحويل بنكي" إلى "شبكة"
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -185,6 +185,25 @@ class DatabaseService {
           try {
             await db.execute(
               'CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+        }
+        if (oldVersion < 43) {
+          // توحيد وسيلة الدفع: "بنك" لم تعد وسيلة دفع مستقلة، كل ما هو غير نقدي أصبح "شبكة".
+          // يُطبَّق فقط على حقول "وسيلة الدفع/السحب" الفعلية، وليس على بند إيراد "التحويل البنكي"
+          // في التقرير اليومي (financial_reports.details_json['transfer']) الذي يبقى تصنيفاً مستقلاً.
+          try { await db.execute("UPDATE personal_withdrawals SET method = 'شبكة' WHERE method = 'حساب بنكي'"); } catch (_) {}
+          try { await db.execute("UPDATE entity_loans SET source = 'شبكة' WHERE source = 'حساب بنكي'"); } catch (_) {}
+          try { await db.execute("UPDATE vault_transactions SET source = 'شبكة' WHERE source = 'الحساب البنكي'"); } catch (_) {}
+          try { await db.execute("UPDATE invoices SET payment_method = 'شبكة' WHERE payment_method = 'بنك'"); } catch (_) {}
+          try { await db.execute("UPDATE shared_expense_groups SET payment_method = 'شبكة' WHERE payment_method = 'تحويل بنكي'"); } catch (_) {}
+          try { await db.execute("UPDATE payroll_records SET payment_source = 'شبكة' WHERE payment_source = 'بنك'"); } catch (_) {}
+          // "التحويل بين المنشآت": تحويل مباشر لمبلغ بين فندقين (بلا مصروف مرتبط) —
+          // نفس نمط advance_withdrawals/shared_expense_groups (جدول تتبّع/عرض فقط، القيد
+          // المحاسبي الفعلي عبر FinancialEngine.recordTransaction بآلية entity_/receivable_entity).
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
             );
           } catch (_) {}
         }
@@ -374,6 +393,9 @@ class DatabaseService {
       await db.execute(
         'CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
       );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
       // بالحد الأدنى، وتُعاد المحاولة تلقائياً عند فتح التطبيق مرة أخرى.
@@ -418,6 +440,10 @@ class DatabaseService {
     // مباشرة عند الحفظ، هذا الجدول للتتبع/العرض فقط (نفس شكل personal_withdrawals تماماً،
     // لكنه جدول مستقل لأن الاتجاه المحاسبي مختلف تماماً — راجع تعليق recordOwnerDrawing).
     await db.execute('CREATE TABLE IF NOT EXISTS advance_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    // "التحويل بين المنشآت": تحويل مباشر لمبلغ بين فندقين بلا مصروف مرتبط —
+    // جدول تتبّع/عرض فقط، القيد المحاسبي الفعلي عبر FinancialEngine.recordTransaction
+    // (آلية entity_/receivable_entity نفسها المستخدمة أصلاً للمصروف المموَّل من فندق آخر).
+    await db.execute('CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     // كتالوج بنود التقرير المالي اليومي الدائمة (إيراد/مصروف) — راجع
     // FinancialReportItemRepository. لا تظهر تلقائياً في الشاشة، فقط عبر
     // منتقي "إضافة بند" — التقارير المحفوظة سابقاً تحتفظ بنسخة كاملة داخل
@@ -786,10 +812,25 @@ class DatabaseService {
     );
   }
 
+  /// كل مجموعات المصروف المشترك التي مَوَّلتها منشأة معيّنة — لعرض قسم "المصروفات
+  /// المشتركة" في شاشة العمليات المالية المعلقة (عرض/عدّاد فقط، بلا أي أثر محاسبي إضافي).
+  Future<List<Map<String, dynamic>>> getSharedExpenseGroupsByFundingHotel(int hotelId) async {
+    final db = await database;
+    return await db.query('shared_expense_groups', where: 'funding_hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC, time DESC');
+  }
+
   // ---------------- السلفة (advance_withdrawals) ----------------
 
   Future<int> insertAdvanceWithdrawal(Map<String, dynamic> data) async { final db = await database; return await db.insert('advance_withdrawals', data); }
   Future<List<Map<String, dynamic>>> getAdvanceWithdrawals(int hotelId) async { final db = await database; return await db.query('advance_withdrawals', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC, time DESC'); }
+
+  // ---------------- التحويل بين المنشآت (inter_entity_transfers) ----------------
+
+  Future<int> insertInterEntityTransfer(Map<String, dynamic> data) async { final db = await database; return await db.insert('inter_entity_transfers', data); }
+  Future<List<Map<String, dynamic>>> getInterEntityTransfers(int hotelId) async {
+    final db = await database;
+    return await db.query('inter_entity_transfers', where: 'from_hotel_id = ? OR to_hotel_id = ?', whereArgs: [hotelId, hotelId], orderBy: 'date DESC, time DESC');
+  }
 
   // ---------------- كتالوج بنود التقرير المالي اليومي (financial_report_items) ----------------
 
@@ -1413,7 +1454,7 @@ class DatabaseService {
 
   Future<Map<String, double>> getVaultBalances(int hotelId) async { final db = await database; final res = await db.query('vault_balances', where: 'hotel_id = ?', whereArgs: [hotelId]); Map<String, double> b = {'cash': 0.0, 'bank': 0.0}; if (res.isEmpty) { await db.insert('vault_balances', {'hotel_id': hotelId, 'type': 'cash', 'balance': 0.0}); await db.insert('vault_balances', {'hotel_id': hotelId, 'type': 'bank', 'balance': 0.0}); return b; } for (var r in res) { b[r['type'] as String] = (r['balance'] as num).toDouble(); } return b; }
   Future<List<Map<String, dynamic>>> getVaultTransactions(int hotelId) async { final db = await database; return await db.query('vault_transactions', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
-  Future<int> insertVaultTransaction(Map<String, dynamic> data) async { final db = await database; return await db.transaction((txn) async { final hId = data['hotel_id']; final type = data['source'] == 'الحساب البنكي' ? 'bank' : 'cash'; final nB = (data['balance_after'] as num).toDouble(); await txn.update('vault_balances', {'balance': nB}, where: 'hotel_id = ? AND type = ?', whereArgs: [hId, type]); return await txn.insert('vault_transactions', data); }); }
+  Future<int> insertVaultTransaction(Map<String, dynamic> data) async { final db = await database; return await db.transaction((txn) async { final hId = data['hotel_id']; final type = data['source'] == 'شبكة' ? 'bank' : 'cash'; final nB = (data['balance_after'] as num).toDouble(); await txn.update('vault_balances', {'balance': nB}, where: 'hotel_id = ? AND type = ?', whereArgs: [hId, type]); return await txn.insert('vault_transactions', data); }); }
 
   Future<List<Map<String, dynamic>>> getDepositedFunds({required int hotelId, bool? isArchived}) async { final db = await database; String w = 'hotel_id = ?'; List<dynamic> args = [hotelId]; if (isArchived != null) { w += ' AND is_archived = ?'; args.add(isArchived ? 1 : 0); } return await db.query('deposited_funds', where: w, whereArgs: args, orderBy: 'date DESC'); }
   Future<int> insertDepositedFund(Map<String, dynamic> data) async { final db = await database; return await db.insert('deposited_funds', data); }

@@ -244,7 +244,7 @@ class _AddWithdrawalSheetState extends State<AddWithdrawalSheet> {
               children: [
                 Expanded(child: _buildMethodButton("نقد", Icons.money)),
                 const SizedBox(width: AppSizes.md),
-                Expanded(child: _buildMethodButton("حساب بنكي", Icons.account_balance)),
+                Expanded(child: _buildMethodButton("شبكة", Icons.credit_card)),
               ],
             ),
             const SizedBox(height: AppSizes.xl),

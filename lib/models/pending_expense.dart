@@ -12,7 +12,7 @@ class PendingExpense {
   final String date;
   final String time;
   final bool isTransferred;
-  final String amountSource; // الخزنة / الحساب البنكي / خارج النظام
+  final String amountSource; // الخزنة / شبكة / خارج النظام
   final String createdAt;
 
   /// المورد المرتبط بدين هذا المصروف (إلزامي فقط عند paymentMethod == آجل

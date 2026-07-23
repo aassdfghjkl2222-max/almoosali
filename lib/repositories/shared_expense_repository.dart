@@ -12,7 +12,7 @@ class SharedExpenseRepository {
   final _financialEngine = FinancialEngine();
 
   /// طريقة الدفع النصية → فئة FinancialEngine ('cash'/'bank'). "نقد" فقط
-  /// نقدية؛ "شبكة"/"تحويل بنكي" كلاهما يُخصمان من نفس حساب البنك الموحّد.
+  /// نقدية؛ "شبكة" تُخصم من حساب البنك الموحّد داخلياً.
   static String paymentMethodCategory(String paymentMethod) => paymentMethod == 'نقد' ? 'cash' : 'bank';
 
   /// [shares] حصة كل منشأة مشارِكة (بما فيها المموِّلة نفسها، إن وُجدت في
@@ -50,5 +50,12 @@ class SharedExpenseRepository {
   Future<List<SharedExpenseShare>> getSharesForHotelAndDate(int hotelId, String date) async {
     final data = await _dbService.getSharedExpenseSharesForHotelAndDate(hotelId, date);
     return data.map((e) => SharedExpenseShare.fromMap(e)).toList();
+  }
+
+  /// كل مجموعات المصروف المشترك التي مَوَّلتها منشأة معيّنة — لقسم "المصروفات
+  /// المشتركة" في شاشة العمليات المالية المعلقة.
+  Future<List<SharedExpenseGroup>> getSharedExpensesForFundingHotel(int hotelId) async {
+    final data = await _dbService.getSharedExpenseGroupsByFundingHotel(hotelId);
+    return data.map((e) => SharedExpenseGroup.fromMap(e)).toList();
   }
 }

@@ -23,7 +23,14 @@ import '../common/transaction_review_page.dart';
 class AddPendingExpensePage extends StatefulWidget {
   final Hotel hotel;
   final PendingExpense? editExpense;
-  const AddPendingExpensePage({super.key, required this.hotel, this.editExpense});
+
+  /// true فقط عند الفتح من قسم "مسحوبات المالك" المخصَّص في شاشة العمليات
+  /// المالية المعلقة — يُقفل مصدر التمويل على [PendingExpense.paymentMethodOwnerDrawing]
+  /// ويُبسِّط الواجهة (بلا بطاقة مصدر تمويل كاملة)، بلا أي تغيير في منطق
+  /// الحفظ/الترحيل نفسه (نفس PendingExpense تماماً بمصدر تمويل ثابت).
+  final bool lockToOwnerDrawing;
+
+  const AddPendingExpensePage({super.key, required this.hotel, this.editExpense, this.lockToOwnerDrawing = false});
 
   @override
   State<AddPendingExpensePage> createState() => _AddPendingExpensePageState();
@@ -79,6 +86,8 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       if (edit.isDeferredDebt && edit.supplierId != null) {
         _selectedSupplier = await _supplierRepository.getSupplierById(edit.supplierId!);
       }
+    } else if (widget.lockToOwnerDrawing) {
+      _paymentMethod = PendingExpense.paymentMethodOwnerDrawing;
     }
 
     if (mounted) {
@@ -276,7 +285,12 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: widget.editExpense == null ? "إضافة مصروف معلق" : "تعديل مصروف", hotel: widget.hotel),
+        title: HotelIdentityTitle(
+          title: widget.lockToOwnerDrawing
+              ? (widget.editExpense == null ? "إضافة مسحوب مالك" : "تعديل مسحوب مالك")
+              : (widget.editExpense == null ? "إضافة مصروف معلق" : "تعديل مصروف"),
+          hotel: widget.hotel,
+        ),
         centerTitle: true,
       ),
       body: _isLoading
@@ -290,7 +304,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
                     if (_isLocked) _buildLockedBanner(),
                     _buildMainCard(),
                     const SizedBox(height: AppSizes.lg),
-                    _buildFundingRow(),
+                    widget.lockToOwnerDrawing ? _buildOwnerDrawingFundingCard() : _buildFundingRow(),
                     const SizedBox(height: AppSizes.lg),
                     _buildAttachmentsCard(),
                     const SizedBox(height: AppSizes.xl),
@@ -422,6 +436,26 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
           ),
           _buildCurrentSelectionSummary(),
           if (_isDeferred) _buildDeferredDebtSection(),
+        ],
+      ),
+    );
+  }
+
+  /// بطاقة مبسَّطة تحل محل [_buildFundingRow] الكاملة عند [AddPendingExpensePage.lockToOwnerDrawing]
+  /// — مصدر التمويل مقفل مسبقاً على "مسحوبات المالك" (راجع _loadData)، فلا حاجة
+  /// لعرض شرائح نقد/شبكة/فندق آخر التي لا تنطبق هنا إطلاقاً.
+  Widget _buildOwnerDrawingFundingCard() {
+    return AppCard(
+      child: Row(
+        children: [
+          const Icon(Icons.account_balance_wallet_outlined, color: Colors.amber),
+          const SizedBox(width: AppSizes.sm),
+          const Expanded(
+            child: Text(
+              "مصدر التمويل: مسحوبات المالك — يُخصَم من خزنة الفندق عند الترحيل وتُنشأ ذمة على المالك تلقائياً.",
+              style: AppTextStyles.caption,
+            ),
+          ),
         ],
       ),
     );

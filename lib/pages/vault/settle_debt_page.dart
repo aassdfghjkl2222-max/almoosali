@@ -46,7 +46,7 @@ class _SettleDebtPageState extends State<SettleDebtPage> {
     final amount = double.tryParse(_amountController.text.replaceAll(',', '')) ?? 0;
     if (amount <= 0) return;
 
-    final sourceName = _paymentSource == 'cash' ? 'نقد (الخزنة)' : 'الحساب البنكي';
+    final sourceName = _paymentSource == 'cash' ? 'نقد (الخزنة)' : 'شبكة';
     final categoryName = widget.debtCategory == 'personal' ? 'المالك' : 'فندق زميل';
 
     Navigator.push(
@@ -144,7 +144,7 @@ class _SettleDebtPageState extends State<SettleDebtPage> {
         ),
         const SizedBox(width: AppSizes.md),
         Expanded(
-          child: _buildSourceItem("الحساب البنكي", 'bank', Icons.account_balance),
+          child: _buildSourceItem("شبكة", 'bank', Icons.credit_card),
         ),
       ],
     );

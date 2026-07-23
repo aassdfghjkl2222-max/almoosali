@@ -1,0 +1,198 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../../core/app_colors.dart';
+import '../../core/app_radius.dart';
+import '../../core/app_sizes.dart';
+import '../../core/app_text_styles.dart';
+import '../../models/hotel.dart';
+import '../../repositories/hotel_repository.dart';
+import '../../repositories/inter_entity_transfer_repository.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/common/app_card.dart';
+import '../../widgets/common/app_text_field.dart';
+import '../../widgets/common/hotel_identity_title.dart';
+import '../common/transaction_review_page.dart';
+
+/// "التحويل بين المنشآت" — تحويل مباشر لمبلغ بين هذا الفندق وفندق آخر، بلا
+/// مصروف مرتبط. يُنشئ ذمة فورية بين الطرفين (راجع InterEntityTransferRepository)
+/// — بلا أي أثر على نقد/شبكة أي من الطرفين، بنفس آلية entity_/receivable_entity
+/// المستخدمة أصلاً لحالة "مصروف مموَّل من فندق آخر".
+class AddInterEntityTransferPage extends StatefulWidget {
+  final Hotel hotel;
+  const AddInterEntityTransferPage({super.key, required this.hotel});
+
+  @override
+  State<AddInterEntityTransferPage> createState() => _AddInterEntityTransferPageState();
+}
+
+class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage> {
+  final _repository = InterEntityTransferRepository();
+  final _hotelRepository = HotelRepository();
+  final _formKey = GlobalKey<FormState>();
+  final _statementController = TextEditingController();
+  final _amountController = TextEditingController();
+
+  List<Hotel> _otherHotels = [];
+  Hotel? _counterpartHotel;
+  bool _isLoading = true;
+
+  /// true = هذا الفندق يُرسِل إلى [_counterpartHotel] (يصبح الآخر مديناً لهذا
+  /// الفندق). false = هذا الفندق يستلم من [_counterpartHotel] (يصبح هذا
+  /// الفندق مديناً له).
+  bool _isSending = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHotels();
+  }
+
+  Future<void> _loadHotels() async {
+    final hotels = await _hotelRepository.getAllHotels();
+    if (!mounted) return;
+    setState(() {
+      _otherHotels = hotels.where((h) => h.id != widget.hotel.id).toList();
+      _isLoading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _statementController.dispose();
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    final amount = double.tryParse(_amountController.text.replaceAll(',', '')) ?? 0;
+    if (amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى إدخال مبلغ صحيح")));
+      return;
+    }
+    if (_counterpartHotel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار المنشأة الأخرى")));
+      return;
+    }
+
+    final fromHotel = _isSending ? widget.hotel : _counterpartHotel!;
+    final toHotel = _isSending ? _counterpartHotel! : widget.hotel;
+    final statement = _statementController.text.trim();
+
+    final reviewItems = [
+      ReviewItem(label: "البيان", value: statement),
+      ReviewItem(label: "المبلغ", value: "${NumberFormat("#,##0.##").format(amount)} ريال", color: AppColors.danger),
+      ReviewItem(label: "من", value: fromHotel.arabicName, color: Colors.purple),
+      ReviewItem(label: "إلى", value: toHotel.arabicName, color: Colors.purple),
+    ];
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TransactionReviewPage(
+          title: "مراجعة التحويل",
+          items: reviewItems,
+          onConfirm: () async {
+            await _repository.createTransfer(
+              fromHotelId: fromHotel.id!,
+              toHotelId: toHotel.id!,
+              amount: amount,
+              statement: statement,
+            );
+            if (mounted) {
+              Navigator.pop(context); // Close Review
+              Navigator.pop(context, true); // Close Add Page
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: HotelIdentityTitle(title: "تحويل بين المنشآت", hotel: widget.hotel),
+        centerTitle: true,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSizes.md),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text("اتجاه التحويل", style: AppTextStyles.bodyBold),
+                          const SizedBox(height: AppSizes.sm),
+                          Row(
+                            children: [
+                              Expanded(child: _directionChip("إرسال إلى", Icons.call_made, true)),
+                              const SizedBox(width: 8),
+                              Expanded(child: _directionChip("استلام من", Icons.call_received, false)),
+                            ],
+                          ),
+                          const SizedBox(height: AppSizes.md),
+                          _buildHotelDropdown(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSizes.lg),
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text("تفاصيل التحويل", style: AppTextStyles.bodyBold),
+                          const SizedBox(height: AppSizes.md),
+                          AppTextField(controller: _statementController, hint: "البيان", icon: Icons.description),
+                          const SizedBox(height: AppSizes.md),
+                          AppTextField(controller: _amountController, hint: "المبلغ", icon: Icons.attach_money, formatThousands: true),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSizes.xl),
+                    AppButton(text: "مراجعة وحفظ", onPressed: _save),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _directionChip(String label, IconData icon, bool value) {
+    final selected = _isSending == value;
+    return ChoiceChip(
+      label: Text(label, textAlign: TextAlign.center),
+      avatar: Icon(icon, size: 16),
+      selected: selected,
+      onSelected: (_) => setState(() => _isSending = value),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+    );
+  }
+
+  Widget _buildHotelDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<Hotel>(
+          value: _counterpartHotel,
+          isExpanded: true,
+          hint: Text(_isSending ? "اختر المنشأة المستقبِلة" : "اختر المنشأة المرسِلة"),
+          items: _otherHotels.map((h) => DropdownMenuItem(value: h, child: Text(h.arabicName))).toList(),
+          onChanged: (v) => setState(() => _counterpartHotel = v),
+        ),
+      ),
+    );
+  }
+}

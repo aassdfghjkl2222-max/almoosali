@@ -9,7 +9,7 @@ class PayrollRecord {
   final double advancesTotal;
   final double netSalary;
   final String status; // 'approved' | 'paid'
-  final String? paymentSource; // 'نقد' | 'بنك' | 'شخصي' | 'موزع'
+  final String? paymentSource; // 'نقد' | 'شبكة' | 'شخصي' | 'موزع'
   final double cashAmount;
   final double bankAmount;
   final double personalAmount;

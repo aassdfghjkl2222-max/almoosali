@@ -3,7 +3,7 @@ class EntityLoan {
   final int hotelId;
   final double amount;
   final String statement;
-  final String source; // 'نقد' or 'حساب بنكي'
+  final String source; // 'نقد' or 'شبكة'
   final String date;
   final String time;
   final String createdAt;

@@ -170,7 +170,7 @@ class VaultRepository {
   }
 
   Future<int> addPersonalWithdrawal(PersonalWithdrawal withdrawal) async {
-    final balanceType = withdrawal.method == 'حساب بنكي' ? 'bank' : 'cash';
+    final balanceType = withdrawal.method == 'شبكة' ? 'bank' : 'cash';
     
     await _financialEngine.recordTransaction(
       hotelId: withdrawal.hotelId,
@@ -192,7 +192,7 @@ class VaultRepository {
   }
 
   Future<int> addEntityLoan(EntityLoan loan) async {
-    final balanceType = loan.source == 'حساب بنكي' ? 'bank' : 'cash';
+    final balanceType = loan.source == 'شبكة' ? 'bank' : 'cash';
     
     await _financialEngine.recordTransaction(
       hotelId: loan.hotelId,
@@ -230,7 +230,7 @@ class VaultRepository {
   }
 
   Future<void> undoTransaction(VaultTransaction transaction) async {
-    final balanceType = transaction.source == 'الحساب البنكي' ? 'bank' : 'cash';
+    final balanceType = transaction.source == 'شبكة' ? 'bank' : 'cash';
     await _financialEngine.recordTransaction(
       hotelId: transaction.hotelId,
       sourceCategory: balanceType,

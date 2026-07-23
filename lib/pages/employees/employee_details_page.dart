@@ -528,14 +528,14 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
                       spacing: 8,
                       children: [
                         _sourceChip("نقد", 'cash', singleSource, (v) => setSheetState(() => singleSource = v)),
-                        _sourceChip("حساب بنكي", 'bank', singleSource, (v) => setSheetState(() => singleSource = v)),
+                        _sourceChip("شبكة", 'bank', singleSource, (v) => setSheetState(() => singleSource = v)),
                         _sourceChip("حساب شخصي", 'personal', singleSource, (v) => setSheetState(() => singleSource = v)),
                       ],
                     )
                   else ...[
                     AppTextField(controller: cashController, hint: "المبلغ من النقد", formatThousands: true),
                     const SizedBox(height: AppSizes.sm),
-                    AppTextField(controller: bankController, hint: "المبلغ من الحساب البنكي", formatThousands: true),
+                    AppTextField(controller: bankController, hint: "المبلغ من الشبكة", formatThousands: true),
                     const SizedBox(height: AppSizes.sm),
                     AppTextField(controller: personalController, hint: "المبلغ من الحساب الشخصي", formatThousands: true),
                   ],
@@ -934,7 +934,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
                         spacing: 8,
                         children: [
                           _sourceChip("نقد", 'cash', singleSource, (v) => setSheetState(() => singleSource = v)),
-                          _sourceChip("حساب بنكي", 'bank', singleSource, (v) => setSheetState(() => singleSource = v)),
+                          _sourceChip("شبكة", 'bank', singleSource, (v) => setSheetState(() => singleSource = v)),
                           _sourceChip("حساب شخصي", 'personal', singleSource, (v) => setSheetState(() => singleSource = v)),
                           if (otherHotels.isNotEmpty) _sourceChip("منشأة أخرى", 'entity', singleSource, (v) => setSheetState(() => singleSource = v)),
                         ],
@@ -942,7 +942,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
                     else ...[
                       AppTextField(controller: cashController, hint: "من النقد", formatThousands: true),
                       const SizedBox(height: AppSizes.sm),
-                      AppTextField(controller: bankController, hint: "من الحساب البنكي", formatThousands: true),
+                      AppTextField(controller: bankController, hint: "من الشبكة", formatThousands: true),
                       const SizedBox(height: AppSizes.sm),
                       AppTextField(controller: personalController, hint: "من الحساب الشخصي", formatThousands: true),
                       if (otherHotels.isNotEmpty) ...[

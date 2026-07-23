@@ -51,7 +51,7 @@ class _PersonalActionPageState extends State<PersonalActionPage> {
 
     final isWithdraw = widget.action == 'withdraw';
     final actionName = isWithdraw ? "سحب" : "إيداع";
-    final sourceName = _source == 'cash' ? 'نقد (الخزنة)' : 'الحساب البنكي';
+    final sourceName = _source == 'cash' ? 'نقد (الخزنة)' : 'شبكة';
 
     Navigator.push(
       context,
@@ -144,7 +144,7 @@ class _PersonalActionPageState extends State<PersonalActionPage> {
       children: [
         Expanded(child: _buildSourceItem("نقد (الخزنة)", 'cash', Icons.money)),
         const SizedBox(width: AppSizes.md),
-        Expanded(child: _buildSourceItem("الحساب البنكي", 'bank', Icons.account_balance)),
+        Expanded(child: _buildSourceItem("شبكة", 'bank', Icons.credit_card)),
       ],
     );
   }

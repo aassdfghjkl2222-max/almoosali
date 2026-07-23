@@ -51,7 +51,7 @@ class _CollectReceivablePageState extends State<CollectReceivablePage> {
     final amount = double.tryParse(_amountController.text.replaceAll(',', '')) ?? 0;
     if (amount <= 0) return;
 
-    final targetName = _depositTarget == 'cash' ? 'نقد (الخزنة)' : 'الحساب البنكي';
+    final targetName = _depositTarget == 'cash' ? 'نقد (الخزنة)' : 'شبكة';
 
     Navigator.push(
       context,
@@ -142,7 +142,7 @@ class _CollectReceivablePageState extends State<CollectReceivablePage> {
       children: [
         Expanded(child: _buildTargetItem("نقد (الخزنة)", 'cash', Icons.money)),
         const SizedBox(width: AppSizes.md),
-        Expanded(child: _buildTargetItem("الحساب البنكي", 'bank', Icons.account_balance)),
+        Expanded(child: _buildTargetItem("شبكة", 'bank', Icons.credit_card)),
       ],
     );
   }

@@ -41,7 +41,7 @@ const List<FundingSourceOption> kInvoiceFundingSources = [
   FundingSourceOption('شراء آجل (مورد)', Icons.schedule_outlined, Color(0xFFC62828), hasPaymentMethod: false),
 ];
 
-const List<String> kInvoicePaymentMethods = ['نقد', 'بنك', 'دفع جزئي'];
+const List<String> kInvoicePaymentMethods = ['نقد', 'شبكة', 'دفع جزئي'];
 
 /// شاشة إدخال فاتورة ضريبية سريعة جداً، مُحسَّنة لإدخال عشرات الفواتير
 /// يومياً بأقل عدد لمسات ممكن: بحث فوري عن المورد → تعبئة تلقائية أو حفظ

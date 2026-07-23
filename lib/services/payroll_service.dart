@@ -295,7 +295,7 @@ class PayrollService {
     return record.copyWithId(id);
   }
 
-  /// صرف الراتب: يوزّع صافي الراتب على مصدر واحد أو أكثر (نقد/بنك/حساب شخصي)،
+  /// صرف الراتب: يوزّع صافي الراتب على مصدر واحد أو أكثر (نقد/شبكة/حساب شخصي)،
   /// وينشئ حركة مالية عبر [FinancialEngine] لكل مصدر بمبلغه، ثم يقفل سجل الراتب كمصروف.
   Future<void> paySalary({
     required PayrollRecord payroll,
@@ -348,7 +348,7 @@ class PayrollService {
 
     final sourcesUsed = [
       if (cashAmount > 0) 'نقد',
-      if (bankAmount > 0) 'بنك',
+      if (bankAmount > 0) 'شبكة',
       if (personalAmount > 0) 'شخصي',
     ];
     final sourceLabel = sourcesUsed.length > 1 ? 'موزع' : sourcesUsed.first;

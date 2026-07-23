@@ -7,7 +7,7 @@ class SharedExpenseGroup {
   final String description;
   final int categoryId;
   final double totalAmount;
-  final String paymentMethod; // نقد / شبكة / تحويل بنكي
+  final String paymentMethod; // نقد / شبكة
   final int fundingHotelId;
   final String date;
   final String time;

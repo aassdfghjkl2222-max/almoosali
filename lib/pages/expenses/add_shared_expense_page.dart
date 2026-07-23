@@ -329,8 +329,6 @@ class _AddSharedExpensePageState extends State<AddSharedExpensePage> {
               _paymentMethodChip("نقد", Icons.money),
               const SizedBox(width: 8),
               _paymentMethodChip("شبكة", Icons.credit_card),
-              const SizedBox(width: 8),
-              _paymentMethodChip("تحويل بنكي", Icons.account_balance),
             ],
           ),
         ],

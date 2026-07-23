@@ -3,7 +3,7 @@ class PersonalWithdrawal {
   final int hotelId;
   final double amount;
   final String statement;
-  final String method; // 'نقد' or 'حساب بنكي'
+  final String method; // 'نقد' or 'شبكة'
   final String date;
   final String time;
   final String createdAt;

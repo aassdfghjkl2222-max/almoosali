@@ -33,10 +33,10 @@ class AmountSourceSelector extends StatelessWidget {
             Expanded(
               child: _buildSourceItem(
                 context: context,
-                label: "الحساب البنكي",
-                icon: Icons.account_balance,
-                isSelected: selectedSource == 'الحساب البنكي',
-                onTap: () => onSourceChanged('الحساب البنكي'),
+                label: "شبكة",
+                icon: Icons.credit_card,
+                isSelected: selectedSource == 'شبكة',
+                onTap: () => onSourceChanged('شبكة'),
                 color: Colors.blue,
               ),
             ),

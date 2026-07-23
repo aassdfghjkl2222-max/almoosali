@@ -67,7 +67,7 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
       context,
       MaterialPageRoute(
         builder: (_) => TransactionReviewPage(
-          title: "مراجعة السلفة",
+          title: "مراجعة العهدة",
           items: reviewItems,
           onConfirm: () async {
             await _repository.addAdvanceWithdrawal(advance);
@@ -86,7 +86,7 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: "سلفة", hotel: widget.hotel),
+        title: HotelIdentityTitle(title: "إضافة عهدة", hotel: widget.hotel),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -99,7 +99,7 @@ class _AddAdvancePageState extends State<AddAdvancePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("تفاصيل السلفة", style: AppTextStyles.bodyBold),
+                    const Text("تفاصيل العهدة", style: AppTextStyles.bodyBold),
                     const SizedBox(height: 4),
                     const Text("سحب المالك مبلغاً من أموال الفندق — ليست مصروفاً، تُنشئ ذمة على المالك لصالح الفندق.", style: AppTextStyles.caption),
                     const SizedBox(height: AppSizes.md),

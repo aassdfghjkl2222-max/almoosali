@@ -44,8 +44,8 @@ class _DashboardSection {
 
 final List<_DashboardSection> _sections = [
   _DashboardSection(
-    title: "المصروفات المعلقة",
-    description: "مصروفات بانتظار الترحيل والاعتماد",
+    title: "العمليات المالية المعلقة",
+    description: "مصروفات وعمليات بانتظار الترحيل والاعتماد",
     icon: Icons.pending_actions_rounded,
     color: (_) => AppColors.warning,
     badgeCount: (state) => state._pendingCount,

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-// ignore_for_file: non_const_argument_for_const_parameter
 import 'package:intl/intl.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
@@ -7,14 +6,69 @@ import '../../core/app_text_styles.dart';
 import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
 import '../../models/pending_expense.dart';
+import '../../models/shared_expense_group.dart';
+import '../../models/advance_withdrawal.dart';
+import '../../models/inter_entity_transfer.dart';
+import '../../models/financial_account.dart';
 import '../../repositories/expense_repository.dart';
+import '../../repositories/shared_expense_repository.dart';
+import '../../repositories/vault_repository.dart';
+import '../../repositories/inter_entity_transfer_repository.dart';
+import '../../repositories/hotel_repository.dart';
+import '../../services/financial_engine.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import 'add_advance_page.dart';
+import 'add_inter_entity_transfer_page.dart';
 import 'add_pending_expense_page.dart';
 import 'add_shared_expense_page.dart';
 import 'expense_reports_page.dart';
+
+enum _OpCategory { expenses, shared, advance, ownerDrawing, transfer }
+
+class _CategoryMeta {
+  final _OpCategory type;
+  final String label;
+  final String addLabel;
+  final IconData icon;
+  final Color color;
+  const _CategoryMeta(this.type, this.label, this.addLabel, this.icon, this.color);
+}
+
+const _categoryMetas = <_CategoryMeta>[
+  _CategoryMeta(_OpCategory.expenses, "المصروفات", "إضافة مصروف", Icons.receipt_long_outlined, Color(0xFF7B1E3A)),
+  _CategoryMeta(_OpCategory.shared, "المصروفات المشتركة", "إضافة مصروف مشترك", Icons.call_split, Color(0xFF1E63C7)),
+  _CategoryMeta(_OpCategory.advance, "العهد", "إضافة عهدة", Icons.account_balance_wallet_outlined, Color(0xFF1B8A5A)),
+  _CategoryMeta(_OpCategory.ownerDrawing, "مسحوبات المالك", "إضافة مسحوب", Icons.person_outline, Color(0xFFB8860B)),
+  _CategoryMeta(_OpCategory.transfer, "التحويل بين المنشآت", "إضافة تحويل", Icons.swap_horiz, Color(0xFF6A3EA1)),
+];
+
+/// بيانات عرض موحَّدة لبطاقة عملية — تُبنى من أي من النماذج الخمسة المختلفة
+/// (PendingExpense / SharedExpenseGroup / AdvanceWithdrawal / InterEntityTransfer)
+/// لتُعرض ببطاقة واحدة موحَّدة الشكل (راجع _buildOpCard).
+class _OpCardData {
+  final String statement;
+  final String hotelName;
+  final String date;
+  final String time;
+  final String? paymentMethod;
+  final String status;
+  final Color statusColor;
+  final double amount;
+  final VoidCallback? onTap;
+  const _OpCardData({
+    required this.statement,
+    required this.hotelName,
+    required this.date,
+    required this.time,
+    this.paymentMethod,
+    required this.status,
+    required this.statusColor,
+    required this.amount,
+    this.onTap,
+  });
+}
 
 class PendingExpensesListPage extends StatefulWidget {
   final Hotel hotel;
@@ -25,12 +79,33 @@ class PendingExpensesListPage extends StatefulWidget {
 }
 
 class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
-  final _repository = ExpenseRepository();
-  List<PendingExpense> _allExpenses = [];
-  List<PendingExpense> _filteredExpenses = [];
+  final _expenseRepo = ExpenseRepository();
+  final _sharedRepo = SharedExpenseRepository();
+  final _vaultRepo = VaultRepository();
+  final _transferRepo = InterEntityTransferRepository();
+  final _hotelRepo = HotelRepository();
+  final _financialEngine = FinancialEngine();
+
   bool _isLoading = true;
+  _OpCategory _activeCategory = _OpCategory.expenses;
   final _searchController = TextEditingController();
-  String _sortBy = 'date'; // 'date', 'amount', 'type'
+  String _searchQuery = '';
+  bool _showSearchBar = false;
+  String _sortBy = 'date'; // 'date' أو 'amount'
+
+  List<PendingExpense> _plainExpenses = [];
+  List<PendingExpense> _ownerDrawingExpenses = [];
+  List<SharedExpenseGroup> _sharedExpenses = [];
+  List<AdvanceWithdrawal> _advances = [];
+  List<InterEntityTransfer> _transfers = [];
+  Map<int, String> _hotelNames = {};
+
+  double _ownerDebt = 0;
+  List<FinancialAccount> _receivables = [];
+
+  /// عتبة "ذمة كبيرة" لتنبيه المستخدم — قيمة افتراضية معقولة بانتظار تحديد
+  /// المستخدم لعتبة مخصَّصة لاحقاً إن رغب.
+  static const double _largeBalanceThreshold = 50000;
 
   @override
   void initState() {
@@ -38,289 +113,508 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final expenses = await _repository.getPendingExpenses(
-      hotelId: widget.hotel.id!,
-      isTransferred: false,
-    );
+    final hotelId = widget.hotel.id!;
+
+    final allExpenses = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
+    final sharedExpenses = await _sharedRepo.getSharedExpensesForFundingHotel(hotelId);
+    final advances = await _vaultRepo.getAdvanceWithdrawals(hotelId);
+    final transfers = await _transferRepo.getForHotel(hotelId);
+    final hotels = await _hotelRepo.getAllHotels();
+    final ownerDebt = await _financialEngine.getBalance(hotelId, 'owner_debt');
+    final receivableAccounts = await _financialEngine.getAccountsByType(hotelId, 'asset');
+
+    if (!mounted) return;
     setState(() {
-      _allExpenses = expenses;
-      _filteredExpenses = expenses;
+      _plainExpenses = allExpenses.where((e) => !e.isOwnerDrawing).toList();
+      _ownerDrawingExpenses = allExpenses.where((e) => e.isOwnerDrawing).toList();
+      _sharedExpenses = sharedExpenses;
+      _advances = advances;
+      _transfers = transfers;
+      _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
+      _ownerDebt = ownerDebt;
+      _receivables = receivableAccounts.where((a) => a.balance > 0.01).toList();
       _isLoading = false;
-      _applySearchAndSort();
     });
   }
 
-  void _applySearchAndSort() {
-    List<PendingExpense> results = List.from(_allExpenses);
-
-    // Search
-    if (_searchController.text.isNotEmpty) {
-      final query = _searchController.text.toLowerCase();
-      results = results.where((e) {
-        return (e.statement.toLowerCase().contains(query)) ||
-            (e.categoryName?.toLowerCase().contains(query) ?? false) ||
-            (e.amount.toString().contains(query));
-      }).toList();
+  int? _otherHotelIdFromReceivableCategory(String category) {
+    if (category.startsWith('receivable_entity_')) {
+      return int.tryParse(category.substring('receivable_entity_'.length));
     }
-
-    // Sort
-    if (_sortBy == 'date') {
-      results.sort((a, b) => "${b.date} ${b.time}".compareTo("${a.date} ${a.time}"));
-    } else if (_sortBy == 'amount') {
-      results.sort((a, b) => b.amount.compareTo(a.amount));
-    } else if (_sortBy == 'type') {
-      results.sort((a, b) => (a.categoryName ?? "").compareTo(b.categoryName ?? ""));
-    }
-
-    setState(() {
-      _filteredExpenses = results;
-    });
+    return null;
   }
 
-  /// تعديل مباشر من القائمة — بديل المرور عبر شاشة اختيار المصروفات داخل
-  /// التقرير اليومي فقط. AddPendingExpensePage نفسها تمنع التعديل إن كان
-  /// المصروف مُرحَّلاً بالفعل (راجع _isLocked هناك).
-  Future<void> _editExpense(PendingExpense expense) async {
+  List<String> get _largeBalanceAlerts {
+    final format = NumberFormat("#,##0.##");
+    final alerts = <String>[];
+    if (_ownerDebt > _largeBalanceThreshold) {
+      alerts.add("ذمة المالك (مسحوبات مستحقة) كبيرة: ${format.format(_ownerDebt)} ريال");
+    }
+    for (final acc in _receivables) {
+      if (acc.balance <= _largeBalanceThreshold) continue;
+      final otherId = _otherHotelIdFromReceivableCategory(acc.category);
+      final name = otherId != null ? (_hotelNames[otherId] ?? acc.name) : acc.name;
+      alerts.add("ذمة كبيرة مستحقة من $name: ${format.format(acc.balance)} ريال");
+    }
+    return alerts;
+  }
+
+  int _countFor(_OpCategory c) {
+    switch (c) {
+      case _OpCategory.expenses:
+        return _plainExpenses.length;
+      case _OpCategory.shared:
+        return _sharedExpenses.length;
+      case _OpCategory.advance:
+        return _advances.length;
+      case _OpCategory.ownerDrawing:
+        return _ownerDrawingExpenses.length;
+      case _OpCategory.transfer:
+        return _transfers.length;
+    }
+  }
+
+  bool _matches(String text) {
+    if (_searchQuery.isEmpty) return true;
+    return text.toLowerCase().contains(_searchQuery.toLowerCase());
+  }
+
+  List<_OpCardData> _cardsForActiveCategory() {
+    switch (_activeCategory) {
+      case _OpCategory.expenses:
+        return _plainExpenses.where((e) => _matches(e.statement) || _matches(e.categoryName ?? '')).map((e) {
+          return _OpCardData(
+            statement: e.statement,
+            hotelName: e.isFundedByOtherHotel
+                ? "${widget.hotel.arabicName} (ممول من ${_hotelNames[e.fundingSourceHotelId] ?? '—'})"
+                : widget.hotel.arabicName,
+            date: e.date,
+            time: e.time,
+            paymentMethod: e.paymentMethod,
+            status: "بانتظار الترحيل",
+            statusColor: Colors.orange,
+            amount: e.amount,
+            onTap: () => _editExpense(e),
+          );
+        }).toList();
+      case _OpCategory.shared:
+        return _sharedExpenses.where((g) => _matches(g.description)).map((g) {
+          return _OpCardData(
+            statement: g.description,
+            hotelName: widget.hotel.arabicName,
+            date: g.date,
+            time: g.time,
+            paymentMethod: g.paymentMethod,
+            status: "مُرحَّل فوراً",
+            statusColor: Colors.green,
+            amount: g.totalAmount,
+            onTap: () => _showDetail("مصروف مشترك", g.description, g.totalAmount, g.date, g.time, "دُفع بالكامل من ${widget.hotel.arabicName} فوراً، ويُوزَّع أثره على المنشآت المشارِكة دون انتظار الترحيل."),
+          );
+        }).toList();
+      case _OpCategory.advance:
+        return _advances.where((a) => _matches(a.statement)).map((a) {
+          return _OpCardData(
+            statement: a.statement,
+            hotelName: widget.hotel.arabicName,
+            date: a.date,
+            time: a.time,
+            paymentMethod: a.method,
+            status: "مُرحَّل فوراً",
+            statusColor: Colors.green,
+            amount: a.amount,
+            onTap: () => _showDetail("عهدة", a.statement, a.amount, a.date, a.time, "سحب فوري لصالح المالك — تُنشئ ذمة على المالك تلقائياً."),
+          );
+        }).toList();
+      case _OpCategory.ownerDrawing:
+        return _ownerDrawingExpenses.where((e) => _matches(e.statement)).map((e) {
+          return _OpCardData(
+            statement: e.statement,
+            hotelName: widget.hotel.arabicName,
+            date: e.date,
+            time: e.time,
+            paymentMethod: e.paymentMethod,
+            status: "بانتظار الترحيل",
+            statusColor: Colors.orange,
+            amount: e.amount,
+            onTap: () => _editExpense(e, lockToOwnerDrawing: true),
+          );
+        }).toList();
+      case _OpCategory.transfer:
+        return _transfers.where((t) => _matches(t.statement)).map((t) {
+          final isOutgoing = t.fromHotelId == widget.hotel.id;
+          final counterpart = _hotelNames[isOutgoing ? t.toHotelId : t.fromHotelId] ?? '—';
+          return _OpCardData(
+            statement: t.statement,
+            hotelName: isOutgoing ? "إلى: $counterpart" : "من: $counterpart",
+            date: t.date,
+            time: t.time,
+            status: "مُنفَّذ",
+            statusColor: Colors.green,
+            amount: t.amount,
+            onTap: () => _showDetail("تحويل بين المنشآت", t.statement, t.amount, t.date, t.time, isOutgoing ? "أُرسل من ${widget.hotel.arabicName} إلى $counterpart — أصبح $counterpart مديناً لهذا الفندق." : "استُلم من $counterpart — أصبح ${widget.hotel.arabicName} مديناً له."),
+          );
+        }).toList();
+    }
+  }
+
+  List<_OpCardData> _sortedCards() {
+    final cards = _cardsForActiveCategory();
+    if (_sortBy == 'amount') {
+      cards.sort((a, b) => b.amount.compareTo(a.amount));
+    } else {
+      cards.sort((a, b) => "${b.date} ${b.time}".compareTo("${a.date} ${a.time}"));
+    }
+    return cards;
+  }
+
+  Future<void> _editExpense(PendingExpense expense, {bool lockToOwnerDrawing = false}) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, editExpense: expense)),
+      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, editExpense: expense, lockToOwnerDrawing: lockToOwnerDrawing)),
     );
     if (result == true) _loadData();
   }
 
-  Widget _buildSourceTag(String text, Color color) {
+  void _showDetail(String title, String statement, double amount, String date, String time, String note) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(AppSizes.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: AppSizes.sm),
+            Text(statement, style: AppTextStyles.body),
+            const SizedBox(height: AppSizes.sm),
+            Text("${NumberFormat("#,##0.##").format(amount)} ريال", style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text("$date $time", style: AppTextStyles.caption),
+            const Divider(height: AppSizes.lg),
+            Text(note, style: AppTextStyles.caption),
+            const SizedBox(height: AppSizes.sm),
+            Row(
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                const Expanded(child: Text("عملية منفَّذة فوراً — بلا إمكانية تعديل من هذه الشاشة.", style: TextStyle(fontSize: 11, color: Colors.grey))),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAdd() async {
+    bool? result;
+    switch (_activeCategory) {
+      case _OpCategory.expenses:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel)));
+        break;
+      case _OpCategory.shared:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)));
+        break;
+      case _OpCategory.advance:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddAdvancePage(hotel: widget.hotel)));
+        break;
+      case _OpCategory.ownerDrawing:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToOwnerDrawing: true)));
+        break;
+      case _OpCategory.transfer:
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInterEntityTransferPage(hotel: widget.hotel)));
+        break;
+    }
+    if (result == true) _loadData();
+  }
+
+  void _openFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(AppSizes.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("ترتيب حسب", style: AppTextStyles.bodyBold),
+            const SizedBox(height: AppSizes.sm),
+            RadioListTile<String>(
+              value: 'date',
+              groupValue: _sortBy,
+              title: const Text("التاريخ (الأحدث)"),
+              onChanged: (v) {
+                setState(() => _sortBy = v!);
+                Navigator.pop(context);
+              },
+            ),
+            RadioListTile<String>(
+              value: 'amount',
+              groupValue: _sortBy,
+              title: const Text("المبلغ (الأعلى)"),
+              onChanged: (v) {
+                setState(() => _sortBy = v!);
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statusTag(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Text(
-        text,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
-      ),
+      child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.currency(symbol: '', decimalDigits: 2);
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
+    final activeMeta = _categoryMetas.firstWhere((m) => m.type == _activeCategory);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: "المصروفات المعلقة", hotel: widget.hotel),
+        title: HotelIdentityTitle(title: "العمليات المالية المعلقة", hotel: widget.hotel),
         centerTitle: true,
         backgroundColor: identityColor,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
             icon: const Icon(Icons.bar_chart),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ExpenseReportsPage(hotel: widget.hotel),
-                ),
-              );
-            },
             tooltip: "التقارير والإحصائيات",
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ExpenseReportsPage(hotel: widget.hotel))),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
+            icon: const Icon(Icons.search),
+            tooltip: "بحث",
+            onPressed: () => setState(() => _showSearchBar = !_showSearchBar),
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.sort),
-            onSelected: (value) {
-              setState(() {
-                _sortBy = value;
-                _applySearchAndSort();
-              });
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'date', child: Text("التاريخ (الأحدث)")),
-              const PopupMenuItem(value: 'amount', child: Text("المبلغ (الأعلى)")),
-              const PopupMenuItem(value: 'type', child: Text("النوع")),
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: "تصفية وترتيب",
+            onPressed: _openFilterSheet,
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: Column(
+                children: [
+                  if (_largeBalanceAlerts.isNotEmpty) _buildAlertBanner(),
+                  _buildCategorySelector(),
+                  if (_showSearchBar)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
+                      child: TextField(
+                        controller: _searchController,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          hintText: "بحث في ${activeMeta.label}...",
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          isDense: true,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                          filled: true,
+                          fillColor: Theme.of(context).cardColor,
+                        ),
+                        onChanged: (v) => setState(() => _searchQuery = v),
+                      ),
+                    ),
+                  Expanded(child: _buildActiveList(activeMeta)),
+                ],
+              ),
+            ),
+      bottomNavigationBar: _buildAddBar(activeMeta),
+    );
+  }
+
+  Widget _buildAlertBanner() {
+    final alerts = _largeBalanceAlerts;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, 0),
+      padding: const EdgeInsets.all(AppSizes.sm),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 18),
+              SizedBox(width: 6),
+              Text("تنبيه: ذمم كبيرة", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
+          const SizedBox(height: 4),
+          ...alerts.map((a) => Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text("• $a", style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+              )),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(AppSizes.md),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: "بحث في المصروفات...",
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                filled: true,
-                fillColor: Colors.white,
+    );
+  }
+
+  Widget _buildCategorySelector() {
+    return SizedBox(
+      height: 104,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: 8),
+        itemCount: _categoryMetas.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final meta = _categoryMetas[i];
+          final selected = _activeCategory == meta.type;
+          final count = _countFor(meta.type);
+          return GestureDetector(
+            onTap: () => setState(() => _activeCategory = meta.type),
+            child: Container(
+              width: 112,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected ? meta.color.withValues(alpha: 0.12) : Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: selected ? meta.color : Colors.grey.shade300, width: selected ? 1.5 : 1),
               ),
-              onChanged: (_) => _applySearchAndSort(),
-            ),
-          ),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredExpenses.isEmpty
-                    ? const Center(child: Text("لا توجد مصروفات معلقة"))
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: AppSizes.md),
-                        itemCount: _filteredExpenses.length,
-                        itemBuilder: (context, index) {
-                          final expense = _filteredExpenses[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: AppSizes.md),
-                            child: AppCard(
-                              onTap: () => _editExpense(expense),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(AppSizes.sm),
-                                    decoration: BoxDecoration(
-                                      color: expense.categoryColor != null
-                                        ? Color(expense.categoryColor!).withOpacity(0.1)
-                                        : identityColor.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(AppRadius.md),
-                                    ),
-                                    child: Icon(
-                                      expense.categoryIcon != null
-                                        ? IconData(expense.categoryIcon!, fontFamily: 'MaterialIcons')
-                                        : Icons.payments,
-                                      color: expense.categoryColor != null
-                                        ? Color(expense.categoryColor!)
-                                        : identityColor,
-                                    ),
-                                  ),
-                                  const SizedBox(width: AppSizes.md),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          expense.statement,
-                                          style: AppTextStyles.subtitle.copyWith(fontWeight: FontWeight.bold),
-                                        ),
-                                        Row(
-                                          children: [
-                                            Text(
-                                              "${expense.categoryName} • ${expense.paymentMethod}",
-                                              style: AppTextStyles.caption,
-                                            ),
-                                            if (expense.amountSource == 'حساب شخصي') ...[
-                                              const SizedBox(width: 8),
-                                              _buildSourceTag("🟣 شخصي", Colors.purple),
-                                            ],
-                                            if (expense.amountSource == 'منشأة أخرى') ...[
-                                              const SizedBox(width: 8),
-                                              _buildSourceTag("🟠 دين", Colors.orange),
-                                            ],
-                                            if (expense.isFundedByOtherHotel) ...[
-                                              const SizedBox(width: 8),
-                                              _buildSourceTag("🏨 ممول خارجياً", Colors.teal),
-                                            ],
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        currencyFormat.format(expense.amount),
-                                        style: AppTextStyles.subtitle.copyWith(
-                                        color: identityColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      ),
-                                      Text(
-                                        "${expense.date} ${expense.time}",
-                                        style: AppTextStyles.caption.copyWith(fontSize: 10),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Icon(meta.icon, color: meta.color, size: 20),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: meta.color, borderRadius: BorderRadius.circular(10)),
+                        child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
-          ),
-        ],
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    meta.label,
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: selected ? meta.color : null),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
-      bottomNavigationBar: _buildBottomActionsBar(identityColor),
     );
   }
 
-  Future<void> _openAddExpense() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel)),
+  Widget _buildActiveList(_CategoryMeta activeMeta) {
+    final cards = _sortedCards();
+    if (cards.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(activeMeta.icon, size: 40, color: Colors.grey.shade400),
+            const SizedBox(height: 8),
+            Text("لا توجد عمليات في \"${activeMeta.label}\"", style: AppTextStyles.caption),
+          ],
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.md),
+      itemCount: cards.length,
+      itemBuilder: (context, index) => _buildOpCard(cards[index], activeMeta.color),
     );
-    if (result == true) _loadData();
   }
 
-  Future<void> _openSharedExpense() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)),
+  Widget _buildOpCard(_OpCardData d, Color accent) {
+    final format = NumberFormat("#,##0.##");
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSizes.sm),
+      child: AppCard(
+        identityAccent: accent,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        onTap: d.onTap,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(d.statement, style: AppTextStyles.bodyBold.copyWith(fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      const Icon(Icons.apartment_outlined, size: 12, color: Colors.grey),
+                      const SizedBox(width: 3),
+                      Expanded(child: Text(d.hotelName, style: AppTextStyles.caption.copyWith(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule, size: 12, color: Colors.grey),
+                      const SizedBox(width: 3),
+                      Text("${d.date} ${d.time}", style: AppTextStyles.caption.copyWith(fontSize: 10)),
+                      if (d.paymentMethod != null) ...[
+                        const SizedBox(width: 8),
+                        Icon(d.paymentMethod == 'نقد' ? Icons.money : Icons.credit_card, size: 12, color: Colors.grey),
+                        const SizedBox(width: 3),
+                        Text(d.paymentMethod!, style: AppTextStyles.caption.copyWith(fontSize: 10)),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  _statusTag(d.status, d.statusColor),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              format.format(d.amount),
+              style: AppTextStyles.bodyBold.copyWith(fontSize: 13, color: accent),
+            ),
+          ],
+        ),
+      ),
     );
-    if (result == true) _loadData();
   }
 
-  Future<void> _openAdvance() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => AddAdvancePage(hotel: widget.hotel)),
-    );
-    if (result == true) _loadData();
-  }
-
-  Widget _buildBottomActionsBar(Color identityColor) {
+  Widget _buildAddBar(_CategoryMeta activeMeta) {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.sm),
-        child: Row(
-          children: [
-            Expanded(
-              child: AppButton(
-                text: "إضافة مصروف",
-                icon: Icons.add,
-                onPressed: _openAddExpense,
-                backgroundColor: identityColor,
-              ),
-            ),
-            const SizedBox(width: AppSizes.sm),
-            Expanded(
-              child: AppButton(
-                text: "مصروف مشترك",
-                icon: Icons.call_split,
-                onPressed: _openSharedExpense,
-                backgroundColor: identityColor,
-              ),
-            ),
-            const SizedBox(width: AppSizes.sm),
-            Expanded(
-              child: AppButton(
-                text: "سلفة",
-                icon: Icons.account_balance_wallet_outlined,
-                onPressed: _openAdvance,
-                backgroundColor: identityColor,
-              ),
-            ),
-          ],
+        child: AppButton(
+          text: activeMeta.addLabel,
+          icon: Icons.add,
+          onPressed: _openAdd,
+          backgroundColor: activeMeta.color,
         ),
       ),
     );
