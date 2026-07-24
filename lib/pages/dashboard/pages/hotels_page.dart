@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/app_colors.dart';
 import '../../../core/document_status.dart';
@@ -10,11 +11,16 @@ import '../../../core/app_page_route.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/hotel_repository.dart';
 import '../../../repositories/document_repository.dart';
+import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/app_drawer.dart';
 import '../dashboard_page.dart';
 import 'documents_page.dart';
-import 'add_hotel_page.dart';
 
+/// شاشة اختيار الفندق — نقطة الدخول الأولى بعد الدخول للتطبيق، بلا أي هوية
+/// لفندق محدَّد بعد (لهذا خلفيتها محايدة وليست بلون أي فندق). لا تحتوي أي
+/// إدارة للفنادق (إضافة/تعديل/أرشفة) — تلك انتقلت بالكامل إلى الإعدادات ←
+/// إدارة الفنادق (راجع HotelManagementPage)؛ هذه الشاشة مخصَّصة حصراً لاختيار
+/// فندق نشط والانتقال للوحة تحكمه.
 class HotelsPage extends StatefulWidget {
   const HotelsPage({super.key});
 
@@ -27,6 +33,10 @@ class _HotelsPageState extends State<HotelsPage> {
   final docRepository = DocumentRepository();
   late Future<List<Hotel>> _hotelsFuture;
   final Map<int, int> _hotelAlertCounts = {};
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  static const _ink = Color(0xFF1C1B1A);
+  static const _paper = Color(0xFFFAF8F5);
 
   @override
   void initState() {
@@ -55,257 +65,253 @@ class _HotelsPageState extends State<HotelsPage> {
     }
   }
 
+  void _openHotel(Hotel hotel) {
+    // ضبط الفندق الحالي هو ما يجعل ثيم التطبيق بأكمله يتحول لهويته البصرية
+    // فوراً، لكل شاشة تُفتح من هنا فصاعداً.
+    HotelSession.current.value = hotel;
+    Navigator.push(context, premiumRoute(DashboardPage(hotel: hotel)));
+  }
+
+  void _openAlerts(Hotel hotel) {
+    Navigator.push(context, premiumRoute(DocumentsPage(hotel: hotel, alertsOnly: true)));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text(
-          "قائمة المنشآت",
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: _paper,
+        drawer: const AppDrawer(),
+        body: SafeArea(
+          child: FutureBuilder<List<Hotel>>(
+            future: _hotelsFuture,
+            builder: (context, snapshot) {
+              final isLoading = snapshot.connectionState == ConnectionState.waiting;
+              final hotels = snapshot.data ?? [];
 
-
-
-
-
-
-
-
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.2),
-        ),
-        centerTitle: true,
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      drawer: const AppDrawer(),
-      body: FutureBuilder<List<Hotel>>(
-        future: _hotelsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final hotels = snapshot.data ?? [];
-
-          if (hotels.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 50),
-                child: Text("لا توجد منشآت مضافة"),
-              ),
-            );
-          }
-
-          final totalAlerts = _hotelAlertCounts.values.fold(0, (sum, v) => sum + v);
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.xl),
-            children: [
-              _buildHeaderStats(hotels.length, totalAlerts),
-              const SizedBox(height: AppSizes.lg),
-              ...List.generate(hotels.length, (index) {
-                final hotel = hotels[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSizes.sm + 4),
-                  child: _StaggeredEntry(
-                    index: index,
-                    child: _buildHotelCard(context, hotel),
+              return Column(
+                children: [
+                  _buildHeader(),
+                  Expanded(
+                    child: isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : hotels.isEmpty
+                            ? _buildEmptyState()
+                            : ListView.builder(
+                                padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.xs, AppSizes.md, AppSizes.xl),
+                                itemCount: hotels.length,
+                                itemBuilder: (context, index) => Padding(
+                                  padding: const EdgeInsets.only(bottom: AppSizes.sm + 4),
+                                  child: _StaggeredEntry(index: index, child: _buildHotelCard(hotels[index])),
+                                ),
+                              ),
                   ),
-                );
-              }),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddHotelPage()),
-          );
-          if (result == true) _loadData();
-        },
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 3,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text("إضافة منشأة", style: TextStyle(fontWeight: FontWeight.w600)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildHeaderStats(int hotelsCount, int alertsCount) {
-    return Row(
-      children: [
-        Expanded(
-          child: _statCard(
-            icon: Icons.apartment_rounded,
-            label: "عدد الفنادق",
-            value: "$hotelsCount",
-            color: AppColors.primary,
+  /// ترويسة هادئة بلا أي كتلة لون صلبة — عنوان كبير بتباعد سخي وزر قائمة
+  /// جانبية أنيق بدل شريط تطبيق تقليدي، ينسجم مع خلفية الشاشة المحايدة.
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "منازل البيت المحدودة",
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.secondary, letterSpacing: 1.4),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "منشآتنا",
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: _ink, letterSpacing: -0.4, height: 1.1),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "اختر منشأة لعرض لوحة تحكمها",
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: AppSizes.sm + 4),
-        Expanded(
-          child: _statCard(
-            icon: Icons.notifications_rounded,
-            label: "التنبيهات",
-            value: "$alertsCount",
-            color: alertsCount > 0 ? AppColors.warning : AppColors.success,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _statCard({required IconData icon, required String label, required String value, required Color color}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSizes.md, vertical: AppSizes.sm + 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 3)),
+          const SizedBox(width: AppSizes.md),
+          _buildMenuButton(),
         ],
       ),
+    );
+  }
+
+  Widget _buildMenuButton() {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        onTap: () => _scaffoldKey.currentState?.openDrawer(),
+        child: Container(
+          width: 46,
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
+          ),
+          child: const Icon(Icons.menu_rounded, color: _ink, size: 22),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSizes.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.06), shape: BoxShape.circle),
+              child: const Icon(Icons.apartment_outlined, size: 32, color: AppColors.primary),
+            ),
+            const SizedBox(height: AppSizes.md),
+            const Text("لا توجد منشآت مضافة", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _ink)),
+            const SizedBox(height: 6),
+            Text(
+              "يمكن إضافة منشأة جديدة من الإعدادات ← إدارة الفنادق",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// بطاقة فندق فاخرة: خلفية بيضاء نظيفة وشريط هوية رفيع (AppCard.identityAccent)
+  /// بدل تعبئة كاملة بلون الفندق — نفس لغة التصميم المستخدَمة الآن في كل
+  /// شاشات التطبيق (العمليات المالية المعلقة، إدارة الفنادق)، فيبقى التطبيق
+  /// موحَّداً بصرياً رغم اختلاف هوية كل فندق.
+  Widget _buildHotelCard(Hotel hotel) {
+    final identityColor = HotelVisualIdentity.colorForHotel(hotel);
+    final alertCount = _hotelAlertCounts[hotel.id!] ?? 0;
+
+    return AppCard(
+      identityAccent: identityColor,
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      onTap: () => _openHotel(hotel),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withOpacity(0.10), shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: AppSizes.sm),
+          _buildHotelIcon(hotel, identityColor, alertCount),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xff222222))),
-                Text(label, style: const TextStyle(fontSize: 11, color: Color(0xff777777))),
+                Text(
+                  hotel.arabicName,
+                  style: const TextStyle(color: _ink, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: -0.2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (hotel.city.trim().isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade500),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          hotel.city,
+                          style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
+          const SizedBox(width: 6),
+          Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey.shade400, size: 14),
         ],
       ),
     );
   }
 
-  Widget _buildHotelCard(BuildContext context, Hotel hotel) {
-    final identityColor = HotelVisualIdentity.colorForHotel(hotel);
-    final alertCount = _hotelAlertCounts[hotel.id!] ?? 0;
-    final deepShade = Color.lerp(identityColor, Colors.black, 0.22)!;
-
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        splashColor: Colors.white.withOpacity(0.12),
-        highlightColor: Colors.white.withOpacity(0.06),
-        onTap: () {
-          // ضبط الفندق الحالي هو ما يجعل ثيم التطبيق بأكمله يتحول لهويته
-          // البصرية فوراً، لكل شاشة تُفتح من هنا فصاعداً.
-          HotelSession.current.value = hotel;
-          Navigator.push(context, premiumRoute(DashboardPage(hotel: hotel)));
-        },
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm + 4),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            gradient: LinearGradient(
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
-              colors: [identityColor, deepShade],
-            ),
-            boxShadow: [
-              BoxShadow(color: identityColor.withOpacity(0.28), blurRadius: 14, offset: const Offset(0, 6)),
-            ],
+  /// أيقونة الفندق الدائرية بلون هوية خفيف (تلوين — وليس تعبئة) + شارة تنبيه
+  /// صغيرة متكاملة في زاويتها عند وجود تنبيهات (أسلوب "شارة تطبيق" مألوف
+  /// وأنيق) بدل الحبة الكبيرة المنفصلة سابقاً — تبقى قابلة للضغط بمفردها
+  /// (تفتح تنبيهات المستندات) بمساحة لمس مريحة رغم صغر حجمها الظاهري.
+  Widget _buildHotelIcon(Hotel hotel, Color color, int alertCount) {
+    return SizedBox(
+      width: 54,
+      height: 54,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(AppRadius.md)),
+            child: Icon(Icons.apartment_rounded, color: color, size: 24),
           ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.apartment_rounded, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: AppSizes.sm + 4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      hotel.arabicName,
-                      style: const TextStyle(color: Colors.white, fontSize: 16.5, fontWeight: FontWeight.bold),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (hotel.city.trim().isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(Icons.location_on_rounded, color: Colors.white.withOpacity(0.75), size: 12),
-                          const SizedBox(width: 3),
-                          Text(hotel.city, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
-                        ],
+          if (alertCount > 0)
+            PositionedDirectional(
+              top: -6,
+              end: -6,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => _openAlerts(hotel),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    alignment: Alignment.center,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 19, minHeight: 19),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: _paper, width: 2),
+                        boxShadow: [BoxShadow(color: AppColors.warning.withValues(alpha: 0.35), blurRadius: 6, offset: const Offset(0, 2))],
                       ),
-                    ],
-                  ],
+                      child: Center(
+                        child: Text(
+                          alertCount > 9 ? '9+' : '$alertCount',
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              if (alertCount > 0) ...[
-                _buildAlertBadge(context, hotel, identityColor, alertCount),
-                const SizedBox(width: AppSizes.xs),
-              ],
-              Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withOpacity(0.65), size: 13),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAlertBadge(BuildContext context, Hotel hotel, Color identityColor, int count) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(AppRadius.xl),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DocumentsPage(hotel: hotel, alertsOnly: true),
             ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.notifications_rounded, size: 13, color: identityColor),
-              const SizedBox(width: 4),
-              Text(
-                "$count",
-                style: TextStyle(
-                  color: identityColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
-
 }
 
 /// حركة دخول بسيطة (تلاشٍ + انزلاق خفيف) لبطاقات القائمة عند ظهورها، بدون مبالغة.
