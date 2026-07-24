@@ -6,6 +6,7 @@ import '../../../core/hotel_session.dart';
 import '../../../core/hotel_visual_identity.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
+import '../../../core/app_page_route.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/hotel_repository.dart';
 import '../../../repositories/document_repository.dart';
@@ -39,7 +40,7 @@ class _HotelsPageState extends State<HotelsPage> {
   void _loadData() {
     setState(() {
       _hotelsFuture = repository.seedData().then((_) async {
-        final hotels = await repository.getAllHotels();
+        final hotels = await repository.getActiveHotels();
         await _loadAllAlerts(hotels);
         return hotels;
       });
@@ -207,7 +208,7 @@ class _HotelsPageState extends State<HotelsPage> {
           // ضبط الفندق الحالي هو ما يجعل ثيم التطبيق بأكمله يتحول لهويته
           // البصرية فوراً، لكل شاشة تُفتح من هنا فصاعداً.
           HotelSession.current.value = hotel;
-          Navigator.push(context, _premiumRoute(DashboardPage(hotel: hotel)));
+          Navigator.push(context, premiumRoute(DashboardPage(hotel: hotel)));
         },
         child: Container(
           padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm + 4),
@@ -305,22 +306,6 @@ class _HotelsPageState extends State<HotelsPage> {
     );
   }
 
-  Route _premiumRoute(Widget page) {
-    return PageRouteBuilder(
-      transitionDuration: const Duration(milliseconds: 320),
-      pageBuilder: (_, animation, secondaryAnimation) => page,
-      transitionsBuilder: (_, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-        return FadeTransition(
-          opacity: curved,
-          child: SlideTransition(
-            position: Tween<Offset>(begin: const Offset(0, 0.03), end: Offset.zero).animate(curved),
-            child: child,
-          ),
-        );
-      },
-    );
-  }
 }
 
 /// حركة دخول بسيطة (تلاشٍ + انزلاق خفيف) لبطاقات القائمة عند ظهورها، بدون مبالغة.

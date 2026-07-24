@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 43, // Upgrade to v43: توحيد وسيلة الدفع "بنك/حساب بنكي/تحويل بنكي" إلى "شبكة"
+      version: 44, // Upgrade to v44: أرشفة الفنادق (archived_at/archived_by) بدل الحذف النهائي المباشر
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -207,6 +207,14 @@ class DatabaseService {
             );
           } catch (_) {}
         }
+        if (oldVersion < 44) {
+          // أرشفة الفنادق: العمود hotels.active موجود أصلاً منذ سنوات لكنه لم
+          // يُستخدَم فعلياً في أي استعلام (كل الفنادق كانت active=1 دائماً) —
+          // أُعيد استخدامه الآن كعلم "غير مؤرشَف" بدل إضافة عمود جديد مكرِّر
+          // لنفس المعنى. archived_at/archived_by جديدان فقط لعرض سجل الأرشيف.
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN archived_at TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN archived_by TEXT'); } catch (_) {}
+        }
       },
     );
   }
@@ -221,6 +229,12 @@ class DatabaseService {
     }
 
     try {
+      if (!await hasColumn('hotels', 'archived_at')) {
+        await db.execute('ALTER TABLE hotels ADD COLUMN archived_at TEXT');
+      }
+      if (!await hasColumn('hotels', 'archived_by')) {
+        await db.execute('ALTER TABLE hotels ADD COLUMN archived_by TEXT');
+      }
       if (!await hasColumn('employees', 'employee_number')) {
         await db.execute('ALTER TABLE employees ADD COLUMN employee_number TEXT');
       }
@@ -403,7 +417,7 @@ class DatabaseService {
   }
 
   Future<void> _createTables(Database db) async {
-    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER)');
+    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER, archived_at TEXT, archived_by TEXT)');
     // محرك المستندات الموحّد: كل مستند صف واحد فقط، بمرجع مالك متعدد الأشكال
     // (owner_type/owner_id) — 'hotel' (owner_id=hotel_id نفسه)، 'employee'، ومستقبلاً
     // 'supplier'/'contract'/... بلا أي تعديل معماري، فقط قيمة owner_type جديدة.
@@ -702,9 +716,32 @@ class DatabaseService {
   }
 
   // --- CRUD ---
-  Future<List<Map<String, dynamic>>> getHotels() async { final db = await database; return await db.query('hotels'); }
+  /// [active] null = كل الفنادق (مؤرشَفة وغير مؤرشَفة معاً — للاستخدامات التي
+  /// تحتاج تحليل اسم فندق قديم حتى لو أُرشِف لاحقاً)، true = غير مؤرشَفة فقط،
+  /// false = مؤرشَفة فقط (سلة المحذوفات).
+  Future<List<Map<String, dynamic>>> getHotels({bool? active}) async {
+    final db = await database;
+    if (active == null) return await db.query('hotels');
+    return await db.query('hotels', where: 'active = ?', whereArgs: [active ? 1 : 0]);
+  }
   Future<int> insertHotel(Map<String, dynamic> data) async { final db = await database; final id = await db.insert('hotels', data); await _initFinancialAccountsForHotel(db, id); await _provisionDocumentTypesForHotel(db, id); return id; }
   Future<int> updateHotel(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('hotels', data, where: 'id = ?', whereArgs: [id]); }
+
+  /// أرشفة (بدل الحذف النهائي): تبقى كل البيانات المرتبطة كما هي تماماً،
+  /// فقط active=0 فيختفي الفندق من القائمة الرئيسية ويظهر في سلة المحذوفات.
+  Future<int> archiveHotel(int id, {required String archivedBy}) async {
+    final db = await database;
+    return await db.update('hotels', {'active': 0, 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> restoreHotel(int id) async {
+    final db = await database;
+    return await db.update('hotels', {'active': 1, 'archived_at': null, 'archived_by': null}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// حذف نهائي حقيقي — لا رجعة عنه، يحذف كل البيانات المرتبطة بالفندق عبر
+  /// ON DELETE CASCADE. يُستخدم فقط من سلة المحذوفات بعد تأكيد صريح متعدد
+  /// المراحل (راجع RecycleBinPage) — لا يُستدعى مباشرة من أي شاشة أخرى.
   Future<int> deleteHotel(int id) async { final db = await database; return await db.delete('hotels', where: 'id = ?', whereArgs: [id]); }
 
   Future<int> insertFinancialReport(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_reports', data); }

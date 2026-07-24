@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 
-class AppCard extends StatelessWidget {
+class AppCard extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
@@ -33,34 +33,55 @@ class AppCard extends StatelessWidget {
   });
 
   @override
+  State<AppCard> createState() => _AppCardState();
+}
+
+/// نفس بنية الرسم السابقة تماماً (BorderDirectional بلا أي قيد ارتفاع —
+/// راجع تعليق [AppCard.identityAccent] عن مشكلة IntrinsicHeight القديمة، لم
+/// تُمَس هنا إطلاقاً) + ظل مزدوج أكثر نعومة وعمقاً (طبقة قريبة + طبقة بعيدة
+/// خفيفة) وانكماش لمسي خفيف عند البطاقات القابلة للضغط، لمظهر أكثر فخامة.
+class _AppCardState extends State<AppCard> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (widget.onTap == null) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(AppRadius.lg);
 
     return Container(
-      margin: margin,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: radius,
-          onTap: onTap,
-          child: ClipRRect(
+      margin: widget.margin,
+      child: AnimatedScale(
+        scale: _pressed ? 0.985 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: radius,
-            child: Container(
-              decoration: BoxDecoration(
-                color: color ?? Theme.of(context).cardColor,
-                borderRadius: radius,
-                border: identityAccent != null ? BorderDirectional(start: BorderSide(color: identityAccent!, width: 4)) : null,
-                boxShadow: const [
-                  BoxShadow(
-                    color: AppColors.shadow,
-                    blurRadius: 12,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: padding ?? const EdgeInsets.all(16),
-                child: child,
+            onTap: widget.onTap,
+            onTapDown: (_) => _setPressed(true),
+            onTapUp: (_) => _setPressed(false),
+            onTapCancel: () => _setPressed(false),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: widget.color ?? Theme.of(context).cardColor,
+                  borderRadius: radius,
+                  border: widget.identityAccent != null ? BorderDirectional(start: BorderSide(color: widget.identityAccent!, width: 4)) : null,
+                  boxShadow: [
+                    BoxShadow(color: AppColors.shadow, blurRadius: 8, offset: const Offset(0, 2)),
+                    BoxShadow(color: AppColors.shadow.withValues(alpha: 0.5), blurRadius: 24, offset: const Offset(0, 10)),
+                  ],
+                ),
+                child: Padding(
+                  padding: widget.padding ?? const EdgeInsets.all(16),
+                  child: widget.child,
+                ),
               ),
             ),
           ),

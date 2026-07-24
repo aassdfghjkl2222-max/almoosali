@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/app_sizes.dart';
 import '../core/app_text_styles.dart';
 
-class AppButton extends StatelessWidget {
+class AppButton extends StatefulWidget {
   final String text;
   final VoidCallback? onPressed;
 
@@ -38,53 +38,76 @@ class AppButton extends StatelessWidget {
   });
 
   @override
+  State<AppButton> createState() => _AppButtonState();
+}
+
+/// زر بلمسة "فاخرة": انكماش خفيف جداً عند الضغط (نفس أسلوب تطبيقات iOS/الأنظمة
+/// الفاخرة الحديثة) بدل الاعتماد على تأثير الموجة الافتراضي فقط — يُطبَّق مرة
+/// واحدة هنا فينعكس تلقائياً على كل زر في التطبيق يستخدم AppButton.
+class _AppButtonState extends State<AppButton> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (widget.onPressed == null || widget.isLoading) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final button = SizedBox(
-      width: width,
-      height: height ?? AppSizes.buttonHeight,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          elevation: 0,
-          backgroundColor: backgroundColor ?? Theme.of(context).colorScheme.primary,
-          foregroundColor: foregroundColor ?? Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius:
-            borderRadius ??
-                BorderRadius.circular(AppSizes.radiusMedium),
-          ),
-        ),
-        child: isLoading
-            ? const SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: Colors.white,
-          ),
-        )
-            : Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon),
-              const SizedBox(width: 8),
-            ],
-            Flexible(
-              child: Text(
-                text,
-                style: AppTextStyles.button,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+      width: widget.width,
+      height: widget.height ?? AppSizes.buttonHeight,
+      child: GestureDetector(
+        onTapDown: (_) => _setPressed(true),
+        onTapUp: (_) => _setPressed(false),
+        onTapCancel: () => _setPressed(false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: ElevatedButton(
+            onPressed: widget.isLoading ? null : widget.onPressed,
+            style: ElevatedButton.styleFrom(
+              elevation: 0,
+              backgroundColor: widget.backgroundColor ?? Theme.of(context).colorScheme.primary,
+              foregroundColor: widget.foregroundColor ?? Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: widget.borderRadius ?? BorderRadius.circular(AppSizes.radiusMedium),
               ),
             ),
-          ],
+            child: widget.isLoading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.icon != null) ...[
+                        Icon(widget.icon),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          widget.text,
+                          style: AppTextStyles.button,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
       ),
     );
 
-    if (isExpanded) {
+    if (widget.isExpanded) {
       return SizedBox(
         width: double.infinity,
         child: button,

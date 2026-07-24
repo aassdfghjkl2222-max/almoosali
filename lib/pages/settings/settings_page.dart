@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_config.dart';
+import '../../core/app_page_route.dart';
 import '../../core/app_preferences.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_theme_controller.dart';
@@ -18,6 +19,7 @@ import '../login/security_setup_page.dart';
 import 'about_page.dart';
 import 'ai_invoice_ocr_settings_page.dart';
 import 'data_info_page.dart';
+import 'hotel_management_page.dart';
 import 'support_page.dart';
 
 /// "الإعدادات العامة" — إعدادات التطبيق العامة فقط (المرحلة الثانية من قسم
@@ -114,6 +116,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildSectionTitle("الأمان"),
                 _buildSecuritySection(),
                 const SizedBox(height: AppSizes.lg),
+                _buildSectionTitle("إدارة الفنادق"),
+                _buildLinkCard(
+                  icon: Icons.apartment_outlined,
+                  title: "إدارة الفنادق",
+                  subtitle: "إضافة وتعديل وأرشفة الفنادق، وسلة المحذوفات",
+                  onTap: () => Navigator.push(context, premiumRoute(const HotelManagementPage())),
+                ),
+                const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("المظهر"),
                 _buildAppearanceSection(),
                 const SizedBox(height: AppSizes.lg),
@@ -121,14 +131,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildNotificationsSection(),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("البيانات"),
-                _buildLinkCard(icon: Icons.storage_outlined, title: "معلومات البيانات المخزَّنة", subtitle: "حجم قاعدة البيانات وعدد السجلات (للعرض فقط)", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DataInfoPage()))),
+                _buildLinkCard(icon: Icons.storage_outlined, title: "معلومات البيانات المخزَّنة", subtitle: "حجم قاعدة البيانات وعدد السجلات (للعرض فقط)", onTap: () => Navigator.push(context, premiumRoute(const DataInfoPage()))),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("القراءة الذكية للفواتير"),
                 _buildLinkCard(
                   icon: Icons.auto_awesome_outlined,
                   title: "الذكاء الاصطناعي لقراءة الفواتير",
                   subtitle: "اختيار المزوّد ومفتاح API لقراءة الفواتير بلا رمز QR",
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AiInvoiceOcrSettingsPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const AiInvoiceOcrSettingsPage())),
                 ),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("🎓 وضع التدريب"),
@@ -138,10 +148,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildSystemStatusSection(),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("الدعم والمساعدة"),
-                _buildLinkCard(icon: Icons.help_outline_rounded, title: "الدعم والمساعدة", subtitle: "الأسئلة الشائعة والإبلاغ عن مشكلة", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportPage()))),
+                _buildLinkCard(icon: Icons.help_outline_rounded, title: "الدعم والمساعدة", subtitle: "الأسئلة الشائعة والإبلاغ عن مشكلة", onTap: () => Navigator.push(context, premiumRoute(const SupportPage()))),
                 const SizedBox(height: AppSizes.lg),
                 _buildSectionTitle("حول التطبيق"),
-                _buildLinkCard(icon: Icons.info_outline_rounded, title: "حول التطبيق", subtitle: "${AppConfig.appName} — الإصدار ${AppConfig.version}", onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()))),
+                _buildLinkCard(icon: Icons.info_outline_rounded, title: "حول التطبيق", subtitle: "${AppConfig.appName} — الإصدار ${AppConfig.version}", onTap: () => Navigator.push(context, premiumRoute(const AboutPage()))),
                 const SizedBox(height: AppSizes.xl),
               ],
             ),
@@ -278,7 +288,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       Navigator.pop(context);
       Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HotelsPage()),
+        premiumRoute(const HotelsPage()),
         (route) => false,
       );
     } catch (e) {
@@ -297,7 +307,7 @@ class _SettingsPageState extends State<SettingsPage> {
         leading: Icon(Icons.lock_outline, color: primary),
         title: const Text("تغيير الرمز السري"),
         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SecuritySetupPage())),
+        onTap: () => Navigator.push(context, premiumRoute(const SecuritySetupPage())),
       ),
       const Divider(height: 1, indent: 50),
       SwitchListTile(
@@ -398,7 +408,7 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _pinLength = length);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى إعادة إعداد الرمز السري بالطول الجديد")));
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const SecuritySetupPage()));
+    Navigator.push(context, premiumRoute(const SecuritySetupPage()));
   }
 
   void _showResetSecurityDialog() {
@@ -415,7 +425,7 @@ class _SettingsPageState extends State<SettingsPage> {
               await _securityService.clearAll();
               if (!context.mounted) return;
               Navigator.pop(context);
-              Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const SecuritySetupPage()), (route) => false);
+              Navigator.pushAndRemoveUntil(context, premiumRoute(const SecuritySetupPage()), (route) => false);
             },
             child: const Text("حذف", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
           ),
@@ -434,7 +444,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           TextButton(
-            onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const PinLoginPage()), (route) => false),
+            onPressed: () => Navigator.pushAndRemoveUntil(context, premiumRoute(const PinLoginPage()), (route) => false),
             child: const Text("تسجيل الخروج", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -618,7 +628,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return _buildCard([
       _statusRow(Icons.apartment, "إصدار التطبيق", AppConfig.version),
       const Divider(height: 1, indent: 50),
-      _statusRow(Icons.storage_outlined, "إصدار قاعدة البيانات", "24"),
+      _statusRow(Icons.storage_outlined, "إصدار قاعدة البيانات", "44"),
       const Divider(height: 1, indent: 50),
       _statusRow(Icons.sync_outlined, "آخر مزامنة", "غير مفعَّلة حالياً"),
       const Divider(height: 1, indent: 50),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_config.dart';
+import '../../core/app_page_route.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -43,7 +44,7 @@ class AppDrawer extends StatelessWidget {
   /// يعرض قائمة اختيار فندق أولاً (بلا تحميل أي بيانات إلا عند الحاجة فعلاً).
   Future<void> _openHotelScoped(BuildContext context, String pickerTitle, Widget Function(Hotel) builder) async {
     if (hotel != null) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => builder(hotel!)));
+      Navigator.push(context, premiumRoute(builder(hotel!)));
       return;
     }
     final hotels = await HotelRepository().getAllHotels();
@@ -56,7 +57,7 @@ class AppDrawer extends StatelessWidget {
       builder: (ctx) => _HotelPickerSheet(title: pickerTitle, hotels: hotels),
     );
     if (chosen != null && context.mounted) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => builder(chosen)));
+      Navigator.push(context, premiumRoute(builder(chosen)));
     }
   }
 
@@ -78,7 +79,7 @@ class AppDrawer extends StatelessWidget {
                   title: "الصفحة الرئيسية",
                   subtitle: "قائمة الفنادق",
                   color: color,
-                  onTap: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const HotelsPage()), (route) => false),
+                  onTap: () => Navigator.pushAndRemoveUntil(context, premiumRoute(const HotelsPage()), (route) => false),
                 ),
                 _drawerItem(
                   context: context,
@@ -86,7 +87,7 @@ class AppDrawer extends StatelessWidget {
                   title: "المستندات",
                   subtitle: "كل مستندات التطبيق في مكان واحد",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DocumentsHubPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const DocumentsHubPage())),
                 ),
                 _drawerItem(
                   context: context,
@@ -115,7 +116,7 @@ class AppDrawer extends StatelessWidget {
                   title: "البيانات المرجعية",
                   subtitle: "بيانات مشتركة بين كل الفنادق",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataHubPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const MasterDataHubPage())),
                 ),
                 if (kAppHasMultipleUsers)
                   _drawerItem(
@@ -123,7 +124,7 @@ class AppDrawer extends StatelessWidget {
                     icon: Icons.manage_accounts_outlined,
                     title: "إدارة المستخدمين والصلاحيات",
                     color: color,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UsersPage())),
+                    onTap: () => Navigator.push(context, premiumRoute(const UsersPage())),
                   ),
                 const _DrawerDivider(),
                 _drawerItem(
@@ -131,28 +132,28 @@ class AppDrawer extends StatelessWidget {
                   icon: Icons.cloud_sync_outlined,
                   title: "النسخ الاحتياطي والمزامنة",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const BackupPage())),
                 ),
                 _drawerItem(
                   context: context,
                   icon: Icons.settings_outlined,
                   title: "الإعدادات",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const SettingsPage())),
                 ),
                 _drawerItem(
                   context: context,
                   icon: Icons.help_outline_rounded,
                   title: "الدعم والمساعدة",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const SupportPage())),
                 ),
                 _drawerItem(
                   context: context,
                   icon: Icons.info_outline_rounded,
                   title: "حول التطبيق",
                   color: color,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage())),
+                  onTap: () => Navigator.push(context, premiumRoute(const AboutPage())),
                 ),
               ],
             ),
@@ -261,7 +262,7 @@ class AppDrawer extends StatelessWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text("إلغاء", style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
           TextButton(
-            onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const PinLoginPage()), (route) => false),
+            onPressed: () => Navigator.pushAndRemoveUntil(context, premiumRoute(const PinLoginPage()), (route) => false),
             child: const Text("تسجيل الخروج", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
           ),
         ],

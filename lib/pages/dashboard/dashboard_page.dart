@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_colors.dart';
+import '../../core/app_page_route.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_theme.dart';
 import '../../core/document_status.dart';
@@ -157,23 +158,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     });
   }
 
-  /// انتقال ناعم (تلاشٍ + انزلاق خفيف لأعلى) بدل التحول الافتراضي للمنصة —
-  /// يُستخدم لكل فتح قسم من لوحة التحكم فقط، بلا أي تغيير في التنقل نفسه.
+  /// انتقال ناعم موحَّد (راجع core/app_page_route.dart) — يُستخدم لكل فتح قسم
+  /// من لوحة التحكم فقط، بلا أي تغيير في التنقل نفسه.
   Future<T?> _openSection<T>(Widget page) {
-    return Navigator.push<T>(
-      context,
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 280),
-        pageBuilder: (_, _, _) => page,
-        transitionsBuilder: (_, animation, _, child) {
-          final curved = CurvedAnimation(parent: animation, curve: Curves.easeOut);
-          return FadeTransition(
-            opacity: curved,
-            child: SlideTransition(position: Tween<Offset>(begin: const Offset(0, 0.03), end: Offset.zero).animate(curved), child: child),
-          );
-        },
-      ),
-    );
+    return Navigator.push<T>(context, premiumRoute<T>(page));
   }
 
   @override
