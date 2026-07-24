@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_radius.dart';
 import 'hotel_identity.dart';
 
 /// المصدر الوحيد للحقيقة لثيم التطبيق (فاتح وداكن معاً) — أي شاشة تعتمد على
@@ -116,6 +117,25 @@ class AppTheme {
       ),
 
       splashColor: colorScheme.primary.withOpacity(0.1),
+
+      // ثيم النوافذ المنبثقة (AlertDialog) الموحَّد — حواف دائرية فاخرة بشكل
+      // افتراضي لكل نافذة في التطبيق، حتى تلك التي لا تُحدِّد shape صراحةً.
+      // النوافذ الحالية التي تُكرِّر نفس الـ shape يدوياً تبقى تعمل كما هي
+      // (قيمة مطابقة، لا تعارض) — هذا فقط يمنع أي نافذة جديدة من الظهور بحواف
+      // حادة افتراضية بالخطأ.
+      dialogTheme: DialogThemeData(
+        backgroundColor: cardBackground,
+        elevation: 6,
+        shadowColor: Colors.black.withOpacity(0.25),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+      ),
+
+      // ثيم النوافذ السفلية المنبثقة (BottomSheet) — حافة علوية دائرية فاخرة
+      // موحَّدة، بنفس منطق dialogTheme أعلاه.
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: cardBackground,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      ),
     );
   }
 }
