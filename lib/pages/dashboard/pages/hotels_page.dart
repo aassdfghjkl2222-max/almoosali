@@ -201,156 +201,158 @@ class _HotelsPageState extends State<HotelsPage> {
     );
   }
 
-  /// بطاقة فندق فاخرة، بأقل محتوى ممكن: لوحة هوية جانبية عريضة متدرِّجة اللون
-  /// تحمل مكان الشعار المستقبلي (تُهيمن على الهوية البصرية دون أن تُغرِق
-  /// البطاقة بأكملها بلون صلب)، مقابل اسم الفندق فقط — بلا مدينة ولا أي
-  /// نص إضافي، ليبقى الاسم هو العنصر البصري الأساسي كما هو مطلوب. الظل/الحواف/
-  /// لمسة الضغط موروثة من AppCard نفسها (padding صفري هنا لأن اللوحة يجب أن
-  /// تلامس حواف البطاقة الخارجية بلا أي هامش داخلي).
+  /// بطاقة فندق فاخرة بأقل محتوى ممكن: تعبئة كاملة بتدرُّج هوية الفندق (بدل
+  /// لوحة جانبية) واسم أبيض بارز فوقها مباشرة — "اللون يهيمن، الاسم يتحدَّث
+  /// بلونه" بدل تقسيم البطاقة بين منطقة ملوَّنة وأخرى بيضاء. بلا مدينة ولا أي
+  /// نص إضافي، ليبقى الاسم هو العنصر البصري الأساسي. الظل/الحواف/لمسة الضغط
+  /// موروثة من AppCard نفسها (padding صفري لأن التدرُّج يجب أن يملأ البطاقة
+  /// حتى حوافها الخارجية بلا أي هامش داخلي أبيض).
   Widget _buildHotelCard(Hotel hotel) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     final alertCount = _hotelAlertCounts[hotel.id!] ?? 0;
 
+    // تفتيح/تعتيم داخل مساحة HSL (تغيير النصوع فقط، بلا مزج مع الأسود/الأبيض
+    // المحايدَين) — يحافظ على تدرُّج اللون (hue) والتشبُّع كما هما، فيبقى
+    // الذهبي ذهبياً فعلاً عند تعتيمه بدل الانجراف نحو بنّي موحل.
+    final hsl = HSLColor.fromColor(identityColor);
+    final bright = hsl.withLightness((hsl.lightness + (1 - hsl.lightness) * 0.3).clamp(0.0, 1.0)).toColor();
+    final deep = hsl.withLightness((hsl.lightness * 0.55).clamp(0.0, 1.0)).toColor();
+
     return SizedBox(
-      height: 104,
+      height: 112,
       child: AppCard(
         padding: EdgeInsets.zero,
         onTap: () => _openHotel(hotel),
-        // موجة لمس بلون هوية الفندق نفسه بدل لون الثيم العام الافتراضي —
-        // تفاصيل صغيرة لكنها تجعل كل بطاقة "تتحدث" بلونها حتى أثناء التفاعل.
-        splashColor: identityColor.withValues(alpha: 0.10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildIdentityPanel(hotel, identityColor, alertCount),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
+        // موجة لمس بيضاء بدل لون الثيم العام الافتراضي — تقرأ بأناقة فوق أي
+        // لون هوية غامق أو فاتح على حدٍّ سواء.
+        splashColor: Colors.white.withValues(alpha: 0.16),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: AlignmentDirectional.topStart,
+              end: AlignmentDirectional.bottomEnd,
+              colors: [bright, identityColor, deep],
+              stops: const [0, 0.55, 1],
+            ),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // طبقة لمعان علوية خفيفة — إحساس "إضاءة فاخرة منعكسة" بدل سطح مسطَّح.
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.white.withValues(alpha: 0.12), Colors.transparent],
+                      stops: const [0, 0.5],
+                    ),
+                  ),
+                ),
+              ),
+              PositionedDirectional(
+                bottom: -34,
+                end: -34,
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.05)),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(
                   children: [
+                    _buildLogoBadge(hotel, identityColor, alertCount),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: Text(
                         hotel.arabicName,
-                        style: const TextStyle(color: _ink, fontSize: 19, fontWeight: FontWeight.bold, letterSpacing: -0.3, height: 1.2),
+                        // اسم أبيض بارز فوق التدرُّج مباشرة (بدلاً من نص داكن
+                        // فوق خلفية بيضاء) — بظل نصّي خفيف جداً يضمن وضوحه فوق
+                        // أي لون هوية مهما اختلفت درجة سطوعه (كالذهبي الفاتح
+                        // نسبياً مقارنةً بالعنابي/الأخضر الغامقين).
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: -0.3,
+                          height: 1.2,
+                          shadows: [Shadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 1))],
+                        ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey.shade400, size: 14),
+                    Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withValues(alpha: 0.75), size: 14),
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  /// اللوحة الجانبية لهوية الفندق — عريضة عمداً (تهيمن على الهوية البصرية)
-  /// بتدرُّج ثلاثي (توهُّج خفيف ← لون الفندق الأصلي ← ظل أعمق منه) بدل تعبئة
-  /// صلبة مسطَّحة، مع طبقة "لمعان" علوية خفيفة (إضاءة منعكسة فاخرة) ولمسة
-  /// زخرفية دائرية للعمق، ومساحة بيضاء مخصَّصة مستقبلاً لشعار الفندق الفعلي
-  /// (حالياً أيقونة مبنى مؤقتة) — راجع تعليق الملف. شارة التنبيه الصغيرة
-  /// تتموضع في زاويتها العلوية، قابلة للضغط بمفردها لفتح تنبيهات المستندات،
-  /// بمساحة لمس مريحة رغم صغر حجمها.
-  Widget _buildIdentityPanel(Hotel hotel, Color color, int alertCount) {
-    // تفتيح/تعتيم داخل مساحة HSL (تغيير النصوع فقط، بلا مزج مع الأسود/الأبيض
-    // المحايدَين) — يحافظ على تدرُّج اللون (hue) والتشبُّع كما هما، فيبقى
-    // الذهبي ذهبياً فعلاً عند تعتيمه بدل الانجراف نحو بنّي موحل (وهو ما كان
-    // يحدث مع Color.lerp(...,Colors.black,...) لأنه يمزج تشبُّعاً محايداً).
-    final hsl = HSLColor.fromColor(color);
-    final bright = hsl.withLightness((hsl.lightness + (1 - hsl.lightness) * 0.3).clamp(0.0, 1.0)).toColor();
-    final deep = hsl.withLightness((hsl.lightness * 0.55).clamp(0.0, 1.0)).toColor();
-    // بلا أي تدوير حواف هنا عمداً — AppCard تُقصّ البطاقة بأكملها بحواف
-    // دائرية (ClipRRect) فتُشكِّل زوايا اللوحة تلقائياً بشكل صحيح أينما لامست
-    // حافة البطاقة، بلا حاجة لتكرار نفس نصف القطر هنا.
-    return Container(
-        width: 128,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: AlignmentDirectional.topStart,
-            end: AlignmentDirectional.bottomEnd,
-            colors: [bright, color, deep],
-            stops: const [0, 0.55, 1],
+  /// مساحة الشعار — مربَّع أبيض مرتفع بظل ناعم، مُهيَّأ لاستقبال شعار حقيقي
+  /// (صورة) لاحقاً من إدارة الفنادق بدل هذه الأيقونة المؤقتة (راجع تعليق
+  /// الملف). شارة التنبيه الصغيرة تتموضع في زاويته العلوية عند وجود تنبيهات،
+  /// قابلة للضغط بمفردها لفتح تنبيهات المستندات، بمساحة لمس مريحة رغم صغر
+  /// حجمها الظاهري — تعبئة بيضاء ثابتة بحلقة عنبرية تضمن وضوحها فوق أي لون
+  /// هوية للفندق.
+  Widget _buildLogoBadge(Hotel hotel, Color color, int alertCount) {
+    return SizedBox(
+      width: 60,
+      height: 60,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 12, offset: const Offset(0, 5))],
+            ),
+            child: Icon(Icons.apartment_rounded, color: color, size: 28),
           ),
-        ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            // طبقة لمعان علوية خفيفة — إحساس "إضاءة فاخرة منعكسة" بدل سطح مسطَّح.
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.white.withValues(alpha: 0.14), Colors.transparent],
-                    stops: const [0, 0.45],
-                  ),
-                ),
-              ),
-            ),
+          if (alertCount > 0)
             PositionedDirectional(
-              bottom: -30,
-              end: -30,
-              child: Container(
-                width: 92,
-                height: 92,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.06)),
-              ),
-            ),
-            // مساحة الشعار — مربَّع أبيض مرتفع بظل ناعم، مُهيَّأ لاستقبال شعار
-            // حقيقي (صورة) لاحقاً من إدارة الفنادق بدل هذه الأيقونة المؤقتة.
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 12, offset: const Offset(0, 5))],
-              ),
-              child: Icon(Icons.apartment_rounded, color: color, size: 28),
-            ),
-            if (alertCount > 0)
-              PositionedDirectional(
-                top: -8,
-                end: -8,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: () => _openAlerts(hotel),
+              top: -8,
+              end: -8,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => _openAlerts(hotel),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    alignment: Alignment.center,
                     child: Container(
-                      padding: const EdgeInsets.all(6),
-                      alignment: Alignment.center,
-                      child: Container(
-                        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        decoration: BoxDecoration(
-                          // تعبئة بيضاء ثابتة بدل لون التنبيه المباشر — يضمن
-                          // تبايناً واضحاً فوق أي لون هوية للفندق (حتى الألوان
-                          // القريبة من العنبري نفسه)، مع الاحتفاظ بدلالة "تنبيه"
-                          // عبر لون النص والحلقة الخارجية فقط.
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.warning, width: 1.6),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 6, offset: const Offset(0, 2))],
-                        ),
-                        child: Center(
-                          child: Text(
-                            alertCount > 9 ? '9+' : '$alertCount',
-                            style: const TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
-                          ),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.warning, width: 1.6),
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 6, offset: const Offset(0, 2))],
+                      ),
+                      child: Center(
+                        child: Text(
+                          alertCount > 9 ? '9+' : '$alertCount',
+                          style: const TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-          ],
+            ),
+        ],
         ),
     );
   }
