@@ -253,8 +253,13 @@ class _HotelsPageState extends State<HotelsPage> {
   /// تتموضع في زاويتها العلوية، قابلة للضغط بمفردها لفتح تنبيهات المستندات،
   /// بمساحة لمس مريحة رغم صغر حجمها.
   Widget _buildIdentityPanel(Hotel hotel, Color color, int alertCount) {
-    final bright = Color.lerp(color, Colors.white, 0.12)!;
-    final deep = Color.lerp(color, Colors.black, 0.32)!;
+    // تفتيح/تعتيم داخل مساحة HSL (تغيير النصوع فقط، بلا مزج مع الأسود/الأبيض
+    // المحايدَين) — يحافظ على تدرُّج اللون (hue) والتشبُّع كما هما، فيبقى
+    // الذهبي ذهبياً فعلاً عند تعتيمه بدل الانجراف نحو بنّي موحل (وهو ما كان
+    // يحدث مع Color.lerp(...,Colors.black,...) لأنه يمزج تشبُّعاً محايداً).
+    final hsl = HSLColor.fromColor(color);
+    final bright = hsl.withLightness((hsl.lightness + (1 - hsl.lightness) * 0.3).clamp(0.0, 1.0)).toColor();
+    final deep = hsl.withLightness((hsl.lightness * 0.55).clamp(0.0, 1.0)).toColor();
     // بلا أي تدوير حواف هنا عمداً — AppCard تُقصّ البطاقة بأكملها بحواف
     // دائرية (ClipRRect) فتُشكِّل زوايا اللوحة تلقائياً بشكل صحيح أينما لامست
     // حافة البطاقة، بلا حاجة لتكرار نفس نصف القطر هنا.
@@ -319,18 +324,22 @@ class _HotelsPageState extends State<HotelsPage> {
                       padding: const EdgeInsets.all(6),
                       alignment: Alignment.center,
                       child: Container(
-                        constraints: const BoxConstraints(minWidth: 19, minHeight: 19),
+                        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.warning,
+                          // تعبئة بيضاء ثابتة بدل لون التنبيه المباشر — يضمن
+                          // تبايناً واضحاً فوق أي لون هوية للفندق (حتى الألوان
+                          // القريبة من العنبري نفسه)، مع الاحتفاظ بدلالة "تنبيه"
+                          // عبر لون النص والحلقة الخارجية فقط.
+                          color: Colors.white,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [BoxShadow(color: AppColors.warning.withValues(alpha: 0.4), blurRadius: 6, offset: const Offset(0, 2))],
+                          border: Border.all(color: AppColors.warning, width: 1.6),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 6, offset: const Offset(0, 2))],
                         ),
                         child: Center(
                           child: Text(
                             alertCount > 9 ? '9+' : '$alertCount',
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
+                            style: const TextStyle(color: AppColors.warning, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
                           ),
                         ),
                       ),
