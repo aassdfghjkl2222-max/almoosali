@@ -17,6 +17,7 @@ import '../../pages/settlements/pages/supplier_debts_page.dart';
 import '../../pages/dashboard/pages/hotels_page.dart';
 import '../../pages/contracts/contracts_page.dart';
 import '../../pages/documents/documents_hub_page.dart';
+import '../../pages/documents/contract_documents/contract_folder_browser_page.dart';
 import '../../pages/login/pin_login_page.dart';
 import '../../pages/master_data/master_data_hub_page.dart';
 import '../../pages/users/users_page.dart';
@@ -95,6 +96,14 @@ class AppDrawer extends StatelessWidget {
                   title: "العقود",
                   color: color,
                   onTap: () => _openHotelScoped(context, "اختر الفندق لعرض عقوده", (h) => ContractsPage(hotel: h)),
+                ),
+                _drawerItem(
+                  context: context,
+                  icon: Icons.snippet_folder_outlined,
+                  title: "مستندات العقود",
+                  subtitle: "مجلدات متداخلة على مستوى الشركة",
+                  color: color,
+                  onTap: () => Navigator.push(context, premiumRoute(const ContractFolderBrowserPage())),
                 ),
                 _drawerItem(
                   context: context,

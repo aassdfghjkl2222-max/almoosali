@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 45, // Upgrade to v45: وحدة إدارة الفنادق الكاملة (حقول تفصيلية + سجل تدقيق)
+      version: 46, // Upgrade to v46: وحدة مستندات العقود (مجلدات متداخلة بلا حد + مستندات)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -259,6 +259,34 @@ class DatabaseService {
             );
           } catch (_) {}
         }
+        if (oldVersion < 46) {
+          // مستندات العقود: نظام مجلدات/مستندات مخصَّص ومستقل عن نظام
+          // documents/document_types الحالي (المسطَّح، بلا تعشيش، وexpiry_date
+          // فيه إلزامي) — هنا parent_id ذاتي الإشارة يسمح بتعشيش غير محدود،
+          // وexpiry/reminder اختياريان بالكامل. نفس نمط تعدد الأنظمة المتوازية
+          // المتعمَّد سابقاً (FinancialEngine/Vault/Settlements)، موثَّق هنا
+          // بنفس السبب: الفروقات الجوهرية في شكل البيانات لا تبرر إعادة توظيف
+          // نظام قائم بمعنى مختلف تماماً.
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS contract_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER, name TEXT NOT NULL, description TEXT, icon_key TEXT NOT NULL DEFAULT "folder", color_value INTEGER NOT NULL DEFAULT 4286193196, cover_image_path TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (parent_id) REFERENCES contract_folders (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try { await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_folders_parent ON contract_folders(parent_id)'); } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS contract_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER, name TEXT NOT NULL, description TEXT, category TEXT, tags TEXT, notes TEXT, file_path TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT NOT NULL, file_size INTEGER NOT NULL DEFAULT 0, expiry_date TEXT, reminder_date TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (folder_id) REFERENCES contract_folders (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try { await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_documents_folder ON contract_documents(folder_id)'); } catch (_) {}
+          // بلا FOREIGN KEY عمداً (نفس نمط hotel_audit_log/invoice_audit_log):
+          // يبقى السجل موجوداً حتى بعد حذف المجلد/المستند نهائياً.
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS contract_document_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
+            );
+          } catch (_) {}
+        }
       },
     );
   }
@@ -299,6 +327,17 @@ class DatabaseService {
       }
       await db.execute(
         'CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS contract_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER, name TEXT NOT NULL, description TEXT, icon_key TEXT NOT NULL DEFAULT "folder", color_value INTEGER NOT NULL DEFAULT 4286193196, cover_image_path TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (parent_id) REFERENCES contract_folders (id) ON DELETE CASCADE)',
+      );
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_folders_parent ON contract_folders(parent_id)');
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS contract_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER, name TEXT NOT NULL, description TEXT, category TEXT, tags TEXT, notes TEXT, file_path TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT NOT NULL, file_size INTEGER NOT NULL DEFAULT 0, expiry_date TEXT, reminder_date TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (folder_id) REFERENCES contract_folders (id) ON DELETE CASCADE)',
+      );
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_documents_folder ON contract_documents(folder_id)');
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS contract_document_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
       );
       if (!await hasColumn('employees', 'employee_number')) {
         await db.execute('ALTER TABLE employees ADD COLUMN employee_number TEXT');
@@ -567,6 +606,13 @@ class DatabaseService {
     // لنفس المستند بلا أي نسخ للملف أو للسجل (مبدأ "References" في قسم المستندات).
     await db.execute('CREATE TABLE IF NOT EXISTS document_folder_links (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, document_type_id INTEGER NOT NULL, FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE, FOREIGN KEY (document_type_id) REFERENCES document_types (id) ON DELETE CASCADE)');
     await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_folder_links ON document_folder_links(document_id, document_type_id)');
+    // مستندات العقود: مجلدات ذاتية التعشيش (parent_id) بلا حد للعمق + مستندات
+    // بحقول اختيارية بالكامل (expiry/reminder) — راجع تعليق الترحيل v46.
+    await db.execute('CREATE TABLE IF NOT EXISTS contract_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER, name TEXT NOT NULL, description TEXT, icon_key TEXT NOT NULL DEFAULT "folder", color_value INTEGER NOT NULL DEFAULT 4286193196, cover_image_path TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (parent_id) REFERENCES contract_folders (id) ON DELETE CASCADE)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_folders_parent ON contract_folders(parent_id)');
+    await db.execute('CREATE TABLE IF NOT EXISTS contract_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER, name TEXT NOT NULL, description TEXT, category TEXT, tags TEXT, notes TEXT, file_path TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT NOT NULL, file_size INTEGER NOT NULL DEFAULT 0, expiry_date TEXT, reminder_date TEXT, is_archived INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_by TEXT, archive_reason TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (folder_id) REFERENCES contract_folders (id) ON DELETE CASCADE)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_contract_documents_folder ON contract_documents(folder_id)');
+    await db.execute('CREATE TABLE IF NOT EXISTS contract_document_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)');
   }
 
   /// يزرع نفس المستخدمين الثلاثة الافتراضيين الذين كانوا مُدرَجين سابقاً كقائمة
@@ -831,6 +877,127 @@ class DatabaseService {
     final db = await database;
     if (hotelId == null) return await db.query('hotel_audit_log', orderBy: 'id DESC');
     return await db.query('hotel_audit_log', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC');
+  }
+
+  // ---------------- مستندات العقود (contract_folders / contract_documents) ----------------
+
+  /// [parentId] null = المجلدات الجذرية فقط.
+  Future<List<Map<String, dynamic>>> getContractFolders({int? parentId, bool includeArchived = false}) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <Object?>[];
+    if (parentId == null) {
+      where.add('parent_id IS NULL');
+    } else {
+      where.add('parent_id = ?');
+      args.add(parentId);
+    }
+    if (!includeArchived) where.add('is_archived = 0');
+    return await db.query('contract_folders', where: where.join(' AND '), whereArgs: args, orderBy: 'name COLLATE NOCASE ASC');
+  }
+
+  Future<Map<String, dynamic>?> getContractFolderById(int id) async {
+    final db = await database;
+    final rows = await db.query('contract_folders', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getAllContractFolders() async {
+    final db = await database;
+    return await db.query('contract_folders');
+  }
+
+  Future<List<Map<String, dynamic>>> getArchivedContractFolders() async {
+    final db = await database;
+    return await db.query('contract_folders', where: 'is_archived = 1', orderBy: 'archived_at DESC');
+  }
+
+  Future<int> insertContractFolder(Map<String, dynamic> data) async { final db = await database; return await db.insert('contract_folders', data); }
+  Future<int> updateContractFolder(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('contract_folders', data, where: 'id = ?', whereArgs: [id]); }
+
+  Future<int> archiveContractFolder(int id, {required String archivedBy, String? reason}) async {
+    final db = await database;
+    return await db.update(
+      'contract_folders',
+      {'is_archived': 1, 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy, 'archive_reason': reason},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> restoreContractFolder(int id) async {
+    final db = await database;
+    return await db.update(
+      'contract_folders',
+      {'is_archived': 0, 'archived_at': null, 'archived_by': null, 'archive_reason': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// حذف نهائي — يحذف كل المجلدات الفرعية والمستندات المرتبطة عبر ON DELETE
+  /// CASCADE. لا يحذف ملفات المرفقات من التخزين (مسؤولية المستدعي، راجع
+  /// ContractDocumentRepository.deleteFolderPermanently).
+  Future<int> deleteContractFolder(int id) async { final db = await database; return await db.delete('contract_folders', where: 'id = ?', whereArgs: [id]); }
+
+  /// [folderId] null = المستندات الموجودة مباشرة عند الجذر (بلا مجلد أب).
+  Future<List<Map<String, dynamic>>> getContractDocuments({int? folderId, bool includeArchived = false}) async {
+    final db = await database;
+    final where = <String>[folderId == null ? 'folder_id IS NULL' : 'folder_id = ?'];
+    final args = <Object?>[if (folderId != null) folderId];
+    if (!includeArchived) where.add('is_archived = 0');
+    return await db.query('contract_documents', where: where.join(' AND '), whereArgs: args, orderBy: 'name COLLATE NOCASE ASC');
+  }
+
+  Future<Map<String, dynamic>?> getContractDocumentById(int id) async {
+    final db = await database;
+    final rows = await db.query('contract_documents', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getAllContractDocuments() async {
+    final db = await database;
+    return await db.query('contract_documents');
+  }
+
+  Future<List<Map<String, dynamic>>> getArchivedContractDocuments() async {
+    final db = await database;
+    return await db.query('contract_documents', where: 'is_archived = 1', orderBy: 'archived_at DESC');
+  }
+
+  Future<int> insertContractDocument(Map<String, dynamic> data) async { final db = await database; return await db.insert('contract_documents', data); }
+  Future<int> updateContractDocument(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('contract_documents', data, where: 'id = ?', whereArgs: [id]); }
+
+  Future<int> archiveContractDocument(int id, {required String archivedBy, String? reason}) async {
+    final db = await database;
+    return await db.update(
+      'contract_documents',
+      {'is_archived': 1, 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy, 'archive_reason': reason},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> restoreContractDocument(int id) async {
+    final db = await database;
+    return await db.update(
+      'contract_documents',
+      {'is_archived': 0, 'archived_at': null, 'archived_by': null, 'archive_reason': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> deleteContractDocument(int id) async { final db = await database; return await db.delete('contract_documents', where: 'id = ?', whereArgs: [id]); }
+
+  Future<int> insertContractDocumentAuditLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('contract_document_audit_log', data); }
+
+  Future<List<Map<String, dynamic>>> getContractDocumentAuditLog({String? entityType, int? entityId}) async {
+    final db = await database;
+    if (entityType != null && entityId != null) {
+      return await db.query('contract_document_audit_log', where: 'entity_type = ? AND entity_id = ?', whereArgs: [entityType, entityId], orderBy: 'id DESC');
+    }
+    return await db.query('contract_document_audit_log', orderBy: 'id DESC');
   }
 
   Future<int> insertFinancialReport(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_reports', data); }

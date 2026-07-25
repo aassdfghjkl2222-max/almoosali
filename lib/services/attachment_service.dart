@@ -58,6 +58,26 @@ class AttachmentService {
     return await _copyToPermanentStorage(path, folder);
   }
 
+  /// يفتح الكاميرا لالتقاط صورة واحدة، وينسخها إلى تخزين دائم. يعيد null إن أُلغيت العملية.
+  static Future<({String path, String name})?> captureImage({String folder = 'invoice_attachments'}) async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.camera);
+    if (image == null) return null;
+    return await _copyToPermanentStorage(image.path, folder);
+  }
+
+  /// يفتح منتقي الملفات لأي نوع مدعوم (PDF/Word/Excel/صور)، وينسخ الملف
+  /// المُختار إلى تخزين دائم. يعيد null إن أُلغيت العملية.
+  static Future<({String path, String name})?> pickAnyDocument({String folder = 'invoice_attachments'}) async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp'],
+    );
+    final path = result?.files.single.path;
+    if (path == null) return null;
+    return await _copyToPermanentStorage(path, folder);
+  }
+
   static Future<void> deleteFile(String path) async {
     final file = File(path);
     if (await file.exists()) await file.delete();

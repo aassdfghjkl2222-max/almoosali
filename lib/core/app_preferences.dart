@@ -45,6 +45,8 @@ class AppPreferences {
   static const keyAiOcrEnabled = 'pref_ai_ocr_enabled';
   static const keyAiOcrProvider = 'pref_ai_ocr_provider'; // 'claude' | 'openai' | 'gemini'
 
+  static const keyContractDocsViewMode = 'pref_contract_docs_view_mode'; // 'grid' | 'list'
+
   static Future<bool> getBool(String key, {bool defaultValue = false}) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(key) ?? defaultValue;
