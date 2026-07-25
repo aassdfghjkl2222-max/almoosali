@@ -104,7 +104,7 @@ class _HotelsPageState extends State<HotelsPage> {
                                 padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.xs, AppSizes.md, AppSizes.xl),
                                 itemCount: hotels.length,
                                 itemBuilder: (context, index) => Padding(
-                                  padding: const EdgeInsets.only(bottom: AppSizes.sm + 4),
+                                  padding: const EdgeInsets.only(bottom: AppSizes.md),
                                   child: _StaggeredEntry(index: index, child: _buildHotelCard(hotels[index])),
                                 ),
                               ),
@@ -216,6 +216,9 @@ class _HotelsPageState extends State<HotelsPage> {
       child: AppCard(
         padding: EdgeInsets.zero,
         onTap: () => _openHotel(hotel),
+        // موجة لمس بلون هوية الفندق نفسه بدل لون الثيم العام الافتراضي —
+        // تفاصيل صغيرة لكنها تجعل كل بطاقة "تتحدث" بلونها حتى أثناء التفاعل.
+        splashColor: identityColor.withValues(alpha: 0.10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

@@ -22,6 +22,11 @@ class AppCard extends StatefulWidget {
   /// الحالي بلا أي قيد ارتفاع مطلقاً — البطاقة تتمدد بحرية تماماً كأي Container عادي.
   final Color? identityAccent;
 
+  /// لون تأثير اللمس (splash/highlight) — اختياري، يفيد عندما تريد شاشة معيّنة
+  /// موجة لمس متناسقة مع هوية العنصر (مثل لون الفندق) بدل لون الثيم العام
+  /// الافتراضي. بلا قيمة = السلوك القديم بلا أي تغيير.
+  final Color? splashColor;
+
   const AppCard({
     super.key,
     required this.child,
@@ -30,6 +35,7 @@ class AppCard extends StatefulWidget {
     this.onTap,
     this.color,
     this.identityAccent,
+    this.splashColor,
   });
 
   @override
@@ -66,6 +72,8 @@ class _AppCardState extends State<AppCard> {
             onTapDown: (_) => _setPressed(true),
             onTapUp: (_) => _setPressed(false),
             onTapCancel: () => _setPressed(false),
+            splashColor: widget.splashColor,
+            highlightColor: widget.splashColor?.withValues(alpha: 0.5),
             child: ClipRRect(
               borderRadius: radius,
               child: Container(
