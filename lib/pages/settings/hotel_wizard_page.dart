@@ -71,6 +71,9 @@ class _HotelWizardPageState extends State<HotelWizardPage> {
   String? _nameError;
   String? _codeError;
   String? _emailError;
+  String? _phoneError;
+  String? _mobileError;
+  String? _whatsappError;
 
   bool get _isEditing => widget.hotel != null;
 
@@ -123,6 +126,9 @@ class _HotelWizardPageState extends State<HotelWizardPage> {
       _nameError = null;
       _codeError = null;
       _emailError = null;
+      _phoneError = null;
+      _mobileError = null;
+      _whatsappError = null;
     });
     if (step == 0) {
       if (_arNameController.text.trim().isEmpty) {
@@ -142,6 +148,22 @@ class _HotelWizardPageState extends State<HotelWizardPage> {
       final email = _emailController.text.trim();
       if (email.isNotEmpty && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
         setState(() => _emailError = "صيغة بريد إلكتروني غير صحيحة");
+        return false;
+      }
+      // تحقق بسيط بالأرقام/الرموز الشائعة (+، -، مسافات، أقواس) بدل فرض صيغة
+      // دولية واحدة (حقل "الدولة" منفصل ومفتوح لأي دولة) — فقط يمنع إدخالاً
+      // غير رقمي واضحاً أو قصيراً جداً ليكون رقم هاتف حقيقياً.
+      bool invalidPhone(String v) => v.trim().isNotEmpty && !RegExp(r'^[0-9+\-\s()]{7,}$').hasMatch(v.trim());
+      if (invalidPhone(_phoneController.text)) {
+        setState(() => _phoneError = "صيغة رقم غير صحيحة");
+        return false;
+      }
+      if (invalidPhone(_mobileController.text)) {
+        setState(() => _mobileError = "صيغة رقم غير صحيحة");
+        return false;
+      }
+      if (invalidPhone(_whatsappController.text)) {
+        setState(() => _whatsappError = "صيغة رقم غير صحيحة");
         return false;
       }
     }
@@ -350,11 +372,11 @@ class _HotelWizardPageState extends State<HotelWizardPage> {
 
   Widget _buildContactStep() {
     return _sectionCard([
-      AppTextField(controller: _phoneController, hint: "الهاتف", icon: Icons.call_outlined, keyboardType: TextInputType.phone),
+      AppTextField(controller: _phoneController, hint: "الهاتف", icon: Icons.call_outlined, keyboardType: TextInputType.phone, errorText: _phoneError),
       const SizedBox(height: AppSizes.md),
-      AppTextField(controller: _mobileController, hint: "الجوال", icon: Icons.smartphone_outlined, keyboardType: TextInputType.phone),
+      AppTextField(controller: _mobileController, hint: "الجوال", icon: Icons.smartphone_outlined, keyboardType: TextInputType.phone, errorText: _mobileError),
       const SizedBox(height: AppSizes.md),
-      AppTextField(controller: _whatsappController, hint: "واتساب", icon: Icons.chat_outlined, keyboardType: TextInputType.phone),
+      AppTextField(controller: _whatsappController, hint: "واتساب", icon: Icons.chat_outlined, keyboardType: TextInputType.phone, errorText: _whatsappError),
       const SizedBox(height: AppSizes.md),
       AppTextField(controller: _emailController, hint: "البريد الإلكتروني", icon: Icons.email_outlined, keyboardType: TextInputType.emailAddress, errorText: _emailError),
       const SizedBox(height: AppSizes.md),
