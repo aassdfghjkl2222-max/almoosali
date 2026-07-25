@@ -51,7 +51,10 @@ class _HotelsPageState extends State<HotelsPage> {
   void _loadData() {
     setState(() {
       _hotelsFuture = repository.seedData().then((_) async {
-        final hotels = await repository.getActiveHotels();
+        // فندق تحت الصيانة أو "قريباً" يبقى غير مؤرشَف (يظهر في إدارة الفنادق)
+        // لكن لا يجب أن يظهر هنا كخيار تشغيلي فعلي للموظفين — راجع
+        // HotelRepository.getOperationalHotels وHotel.status.
+        final hotels = await repository.getOperationalHotels();
         await _loadAllAlerts(hotels);
         return hotels;
       });
@@ -217,6 +220,12 @@ class _HotelsPageState extends State<HotelsPage> {
     final hsl = HSLColor.fromColor(identityColor);
     final bright = hsl.withLightness((hsl.lightness + (1 - hsl.lightness) * 0.3).clamp(0.0, 1.0)).toColor();
     final deep = hsl.withLightness((hsl.lightness * 0.55).clamp(0.0, 1.0)).toColor();
+    // لوحة الألوان الجاهزة (HotelColorPalettes) تتضمن الآن ألواناً فاتحة جداً
+    // (لؤلؤي أبيض، شامبانيا) يصبح فوقها النص الأبيض غير مقروء — نحسب سطوع
+    // اللون الأساسي ونبدِّل لوناً داكناً للنص/السهم فقط عند الحاجة الفعلية.
+    final isLightBrand = identityColor.computeLuminance() > 0.6;
+    final onBrandColor = isLightBrand ? _ink : Colors.white;
+    final onBrandColorMuted = isLightBrand ? _ink.withValues(alpha: 0.65) : Colors.white.withValues(alpha: 0.75);
 
     return SizedBox(
       height: 112,
@@ -273,20 +282,20 @@ class _HotelsPageState extends State<HotelsPage> {
                         // فوق خلفية بيضاء) — بظل نصّي خفيف جداً يضمن وضوحه فوق
                         // أي لون هوية مهما اختلفت درجة سطوعه (كالذهبي الفاتح
                         // نسبياً مقارنةً بالعنابي/الأخضر الغامقين).
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: onBrandColor,
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           letterSpacing: -0.3,
                           height: 1.2,
-                          shadows: [Shadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 1))],
+                          shadows: isLightBrand ? null : const [Shadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 1))],
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withValues(alpha: 0.75), size: 14),
+                    Icon(Icons.arrow_forward_ios_rounded, color: onBrandColorMuted, size: 14),
                   ],
                 ),
               ),

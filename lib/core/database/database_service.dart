@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 44, // Upgrade to v44: أرشفة الفنادق (archived_at/archived_by) بدل الحذف النهائي المباشر
+      version: 45, // Upgrade to v45: وحدة إدارة الفنادق الكاملة (حقول تفصيلية + سجل تدقيق)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -215,6 +215,50 @@ class DatabaseService {
           try { await db.execute('ALTER TABLE hotels ADD COLUMN archived_at TEXT'); } catch (_) {}
           try { await db.execute('ALTER TABLE hotels ADD COLUMN archived_by TEXT'); } catch (_) {}
         }
+        if (oldVersion < 45) {
+          // وحدة إدارة الفنادق: حقول تفصيلية (عامة/موقع/تواصل/معلومات الفندق) +
+          // "status" كتصنيف تشغيلي أدق من active (نشط/غير نشط/تحت الصيانة/قريباً)
+          // بينما يبقى active كما هو تماماً علم "غير مؤرشَف" الوحيد المستخدَم في
+          // استعلامات القوائم (بلا أي تغيير على منطقه الحالي) — الأرشفة تضبط
+          // active=0 وstatus='archived' معاً. logo/cover/الإعدادات الإقليمية
+          // حقول مُعَدَّة للمستقبل فقط (راجع تعليقات Hotel model)، لا تُقرأ بعد
+          // من أي شاشة أخرى في التطبيق.
+          try { await db.execute("ALTER TABLE hotels ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"); } catch (_) {}
+          try { await db.execute("UPDATE hotels SET status = 'archived' WHERE active = 0"); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN archive_reason TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN hotel_code TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN description TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN country TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN district TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN address TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN maps_link TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN phone TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN mobile TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN whatsapp TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN email TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN website TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN star_rating INTEGER'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN rooms_count INTEGER'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN opening_date TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN notes TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN secondary_color_value INTEGER'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN logo_path TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN cover_image_path TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN currency TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN language TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN time_zone TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN date_format TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN time_format TEXT'); } catch (_) {}
+          // سجل تدقيق الفنادق — بلا FOREIGN KEY عمداً (نفس نمط invoice_audit_log
+          // تماماً): يجب أن يبقى السجل موجوداً حتى بعد حذف الفندق نهائياً، فلا
+          // يُسمح بحذفه تبعاً لحذف الفندق. hotel_name مخزَّن مباشرة (وليس عبر
+          // JOIN) ليبقى السجل مقروءاً حتى بعد زوال سجل الفندق نفسه.
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
+            );
+          } catch (_) {}
+        }
       },
     );
   }
@@ -235,6 +279,27 @@ class DatabaseService {
       if (!await hasColumn('hotels', 'archived_by')) {
         await db.execute('ALTER TABLE hotels ADD COLUMN archived_by TEXT');
       }
+      if (!await hasColumn('hotels', 'status')) {
+        await db.execute("ALTER TABLE hotels ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+        try { await db.execute("UPDATE hotels SET status = 'archived' WHERE active = 0"); } catch (_) {}
+      }
+      for (final col in const [
+        'archive_reason', 'hotel_code', 'description', 'country', 'district', 'address', 'maps_link',
+        'phone', 'mobile', 'whatsapp', 'email', 'website', 'opening_date', 'notes',
+        'logo_path', 'cover_image_path', 'currency', 'language', 'time_zone', 'date_format', 'time_format',
+      ]) {
+        if (!await hasColumn('hotels', col)) {
+          await db.execute('ALTER TABLE hotels ADD COLUMN $col TEXT');
+        }
+      }
+      for (final col in const ['star_rating', 'rooms_count', 'secondary_color_value']) {
+        if (!await hasColumn('hotels', col)) {
+          await db.execute('ALTER TABLE hotels ADD COLUMN $col INTEGER');
+        }
+      }
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
+      );
       if (!await hasColumn('employees', 'employee_number')) {
         await db.execute('ALTER TABLE employees ADD COLUMN employee_number TEXT');
       }
@@ -417,7 +482,9 @@ class DatabaseService {
   }
 
   Future<void> _createTables(Database db) async {
-    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER, archived_at TEXT, archived_by TEXT)');
+    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER, archived_at TEXT, archived_by TEXT, status TEXT NOT NULL DEFAULT \'active\', archive_reason TEXT, hotel_code TEXT, description TEXT, country TEXT, district TEXT, address TEXT, maps_link TEXT, phone TEXT, mobile TEXT, whatsapp TEXT, email TEXT, website TEXT, star_rating INTEGER, rooms_count INTEGER, opening_date TEXT, notes TEXT, secondary_color_value INTEGER, logo_path TEXT, cover_image_path TEXT, currency TEXT, language TEXT, time_zone TEXT, date_format TEXT, time_format TEXT)');
+    // سجل تدقيق الفنادق — بلا FOREIGN KEY عمداً (يبقى موجوداً حتى بعد حذف الفندق نهائياً).
+    await db.execute('CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)');
     // محرك المستندات الموحّد: كل مستند صف واحد فقط، بمرجع مالك متعدد الأشكال
     // (owner_type/owner_id) — 'hotel' (owner_id=hotel_id نفسه)، 'employee'، ومستقبلاً
     // 'supplier'/'contract'/... بلا أي تعديل معماري، فقط قيمة owner_type جديدة.
@@ -728,21 +795,43 @@ class DatabaseService {
   Future<int> updateHotel(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('hotels', data, where: 'id = ?', whereArgs: [id]); }
 
   /// أرشفة (بدل الحذف النهائي): تبقى كل البيانات المرتبطة كما هي تماماً،
-  /// فقط active=0 فيختفي الفندق من القائمة الرئيسية ويظهر في سلة المحذوفات.
-  Future<int> archiveHotel(int id, {required String archivedBy}) async {
+  /// فقط active=0 وstatus='archived' معاً فيختفي الفندق من القائمة الرئيسية
+  /// ويظهر في سلة المحذوفات.
+  Future<int> archiveHotel(int id, {required String archivedBy, String? reason}) async {
     final db = await database;
-    return await db.update('hotels', {'active': 0, 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy}, where: 'id = ?', whereArgs: [id]);
+    return await db.update(
+      'hotels',
+      {'active': 0, 'status': 'archived', 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy, 'archive_reason': reason},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> restoreHotel(int id) async {
     final db = await database;
-    return await db.update('hotels', {'active': 1, 'archived_at': null, 'archived_by': null}, where: 'id = ?', whereArgs: [id]);
+    return await db.update(
+      'hotels',
+      {'active': 1, 'status': 'active', 'archived_at': null, 'archived_by': null, 'archive_reason': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   /// حذف نهائي حقيقي — لا رجعة عنه، يحذف كل البيانات المرتبطة بالفندق عبر
   /// ON DELETE CASCADE. يُستخدم فقط من سلة المحذوفات بعد تأكيد صريح متعدد
   /// المراحل (راجع RecycleBinPage) — لا يُستدعى مباشرة من أي شاشة أخرى.
   Future<int> deleteHotel(int id) async { final db = await database; return await db.delete('hotels', where: 'id = ?', whereArgs: [id]); }
+
+  // ---------------- سجل تدقيق الفنادق (hotel_audit_log) ----------------
+
+  Future<int> insertHotelAuditLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('hotel_audit_log', data); }
+
+  /// [hotelId] null = سجل كل الفنادق معاً (للعرض العام)، وإلا سجل فندق واحد فقط.
+  Future<List<Map<String, dynamic>>> getHotelAuditLog({int? hotelId}) async {
+    final db = await database;
+    if (hotelId == null) return await db.query('hotel_audit_log', orderBy: 'id DESC');
+    return await db.query('hotel_audit_log', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC');
+  }
 
   Future<int> insertFinancialReport(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_reports', data); }
   Future<List<Map<String, dynamic>>> getFinancialReports({required int hotelId}) async { final db = await database; return await db.query('financial_reports', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC'); }

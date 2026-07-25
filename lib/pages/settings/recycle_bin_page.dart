@@ -13,9 +13,9 @@ import '../../widgets/common/app_text_field.dart';
 
 /// سلة المحذوفات: الفنادق المؤرشَفة فقط. "استعادة" تعيد الفندق فوراً لقائمة
 /// الفنادق النشطة بضغطة واحدة (عملية آمنة تماماً وقابلة للتكرار). "حذف نهائي"
-/// محمي بثلاث طبقات تأكيد متتالية (تحذير صريح ← كتابة اسم الفندق ← رمز PIN)
-/// قبل تنفيذ HotelRepository.deleteHotel الذي يحذف كل البيانات المرتبطة عبر
-/// ON DELETE CASCADE بلا أي إمكانية تراجع بعده.
+/// محمي بأربع طبقات تأكيد متتالية (تحذير صريح ← كتابة اسم الفندق ← سبب الحذف
+/// ← رمز PIN) قبل تنفيذ HotelRepository.deleteHotel الذي يحذف كل البيانات
+/// المرتبطة عبر ON DELETE CASCADE بلا أي إمكانية تراجع بعده.
 class RecycleBinPage extends StatefulWidget {
   const RecycleBinPage({super.key});
 
@@ -59,7 +59,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       message: "سيعود هذا الفندق فوراً لقائمة الفنادق النشطة بكل بياناته كما كانت تماماً.",
       confirmLabel: "استعادة",
       onConfirm: () async {
-        await _repository.restoreHotel(hotel.id!);
+        await _repository.restoreHotel(hotel.id!, performedBy: "مدير النظام");
         _changed = true;
         if (mounted) _loadData();
       },
@@ -130,12 +130,47 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _confirmByPin(hotel);
+    await _confirmByReason(hotel);
   }
 
-  /// المرحلة 3: رمز PIN — أقرب مفهوم "صلاحية المدير" الفعلي المتاح في
+  /// المرحلة 3: سبب الحذف — إلزامي، يوثِّق لماذا اتُّخذ قرار الحذف النهائي.
+  Future<void> _confirmByReason(Hotel hotel) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final valid = controller.text.trim().isNotEmpty;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+            title: const Text("سبب الحذف النهائي", style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("يُسجَّل هذا السبب في سجل التدقيق قبل الحذف مباشرة، إلزامي.", style: AppTextStyles.caption),
+                const SizedBox(height: AppSizes.sm),
+                AppTextField(controller: controller, hint: "سبب الحذف", icon: Icons.notes_outlined, maxLines: 2, onChanged: (_) => setDialogState(() {})),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء")),
+              TextButton(
+                onPressed: valid ? () => Navigator.pop(context, controller.text.trim()) : null,
+                child: Text("متابعة", style: TextStyle(color: valid ? AppColors.danger : Colors.grey, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (reason == null || !mounted) return;
+    await _confirmByPin(hotel, reason);
+  }
+
+  /// المرحلة 4: رمز PIN — أقرب مفهوم "صلاحية المدير" الفعلي المتاح في
   /// التطبيق حالياً (نظام دخول واحد مشترك، بلا حسابات مستخدمين متعددة بعد).
-  Future<void> _confirmByPin(Hotel hotel) async {
+  Future<void> _confirmByPin(Hotel hotel, String reason) async {
     final controller = TextEditingController();
     String? errorText;
     final verified = await showDialog<bool>(
@@ -179,7 +214,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       ),
     );
     if (verified != true || !mounted) return;
-    await _repository.deleteHotel(hotel.id!);
+    await _repository.deleteHotel(hotel.id!, hotelName: hotel.arabicName, performedBy: "مدير النظام", reason: reason);
     _changed = true;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("تم حذف \"${hotel.arabicName}\" نهائياً")));
@@ -240,7 +275,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
               Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(AppRadius.sm)),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(AppRadius.sm)),
                 child: Icon(Icons.apartment_rounded, color: color, size: 20),
               ),
               const SizedBox(width: AppSizes.sm),
@@ -261,6 +296,17 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
               Text("بواسطة: ${hotel.archivedBy ?? '—'}", style: AppTextStyles.caption.copyWith(fontSize: 11)),
             ],
           ),
+          if (hotel.archiveReason != null && hotel.archiveReason!.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.notes_outlined, size: 13, color: Colors.grey),
+                const SizedBox(width: 4),
+                Expanded(child: Text("السبب: ${hotel.archiveReason}", style: AppTextStyles.caption.copyWith(fontSize: 11))),
+              ],
+            ),
+          ],
           const SizedBox(height: AppSizes.sm),
           Row(
             children: [
