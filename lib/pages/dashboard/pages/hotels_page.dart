@@ -201,17 +201,18 @@ class _HotelsPageState extends State<HotelsPage> {
     );
   }
 
-  /// بطاقة فندق فاخرة: لوحة هوية جانبية متدرِّجة اللون (بدل خط رفيع أو تعبئة
-  /// كاملة) تحمل مكان الشعار المستقبلي، مقابل منطقة بيضاء نظيفة للاسم/المدينة
-  /// — يُتعرَّف على الفندق فوراً من لونه دون أن يبتلع اللون البطاقة بأكملها.
-  /// الظل/الحواف/لمسة الضغط موروثة من AppCard نفسها (padding صفري هنا لأن
-  /// اللوحة يجب أن تلامس حواف البطاقة الخارجية بلا أي هامش داخلي).
+  /// بطاقة فندق فاخرة، بأقل محتوى ممكن: لوحة هوية جانبية عريضة متدرِّجة اللون
+  /// تحمل مكان الشعار المستقبلي (تُهيمن على الهوية البصرية دون أن تُغرِق
+  /// البطاقة بأكملها بلون صلب)، مقابل اسم الفندق فقط — بلا مدينة ولا أي
+  /// نص إضافي، ليبقى الاسم هو العنصر البصري الأساسي كما هو مطلوب. الظل/الحواف/
+  /// لمسة الضغط موروثة من AppCard نفسها (padding صفري هنا لأن اللوحة يجب أن
+  /// تلامس حواف البطاقة الخارجية بلا أي هامش داخلي).
   Widget _buildHotelCard(Hotel hotel) {
     final identityColor = HotelVisualIdentity.colorForHotel(hotel);
     final alertCount = _hotelAlertCounts[hotel.id!] ?? 0;
 
     return SizedBox(
-      height: 132,
+      height: 104,
       child: AppCard(
         padding: EdgeInsets.zero,
         onTap: () => _openHotel(hotel),
@@ -221,55 +222,18 @@ class _HotelsPageState extends State<HotelsPage> {
             _buildIdentityPanel(hotel, identityColor, alertCount),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 16, 16, 16),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            hotel.arabicName,
-                            style: const TextStyle(color: _ink, fontSize: 16.5, fontWeight: FontWeight.bold, letterSpacing: -0.2, height: 1.25),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (hotel.city.trim().isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade500),
-                                const SizedBox(width: 3),
-                                Flexible(
-                                  child: Text(
-                                    hotel.city,
-                                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: identityColor.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              "فتح لوحة التحكم",
-                              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: identityColor),
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        hotel.arabicName,
+                        style: const TextStyle(color: _ink, fontSize: 19, fontWeight: FontWeight.bold, letterSpacing: -0.3, height: 1.2),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey.shade400, size: 14),
                   ],
                 ),
@@ -281,45 +245,66 @@ class _HotelsPageState extends State<HotelsPage> {
     );
   }
 
-  /// اللوحة الجانبية لهوية الفندق: تدرُّج لوني من لون الفندق إلى ظل أعمق منه
-  /// (وليس تعبئة صلبة مسطَّحة) + لمسة زخرفية دائرية شفّافة خفيفة للعمق، ومساحة
-  /// بيضاء مخصَّصة مستقبلاً لشعار الفندق الفعلي (حالياً أيقونة مبنى مؤقتة) —
-  /// راجع تعليق الملف. شارة التنبيه الصغيرة تتموضع في زاويتها العلوية، قابلة
-  /// للضغط بمفردها لفتح تنبيهات المستندات، بمساحة لمس مريحة رغم صغر حجمها.
+  /// اللوحة الجانبية لهوية الفندق — عريضة عمداً (تهيمن على الهوية البصرية)
+  /// بتدرُّج ثلاثي (توهُّج خفيف ← لون الفندق الأصلي ← ظل أعمق منه) بدل تعبئة
+  /// صلبة مسطَّحة، مع طبقة "لمعان" علوية خفيفة (إضاءة منعكسة فاخرة) ولمسة
+  /// زخرفية دائرية للعمق، ومساحة بيضاء مخصَّصة مستقبلاً لشعار الفندق الفعلي
+  /// (حالياً أيقونة مبنى مؤقتة) — راجع تعليق الملف. شارة التنبيه الصغيرة
+  /// تتموضع في زاويتها العلوية، قابلة للضغط بمفردها لفتح تنبيهات المستندات،
+  /// بمساحة لمس مريحة رغم صغر حجمها.
   Widget _buildIdentityPanel(Hotel hotel, Color color, int alertCount) {
-    final deep = Color.lerp(color, Colors.black, 0.28)!;
+    final bright = Color.lerp(color, Colors.white, 0.12)!;
+    final deep = Color.lerp(color, Colors.black, 0.32)!;
     // بلا أي تدوير حواف هنا عمداً — AppCard تُقصّ البطاقة بأكملها بحواف
     // دائرية (ClipRRect) فتُشكِّل زوايا اللوحة تلقائياً بشكل صحيح أينما لامست
     // حافة البطاقة، بلا حاجة لتكرار نفس نصف القطر هنا.
     return Container(
-        width: 96,
+        width: 128,
         decoration: BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [color, deep]),
+          gradient: LinearGradient(
+            begin: AlignmentDirectional.topStart,
+            end: AlignmentDirectional.bottomEnd,
+            colors: [bright, color, deep],
+            stops: const [0, 0.55, 1],
+          ),
         ),
         child: Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
+            // طبقة لمعان علوية خفيفة — إحساس "إضاءة فاخرة منعكسة" بدل سطح مسطَّح.
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.white.withValues(alpha: 0.14), Colors.transparent],
+                    stops: const [0, 0.45],
+                  ),
+                ),
+              ),
+            ),
             PositionedDirectional(
-              top: -26,
-              start: -26,
+              bottom: -30,
+              end: -30,
               child: Container(
-                width: 78,
-                height: 78,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.07)),
+                width: 92,
+                height: 92,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.06)),
               ),
             ),
             // مساحة الشعار — مربَّع أبيض مرتفع بظل ناعم، مُهيَّأ لاستقبال شعار
             // حقيقي (صورة) لاحقاً من إدارة الفنادق بدل هذه الأيقونة المؤقتة.
             Container(
-              width: 52,
-              height: 52,
+              width: 56,
+              height: 56,
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 10, offset: const Offset(0, 4))],
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 12, offset: const Offset(0, 5))],
               ),
-              child: Icon(Icons.apartment_rounded, color: color, size: 26),
+              child: Icon(Icons.apartment_rounded, color: color, size: 28),
             ),
             if (alertCount > 0)
               PositionedDirectional(
