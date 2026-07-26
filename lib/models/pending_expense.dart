@@ -21,12 +21,21 @@ class PendingExpense {
   final String? supplierName; // حقل عرض فقط من JOIN، لا يُكتب في toMap
   final String? dueDate; // تاريخ استحقاق الدين — اختياري
 
+  /// اسم منشأة هذا المصروف — حقل عرض فقط من JOIN (راجع
+  /// DatabaseService.getPendingExpensesForSharedExpense)، لا يُكتب في toMap.
+  final String? hotelName;
+
   /// مصدر تمويل المبلغ فعلياً — null يعني هذا الفندق نفسه (الافتراضي، السلوك
   /// القديم بلا تغيير). قيمة غير null = معرّف فندق آخر موَّل المبلغ فعلياً،
   /// فلا يُخصَم من خزنة هذا الفندق عند الترحيل بل تُنشأ ذمة تلقائية بين
   /// الفندقين (راجع FinancialEngine.recordTransaction وتعليقها). منفصل تماماً
   /// عن [paymentMethod] (نقد/شبكة) الذي يبقى يجيب "كيف" بينما هذا يجيب "من أين".
   final int? fundingSourceHotelId;
+
+  /// معرّف رأس "المصروف المشترك" الذي وَلَّد هذا المصروف المعلَّق تلقائياً —
+  /// null يعني مصروف عادي أُنشئ مباشرة (السلوك الافتراضي). راجع
+  /// SharedExpenseDistributionRepository وجدول shared_expenses.
+  final int? sharedExpenseId;
 
   static const fundingSourceDeferred = 'آجل (دين)';
 
@@ -69,6 +78,8 @@ class PendingExpense {
     this.supplierName,
     this.dueDate,
     this.fundingSourceHotelId,
+    this.sharedExpenseId,
+    this.hotelName,
   });
 
   bool get isDeferredDebt => paymentMethod == fundingSourceDeferred;
@@ -96,6 +107,7 @@ class PendingExpense {
       'supplier_id': supplierId,
       'due_date': dueDate,
       'funding_source_hotel_id': fundingSourceHotelId,
+      'shared_expense_id': sharedExpenseId,
     };
   }
 
@@ -120,6 +132,8 @@ class PendingExpense {
       supplierName: map['supplier_name'] as String?,
       dueDate: map['due_date'] as String?,
       fundingSourceHotelId: map['funding_source_hotel_id'] as int?,
+      sharedExpenseId: map['shared_expense_id'] as int?,
+      hotelName: map['hotel_name'] as String?,
     );
   }
 
@@ -143,6 +157,7 @@ class PendingExpense {
     String? supplierName,
     String? dueDate,
     int? fundingSourceHotelId,
+    int? sharedExpenseId,
     bool clearSupplier = false,
     bool clearDueDate = false,
     bool clearFundingSource = false,
@@ -167,6 +182,8 @@ class PendingExpense {
       supplierName: clearSupplier ? null : (supplierName ?? this.supplierName),
       dueDate: clearDueDate ? null : (dueDate ?? this.dueDate),
       fundingSourceHotelId: clearFundingSource ? null : (fundingSourceHotelId ?? this.fundingSourceHotelId),
+      sharedExpenseId: sharedExpenseId ?? this.sharedExpenseId,
+      hotelName: hotelName,
     );
   }
 }

@@ -6,12 +6,10 @@ import '../../core/app_text_styles.dart';
 import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
 import '../../models/pending_expense.dart';
-import '../../models/shared_expense_group.dart';
 import '../../models/advance_withdrawal.dart';
 import '../../models/inter_entity_transfer.dart';
 import '../../models/financial_account.dart';
 import '../../repositories/expense_repository.dart';
-import '../../repositories/shared_expense_repository.dart';
 import '../../repositories/vault_repository.dart';
 import '../../repositories/inter_entity_transfer_repository.dart';
 import '../../repositories/hotel_repository.dart';
@@ -20,11 +18,12 @@ import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../dashboard/widgets/dashboard_section_card.dart';
+import 'add_edit_shared_expense_page.dart';
 import 'add_inter_entity_transfer_page.dart';
 import 'add_owner_withdrawal_page.dart';
 import 'add_pending_expense_page.dart';
-import 'add_shared_expense_page.dart';
 import 'expense_reports_page.dart';
+import 'shared_expense_details_page.dart';
 
 enum _OpCategory { expenses, shared, hotelAdvance, ownerWithdrawal, transfer }
 
@@ -83,7 +82,6 @@ class PendingExpensesListPage extends StatefulWidget {
 
 class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
   final _expenseRepo = ExpenseRepository();
-  final _sharedRepo = SharedExpenseRepository();
   final _vaultRepo = VaultRepository();
   final _transferRepo = InterEntityTransferRepository();
   final _financialEngine = FinancialEngine();
@@ -107,7 +105,6 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     final hotelId = widget.hotel.id!;
 
     final allExpenses = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
-    final sharedExpenses = await _sharedRepo.getSharedExpensesForFundingHotel(hotelId);
     final ownerWithdrawals = await _vaultRepo.getAdvanceWithdrawals(hotelId);
     final transfers = await _transferRepo.getForHotel(hotelId);
     final ownerDebt = await _financialEngine.getBalance(hotelId, 'owner_debt');
@@ -116,8 +113,8 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     if (!mounted) return;
     final legacyOwnerDrawingCount = allExpenses.where((e) => e.isOwnerDrawing).length;
     setState(() {
-      _counts[_OpCategory.expenses] = allExpenses.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance).length;
-      _counts[_OpCategory.shared] = sharedExpenses.length;
+      _counts[_OpCategory.expenses] = allExpenses.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance && e.sharedExpenseId == null).length;
+      _counts[_OpCategory.shared] = allExpenses.where((e) => e.sharedExpenseId != null).length;
       _counts[_OpCategory.hotelAdvance] = allExpenses.where((e) => e.isHotelAdvance).length;
       _counts[_OpCategory.ownerWithdrawal] = ownerWithdrawals.length + legacyOwnerDrawingCount;
       _counts[_OpCategory.transfer] = transfers.length;
@@ -249,7 +246,6 @@ class _CategoryOperationsPage extends StatefulWidget {
 
 class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
   final _expenseRepo = ExpenseRepository();
-  final _sharedRepo = SharedExpenseRepository();
   final _vaultRepo = VaultRepository();
   final _transferRepo = InterEntityTransferRepository();
   final _hotelRepo = HotelRepository();
@@ -262,7 +258,6 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
   String _sortBy = 'date';
 
   List<PendingExpense> _expenseRows = [];
-  List<SharedExpenseGroup> _sharedRows = [];
   List<AdvanceWithdrawal> _ownerWithdrawalRows = [];
   List<PendingExpense> _legacyOwnerDrawingRows = [];
   List<InterEntityTransfer> _transferRows = [];
@@ -286,12 +281,13 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
     switch (widget.meta.type) {
       case _OpCategory.expenses:
         final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
-        _expenseRows = all.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance).toList();
+        _expenseRows = all.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance && e.sharedExpenseId == null).toList();
         final hotels = await _hotelRepo.getAllHotelsIncludingArchived();
         _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
         break;
       case _OpCategory.shared:
-        _sharedRows = await _sharedRepo.getSharedExpensesForFundingHotel(hotelId);
+        final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
+        _expenseRows = all.where((e) => e.sharedExpenseId != null).toList();
         break;
       case _OpCategory.hotelAdvance:
         final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
@@ -335,18 +331,23 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
           );
         }).toList();
       case _OpCategory.shared:
-        return _sharedRows.where((g) => _matches(g.description)).map((g) {
+        return _expenseRows.where((e) => _matches(e.statement) || _matches(e.categoryName ?? '')).map((e) {
           return _OpCardData(
-            statement: g.description,
+            statement: e.statement,
             hotelName: widget.hotel.arabicName,
-            date: g.date,
-            time: g.time,
-            fundingSource: g.paymentMethod,
-            status: "مُرحَّل فوراً",
-            statusColor: Colors.green,
-            amount: g.totalAmount,
-            onTap: () => _showDetail("مصروف مشترك", g.description, g.totalAmount, g.date, g.time,
-                "دُفع بالكامل من ${widget.hotel.arabicName} فوراً، ويُوزَّع أثره على المنشآت المشارِكة دون انتظار الترحيل."),
+            date: e.date,
+            time: e.time,
+            fundingSource: e.paymentMethod,
+            status: "بانتظار الترحيل",
+            statusColor: Colors.orange,
+            amount: e.amount,
+            onTap: () async {
+              final changed = await Navigator.push(context, MaterialPageRoute(builder: (_) => SharedExpenseDetailsPage(sharedExpenseId: e.sharedExpenseId!)));
+              if (changed == true) {
+                _changed = true;
+                _loadData();
+              }
+            },
           );
         }).toList();
       case _OpCategory.hotelAdvance:
@@ -482,7 +483,7 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel)));
         break;
       case _OpCategory.shared:
-        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddSharedExpensePage(initialFundingHotel: widget.hotel)));
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddEditSharedExpensePage(initialHotelId: widget.hotel.id)));
         break;
       case _OpCategory.hotelAdvance:
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToHotelAdvance: true)));

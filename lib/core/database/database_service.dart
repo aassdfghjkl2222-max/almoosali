@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 46, // Upgrade to v46: وحدة مستندات العقود (مجلدات متداخلة بلا حد + مستندات)
+      version: 47, // Upgrade to v47: محرك توزيع المصروف المشترك (SE-000001 + مصروفات معلقة مولَّدة)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -287,6 +287,22 @@ class DatabaseService {
             );
           } catch (_) {}
         }
+        if (oldVersion < 47) {
+          // محرك توزيع "المصروف المشترك" الجديد: مصروف واحد يُوزَّع كمصروفات
+          // معلَّقة مستقلة على كل منشأة مختارة (بلا مفهوم "منشأة مموِّلة تُسدَّد
+          // لها ذمة" — هذا مخالف تماماً لنظام shared_expense_groups القديم
+          // الذي يبقى كما هو بلا أي تغيير لعرض بياناته التاريخية في التقرير
+          // اليومي). shared_expense_id على pending_expenses يربط كل مصروف
+          // معلَّق مولَّد بأصله؛ CASCADE يحذف المصروفات المعلَّقة المولَّدة تلقائياً
+          // عند حذف رأس المصروف المشترك (مسموح فقط قبل ترحيلها — راجع Repository).
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN shared_expense_id INTEGER REFERENCES shared_expenses(id) ON DELETE CASCADE'); } catch (_) {}
+          try { await db.execute('CREATE INDEX IF NOT EXISTS idx_pending_expenses_shared_expense ON pending_expenses(shared_expense_id)'); } catch (_) {}
+        }
       },
     );
   }
@@ -339,6 +355,13 @@ class DatabaseService {
       await db.execute(
         'CREATE TABLE IF NOT EXISTS contract_document_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
       );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)',
+      );
+      if (!await hasColumn('pending_expenses', 'shared_expense_id')) {
+        await db.execute('ALTER TABLE pending_expenses ADD COLUMN shared_expense_id INTEGER REFERENCES shared_expenses(id) ON DELETE CASCADE');
+      }
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_pending_expenses_shared_expense ON pending_expenses(shared_expense_id)');
       if (!await hasColumn('employees', 'employee_number')) {
         await db.execute('ALTER TABLE employees ADD COLUMN employee_number TEXT');
       }
@@ -544,7 +567,12 @@ class DatabaseService {
     // لتصنيفات المصروفات، يُقرأ منه: الفواتير الضريبية، المصروفات المعلقة، مركز التحليل، المركز المالي، التقارير.
     await db.execute('CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, short_code TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
-    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, funding_source_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
+    // محرك توزيع المصروف المشترك — راجع تعليق الترحيل v47 لسبب استقلاله عن
+    // shared_expense_groups/shared_expense_shares القديم (يبقى الأخير كما هو
+    // لعرض بياناته التاريخية فقط، بلا أي إنشاء جديد عبره بعد الآن).
+    await db.execute('CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, funding_source_hotel_id INTEGER, shared_expense_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE, FOREIGN KEY (shared_expense_id) REFERENCES shared_expenses (id) ON DELETE CASCADE)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pending_expenses_shared_expense ON pending_expenses(shared_expense_id)');
     // دين على المنشأة لمورد ناتج عن مصروف معلق بمصدر تمويل "آجل (دين)" — راجع
     // PendingExpenseDebt. مستقل عن supplier_debts (فواتير "شراء آجل" فقط)، وكلاهما
     // يُجمَّعان في "الذمم الدائنة" بمركز التحليل المالي (SupplierRepository.getAccountsPayableTotal).
@@ -1087,6 +1115,104 @@ class DatabaseService {
 
   Future<int> insertPendingExpenseAttachment(Map<String, dynamic> data) async { final db = await database; return await db.insert('pending_expense_attachments', data); }
   Future<List<Map<String, dynamic>>> getPendingExpenseAttachments(int pendingExpenseId) async { final db = await database; return await db.query('pending_expense_attachments', where: 'pending_expense_id = ?', whereArgs: [pendingExpenseId], orderBy: 'created_at DESC'); }
+
+  // ---------------- محرك توزيع المصروف المشترك (shared_expenses) ----------------
+  // يُنشئ مصروفاً معلَّقاً مستقلاً لكل منشأة مختارة (pending_expenses.shared_expense_id)
+  // بدل نموذج "منشأة مموِّلة + ذمم" القديم (shared_expense_groups أدناه، يبقى
+  // للعرض التاريخي فقط). راجع SharedExpenseDistributionRepository.
+
+  Future<int> insertSharedExpense(Map<String, dynamic> data) async { final db = await database; return await db.insert('shared_expenses', data); }
+
+  Future<Map<String, dynamic>?> getSharedExpenseById(int id) async {
+    final db = await database;
+    final rows = await db.query('shared_expenses', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// كل المصروفات المشتركة التي تشارك فيها منشأة معيّنة (بصفتها إحدى المنشآت
+  /// المُوزَّع عليها، وليس "مموِّلاً" — لا مفهوم كهذا في النموذج الجديد).
+  Future<List<Map<String, dynamic>>> getSharedExpensesForHotel(int hotelId) async {
+    final db = await database;
+    return await db.rawQuery(
+      'SELECT DISTINCT se.* FROM shared_expenses se JOIN pending_expenses pe ON pe.shared_expense_id = se.id '
+      'WHERE pe.hotel_id = ? ORDER BY se.date DESC, se.id DESC',
+      [hotelId],
+    );
+  }
+
+  /// كل المصروفات المشتركة عبر كل المنشآت — لشاشة تفاصيل/تعديل مصروف مشترك
+  /// لا تحتاج تقييداً بمنشأة واحدة.
+  Future<List<Map<String, dynamic>>> getAllSharedExpenses() async {
+    final db = await database;
+    return await db.query('shared_expenses', orderBy: 'date DESC, id DESC');
+  }
+
+  /// كل المصروفات المعلَّقة المولَّدة من مصروف مشترك واحد، بترتيب اسم المنشأة —
+  /// أساس شاشة تفاصيل/تعديل/حذف المصروف المشترك.
+  Future<List<Map<String, dynamic>>> getPendingExpensesForSharedExpense(int sharedExpenseId) async {
+    final db = await database;
+    return await db.rawQuery(
+      'SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value, h.arabic_name as hotel_name '
+      'FROM pending_expenses pe '
+      'JOIN expense_categories ec ON pe.category_id = ec.id '
+      'JOIN hotels h ON h.id = pe.hotel_id '
+      'WHERE pe.shared_expense_id = ? ORDER BY h.arabic_name COLLATE NOCASE ASC',
+      [sharedExpenseId],
+    );
+  }
+
+  Future<int> updateSharedExpense(int id, Map<String, dynamic> data) async { final db = await database; return await db.update('shared_expenses', data, where: 'id = ?', whereArgs: [id]); }
+
+  /// ينشئ رأس المصروف المشترك + مصروفاً معلَّقاً مستقلاً لكل صف في
+  /// [pendingExpenseRows] (بلا shared_expense_id فيها — يُضاف هنا تلقائياً)،
+  /// كل ذلك ضمن معاملة واحدة ذرّية (الكل ينجح أو الكل يفشل). يعيد معرّف الرأس.
+  Future<int> createSharedExpenseWithDistribution({
+    required Map<String, dynamic> headerData,
+    required List<Map<String, dynamic>> pendingExpenseRows,
+  }) async {
+    final db = await database;
+    return await db.transaction((txn) async {
+      final headerId = await txn.insert('shared_expenses', headerData);
+      for (final row in pendingExpenseRows) {
+        final data = {...row, 'shared_expense_id': headerId};
+        await txn.insert('pending_expenses', data);
+        await txn.rawUpdate('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
+      }
+      return headerId;
+    });
+  }
+
+  /// يعدّل رأس مصروف مشترك موجود + يوفّق قائمة مصروفاته المعلَّقة المولَّدة مع
+  /// الاختيار الجديد للمنشآت: تحديث لمن بقي مختاراً، حذف لمن أُزيل، وإدراج
+  /// لمن أُضيف حديثاً — ضمن معاملة واحدة ذرّية.
+  Future<void> applySharedExpenseUpdate({
+    required int sharedExpenseId,
+    required Map<String, dynamic> headerData,
+    required List<Map<String, dynamic>> toInsert,
+    required Map<int, Map<String, dynamic>> toUpdate,
+    required List<int> toDeleteIds,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update('shared_expenses', headerData, where: 'id = ?', whereArgs: [sharedExpenseId]);
+      for (final id in toDeleteIds) {
+        await txn.delete('pending_expenses', where: 'id = ?', whereArgs: [id]);
+      }
+      for (final entry in toUpdate.entries) {
+        await txn.update('pending_expenses', entry.value, where: 'id = ?', whereArgs: [entry.key]);
+      }
+      for (final row in toInsert) {
+        final data = {...row, 'shared_expense_id': sharedExpenseId};
+        await txn.insert('pending_expenses', data);
+        await txn.rawUpdate('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
+      }
+    });
+  }
+
+  /// حذف رأس المصروف المشترك — CASCADE يحذف تلقائياً كل المصروفات المعلَّقة
+  /// المولَّدة منه (pending_expenses.shared_expense_id FK). لا يُستدعى إلا بعد
+  /// التحقق أن لا شيء منها رُحِّل بعد (راجع SharedExpenseDistributionRepository.deleteSharedExpense).
+  Future<int> deleteSharedExpense(int id) async { final db = await database; return await db.delete('shared_expenses', where: 'id = ?', whereArgs: [id]); }
 
   // ---------------- المصروف المشترك (shared_expense_groups/shared_expense_shares) ----------------
 
