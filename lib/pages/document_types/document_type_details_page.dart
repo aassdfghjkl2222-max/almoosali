@@ -36,7 +36,7 @@ class _DocumentTypeDetailsPageState extends State<DocumentTypeDetailsPage> {
     if (fresh != null) _type = fresh;
     if (_type.scope == 'specific') {
       final ids = await _repository.getHotelsForType(_type.id!);
-      final allHotels = await _hotelRepository.getAllHotels();
+      final allHotels = await _hotelRepository.getAllHotelsIncludingArchived();
       _scopedHotelNames = allHotels.where((h) => ids.contains(h.id)).map((h) => h.arabicName).toList();
     }
     if (mounted) setState(() => _isLoading = false);

@@ -44,7 +44,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> {
         type: 'inter_entity', 
         hotelId: widget.hotel.id!
       );
-      final hotels = await _hotelRepository.getAllHotels();
+      final hotels = await _hotelRepository.getAllHotelsIncludingArchived();
       setState(() {
         _settlements = settlements;
         _hotels = hotels;

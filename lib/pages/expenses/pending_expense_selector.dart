@@ -35,7 +35,7 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
 
   Future<void> _loadData() async {
     final expenses = await _repository.getPendingExpenses(hotelId: widget.currentHotel.id!, isTransferred: false);
-    final hotels = await _hotelRepo.getAllHotels();
+    final hotels = await _hotelRepo.getAllHotelsIncludingArchived();
     if (mounted) {
       setState(() {
         _expenses = expenses;

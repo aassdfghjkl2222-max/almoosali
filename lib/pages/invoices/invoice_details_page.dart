@@ -66,7 +66,7 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
 
   Future<void> _loadRelatedHotel() async {
     if (_currentInvoice.relatedHotelId == null) return;
-    final hotels = await _hotelRepository.getAllHotels();
+    final hotels = await _hotelRepository.getAllHotelsIncludingArchived();
     final match = hotels.where((h) => h.id == _currentInvoice.relatedHotelId);
     if (!mounted || match.isEmpty) return;
     setState(() => _relatedHotelName = match.first.arabicName);

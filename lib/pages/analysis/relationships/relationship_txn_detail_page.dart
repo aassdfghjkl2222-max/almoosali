@@ -48,7 +48,7 @@ class _RelationshipTxnDetailPageState extends State<RelationshipTxnDetailPage> {
     final all = await FinancialRepository().getFinancialReports(widget.txn.hotelId);
     final match = all.where((r) => r.id == widget.txn.reportId).toList();
     if (match.isNotEmpty) {
-      final hotels = await HotelRepository().getAllHotels();
+      final hotels = await HotelRepository().getAllHotelsIncludingArchived();
       _reportHotel = hotels.firstWhere((h) => h.id == widget.txn.hotelId, orElse: () => widget.contextHotel);
       _linkedReport = match.first;
     }

@@ -7,6 +7,7 @@ import '../../core/app_text_styles.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
+import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../services/excel_service.dart';
 import '../../services/pdf_service.dart';
@@ -28,6 +29,8 @@ class InvoiceReportsPage extends StatefulWidget {
 
 class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
   final _invoiceRepo = InvoiceRepository();
+  final _hotelRepo = HotelRepository();
+  List<int> _activeHotelIds = [];
 
   Color get _identityColor => HotelVisualIdentity.colorForHotel(widget.hotel);
 
@@ -50,7 +53,9 @@ class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
   InvoicesSummary? _summary;
   List<Invoice>? _reportInvoices;
 
-  List<int>? get _hotelIds => _allHotels ? null : [widget.hotel.id!];
+  // عند تفعيل "كل الفنادق" يجب حصر النطاق صراحةً بالفنادق غير المؤرشَفة
+  // (وليس null بمعنى "بلا أي فلترة") حتى لا تتسرب فواتير فندق مؤرشَف لتقرير حالي.
+  List<int>? get _hotelIds => _allHotels ? _activeHotelIds : [widget.hotel.id!];
 
   (String?, String?) get _dateRange {
     final now = DateTime.now();
@@ -72,7 +77,13 @@ class _InvoiceReportsPageState extends State<InvoiceReportsPage> {
   @override
   void initState() {
     super.initState();
-    _loadFilterOptions();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    final hotels = await _hotelRepo.getAllHotels();
+    _activeHotelIds = hotels.where((h) => h.id != null).map((h) => h.id!).toList();
+    await _loadFilterOptions();
   }
 
   Future<void> _loadFilterOptions() async {

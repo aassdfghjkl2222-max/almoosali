@@ -53,7 +53,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final hotels = await _hotelRepository.getAllHotels();
+    final hotels = await _hotelRepository.getAllHotelsIncludingArchived();
     final liabilities = await _engine.getAccountsByType(widget.hotel.id!, 'liability');
     final assets = await _engine.getAccountsByType(widget.hotel.id!, 'asset');
     final payables = liabilities.where((a) => a.category.startsWith('entity_') && a.balance > 0).toList();

@@ -127,7 +127,7 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
     });
 
     final hotelRepo = HotelRepository();
-    final hotels = await hotelRepo.getAllHotels();
+    final hotels = await hotelRepo.getAllHotelsIncludingArchived();
     if (mounted) setState(() => _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName});
   }
 
@@ -287,7 +287,7 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
       case _OpCategory.expenses:
         final all = await _expenseRepo.getPendingExpenses(hotelId: hotelId, isTransferred: false);
         _expenseRows = all.where((e) => !e.isOwnerDrawing && !e.isHotelAdvance).toList();
-        final hotels = await _hotelRepo.getAllHotels();
+        final hotels = await _hotelRepo.getAllHotelsIncludingArchived();
         _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
         break;
       case _OpCategory.shared:
@@ -304,7 +304,7 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
         break;
       case _OpCategory.transfer:
         _transferRows = await _transferRepo.getForHotel(hotelId);
-        final hotels = await _hotelRepo.getAllHotels();
+        final hotels = await _hotelRepo.getAllHotelsIncludingArchived();
         _hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
         break;
     }

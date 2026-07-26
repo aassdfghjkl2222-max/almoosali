@@ -6,19 +6,32 @@ import '../models/hotel_audit_log.dart';
 class HotelRepository {
   final _dbService = DatabaseService();
 
-  /// كل الفنادق (مؤرشَفة وغير مؤرشَفة معاً) — يبقى بلا تغيير لأي استخدام
-  /// يحتاج تحليل بيانات تاريخية (تسوية/تقرير قديم) قد يشير لفندق أُرشِف لاحقاً.
+  /// المصدر الوحيد الموثوق لأي قائمة فنادق تُعرَض للمستخدم للاختيار منها في
+  /// أي مكان بالتطبيق (قوائم منسدلة، حوارات اختيار، Autocomplete، بحث،
+  /// فلاتر، إحصائيات، تقارير، مصروف/إيراد جديد، خزينة، تحويلات، مستندات،
+  /// عقود، موردون، موظفون...) — يستثني الفنادق المؤرشَفة تلقائياً وبصمت.
+  /// هذا هو الاسم "البديهي" الذي يكتبه أي مطوّر جديد بلا تفكير، لذا يجب أن
+  /// يكون آمناً افتراضياً؛ لا تُضِف فلترة أرشفة يدوية في أي شاشة، استخدم هذه
+  /// الدالة مباشرة. راجع [getAllHotelsIncludingArchived] للحالات النادرة
+  /// المشروعة التي تحتاج فنادق مؤرشَفة أيضاً (سجل تدقيق، تسوية/فاتورة تاريخية
+  /// تُشير لفندق أُرشِف لاحقاً، التحقق من تكرار الاسم/الكود).
   Future<List<Hotel>> getAllHotels() async {
+    final data = await _dbService.getHotels(active: true);
+    return data.map((map) => Hotel.fromMap(map)).toList();
+  }
+
+  /// كل الفنادق (مؤرشَفة وغير مؤرشَفة معاً) — لا تُستخدَم إلا في الحالات
+  /// الموثَّقة أعلاه في تعليق [getAllHotels]. أي استخدام جديد لهذه الدالة في
+  /// شاشة يختار منها المستخدم فندقاً هو خطأ معماري يُعيد تسريب فنادق مؤرشَفة
+  /// للواجهة.
+  Future<List<Hotel>> getAllHotelsIncludingArchived() async {
     final data = await _dbService.getHotels();
     return data.map((map) => Hotel.fromMap(map)).toList();
   }
 
-  /// الفنادق النشطة فقط (غير المؤرشَفة، بأي حالة تشغيلية) — لشاشة إدارة
-  /// الفنادق حيث يحتاج المدير رؤية غير النشط/تحت الصيانة/قريباً أيضاً لإدارتها.
-  Future<List<Hotel>> getActiveHotels() async {
-    final data = await _dbService.getHotels(active: true);
-    return data.map((map) => Hotel.fromMap(map)).toList();
-  }
+  /// اسم بديل لـ [getAllHotels] فقط لتوضيح النيّة في الشاشات التي تعرض حالات
+  /// تشغيلية متعددة (نشط/تحت الصيانة/قريباً) عمداً — نفس البيانات تماماً.
+  Future<List<Hotel>> getActiveHotels() => getAllHotels();
 
   /// الفنادق التشغيلية فعلياً فقط (status = 'active') — لشاشة اختيار الفندق
   /// الرئيسية (HotelsPage) التي يستخدمها الموظفون فعلياً؛ فندق تحت الصيانة أو
@@ -49,7 +62,7 @@ class HotelRepository {
   }
 
   Future<void> seedData() async {
-    final hotels = await getAllHotels();
+    final hotels = await getAllHotelsIncludingArchived();
     if (hotels.isEmpty) {
       await addHotel(const Hotel(
         arabicName: "فندق ذاخر بلازا",
@@ -150,15 +163,16 @@ class HotelRepository {
 
   /// هل يوجد فندق آخر بنفس الاسم العربي؟ (بلا حساسية لحالة الأحرف/المسافات
   /// الزائدة) — [excludeId] يُستثنى عند التعديل (الفندق نفسه ليس تكراراً لنفسه).
+  /// يشمل الفنادق المؤرشَفة عمداً حتى لا يتكرر الاسم مع فندق قد يُستعاد لاحقاً.
   Future<bool> isNameTaken(String arabicName, {int? excludeId}) async {
-    final all = await getAllHotels();
+    final all = await getAllHotelsIncludingArchived();
     final normalized = arabicName.trim();
     return all.any((h) => h.id != excludeId && h.arabicName.trim() == normalized);
   }
 
   Future<bool> isCodeTaken(String code, {int? excludeId}) async {
     if (code.trim().isEmpty) return false;
-    final all = await getAllHotels();
+    final all = await getAllHotelsIncludingArchived();
     final normalized = code.trim().toLowerCase();
     return all.any((h) => h.id != excludeId && (h.hotelCode?.trim().toLowerCase() ?? '') == normalized);
   }
@@ -171,7 +185,10 @@ class HotelRepository {
   }
 
   Future<void> _logAuditByName(int hotelId, String action, String performedBy, {String? details}) async {
-    final hotels = await getAllHotels();
+    // تُستخدَم هذه الدالة بعد archiveHotel/restoreHotel أحياناً — أي بعد أن
+    // يكون الفندق مؤرشَفاً فعلياً في قاعدة البيانات، لذا يجب أن تشمل الفنادق
+    // المؤرشَفة حتى لا يُفقَد اسم الفندق من سجل التدقيق.
+    final hotels = await getAllHotelsIncludingArchived();
     final matches = hotels.where((h) => h.id == hotelId);
     final hotelName = matches.isEmpty ? "فندق #$hotelId" : matches.first.arabicName;
     await _dbService.insertHotelAuditLog(HotelAuditLog(

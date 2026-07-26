@@ -114,7 +114,7 @@ class _EmployeeDetailsPageState extends State<EmployeeDetailsPage> with SingleTi
     final documents = await DocumentRepository().getDocumentsForOwner(Document.ownerTypeEmployee, employee.id!);
     final events = await _repository.getEvents(employee.id!);
     final payrollHistory = await _repository.getPayrollRecordsForEmployee(employee.id!);
-    final allHotels = await _hotelRepository.getAllHotels();
+    final allHotels = await _hotelRepository.getAllHotelsIncludingArchived();
     final pendingApprovalHotelIds = (await _payrollService.hotelsPendingApprovalThisPeriod(employee))
         .where((id) => id != employee.hotelId)
         .toList();

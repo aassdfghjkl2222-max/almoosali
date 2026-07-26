@@ -51,7 +51,7 @@ class _InterEntityDebtDetailsPageState extends State<InterEntityDebtDetailsPage>
     setState(() => _isLoading = true);
     try {
       final transactions = await _repository.getTransactions(_settlement.id!);
-      final hotels = await _hotelRepository.getAllHotels();
+      final hotels = await _hotelRepository.getAllHotelsIncludingArchived();
       // Reload settlement to get latest totalPaid/status
       final allSettlements = await _repository.getSettlements(type: 'inter_entity');
       final updatedSettlement = allSettlements.firstWhere((s) => s.id == _settlement.id);

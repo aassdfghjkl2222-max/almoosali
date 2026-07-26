@@ -89,7 +89,7 @@ class _FinancialRelationshipsPageState extends State<FinancialRelationshipsPage>
 
     final allAssets = await _engine.getAccountsByType(widget.hotel.id!, 'asset');
     final allLiabilities = await _engine.getAccountsByType(widget.hotel.id!, 'liability');
-    final hotels = await HotelRepository().getAllHotels();
+    final hotels = await HotelRepository().getAllHotelsIncludingArchived();
     final hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
 
     _receivableEntities = _extractEntities(allAssets, 'receivable_entity_', 'receivable_entity', hotelNames);
