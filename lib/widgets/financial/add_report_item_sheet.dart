@@ -2,20 +2,19 @@ import 'package:flutter/material.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
-import '../../models/financial_report_item.dart';
+import '../../models/financial_category.dart';
 import '../../models/hotel.dart';
-import '../../repositories/financial_report_item_repository.dart';
-import '../common/app_text_field.dart';
+import '../../repositories/financial_category_repository.dart';
 import 'funding_source_picker.dart';
 
-/// نتيجة "إضافة بند" — [savePermanently] يطلب من المستدعي حفظ البند في
-/// كتالوج financial_report_items بعد الإضافة الفعلية للتقرير الحالي.
-typedef AddReportItemResult = ({String name, String fundingSource, bool savePermanently});
+/// نتيجة "إضافة بند" — [categoryId] هو مصدر الحقيقة (يُخزَّن في details_json
+/// الآن)، و[name] نسخة عرض فقط (تبقى العروض/التصدير القديمة تعمل بلا تغيير).
+typedef AddReportItemResult = ({int categoryId, String name, String fundingSource});
 
-/// نافذة موحّدة لإضافة بند (إيراد أو مصروف) إلى التقرير الحالي — إما باختيار
-/// بند محفوظ سلفاً من الكتالوج (لا يظهر تلقائياً في الشاشة الرئيسية، فقط هنا)
-/// أو بكتابة اسم جديد + اختيار مصدر تمويل + خيار حفظه بشكل دائم للمستقبل.
-/// مشتركة بين قسمي الإيرادات والمصروفات (نفس التفاعل، الفارق فقط [itemType]).
+/// نافذة موحّدة لإضافة بند (إيراد أو مصروف) إلى التقرير الحالي — اختيار فئة
+/// من محرك الفئات المالية الموحَّد فقط، بلا أي إمكانية لكتابة اسم حر (راجع
+/// "Core Principle": لا يجوز كتابة اسم تصنيف يدوياً في أي شاشة). لإضافة فئة
+/// غير موجودة بعد: الإعدادات ← الفئات المالية.
 Future<AddReportItemResult?> showAddReportItemSheet(
   BuildContext context, {
   required String itemType,
@@ -41,16 +40,14 @@ class _AddReportItemSheet extends StatefulWidget {
 }
 
 class _AddReportItemSheetState extends State<_AddReportItemSheet> {
-  final _repository = FinancialReportItemRepository();
-  final _nameController = TextEditingController();
+  final _repository = FinancialCategoryRepository();
 
-  List<FinancialReportItem> _savedItems = [];
+  List<FinancialCategory> _categories = [];
   bool _isLoading = true;
-  bool _manualMode = false;
+  FinancialCategory? _selectedCategory;
   String? _fundingSource;
-  bool _savePermanently = false;
 
-  bool get _isRevenue => widget.itemType == FinancialReportItem.typeRevenue;
+  bool get _isRevenue => widget.itemType == FinancialCategory.typeRevenue;
 
   @override
   void initState() {
@@ -58,20 +55,16 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
     _load();
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
-  }
-
   Future<void> _load() async {
-    final items = await _repository.getItems(type: widget.itemType);
-    if (mounted) setState(() { _savedItems = items; _isLoading = false; });
+    final items = await _repository.getCategories(type: widget.itemType);
+    if (mounted) setState(() { _categories = items; _isLoading = false; });
   }
 
-  void _pickSaved(FinancialReportItem item) {
-    final result = (name: item.name, fundingSource: item.defaultFundingSource ?? 'نقد', savePermanently: false);
-    Navigator.pop(context, result);
+  void _pickCategory(FinancialCategory category) {
+    setState(() {
+      _selectedCategory = category;
+      _fundingSource = category.defaultFundingSource;
+    });
   }
 
   Future<void> _pickFundingSource() async {
@@ -85,17 +78,14 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
     if (result != null) setState(() => _fundingSource = result.paymentMethod);
   }
 
-  void _confirmManual() {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى إدخال اسم البند")));
-      return;
-    }
+  void _confirm() {
+    final category = _selectedCategory;
+    if (category == null) return;
     if (_fundingSource == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("يرجى اختيار مصدر التمويل")));
       return;
     }
-    final AddReportItemResult result = (name: name, fundingSource: _fundingSource!, savePermanently: _savePermanently);
+    final result = (categoryId: category.id!, name: category.name, fundingSource: _fundingSource!);
     Navigator.pop(context, result);
   }
 
@@ -113,7 +103,14 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text(_isRevenue ? "إضافة بند إيراد" : "إضافة بند مصروف", style: AppTextStyles.title.copyWith(fontSize: 17))),
+                  Expanded(
+                    child: Text(
+                      _selectedCategory == null ? (_isRevenue ? "اختيار فئة إيراد" : "اختيار فئة مصروف") : _selectedCategory!.name,
+                      style: AppTextStyles.title.copyWith(fontSize: 17),
+                    ),
+                  ),
+                  if (_selectedCategory != null)
+                    IconButton(onPressed: () => setState(() { _selectedCategory = null; _fundingSource = null; }), icon: const Icon(Icons.arrow_back)),
                   IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
                 ],
               ),
@@ -121,9 +118,9 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
               Flexible(
                 child: _isLoading
                     ? const Padding(padding: EdgeInsets.all(AppSizes.lg), child: Center(child: CircularProgressIndicator()))
-                    : _manualMode
-                        ? _buildManualForm()
-                        : _buildSavedList(),
+                    : _selectedCategory == null
+                        ? _buildCategoryList()
+                        : _buildFundingStep(),
               ),
             ],
           ),
@@ -132,39 +129,39 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
     );
   }
 
-  Widget _buildSavedList() {
+  Widget _buildCategoryList() {
+    if (_categories.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSizes.lg),
+        child: Center(child: Text("لا توجد فئات بعد — أضفها من الإعدادات ← الفئات المالية", style: AppTextStyles.caption, textAlign: TextAlign.center)),
+      );
+    }
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_savedItems.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: AppSizes.md), child: Center(child: Text("لا توجد بنود محفوظة بعد", style: AppTextStyles.caption)))
-          else
-            ..._savedItems.map((item) => ListTile(
-                  leading: Icon(_isRevenue ? Icons.trending_up : Icons.trending_down, color: _isRevenue ? Colors.green : Colors.red),
-                  title: Text(item.name),
-                  subtitle: item.defaultFundingSource != null ? Text(item.defaultFundingSource!, style: AppTextStyles.caption) : null,
-                  onTap: () => _pickSaved(item),
-                )),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.add_circle_outline, color: Colors.blue),
-            title: const Text("إضافة اسم جديد", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-            onTap: () => setState(() => _manualMode = true),
-          ),
+          for (final c in _categories)
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Color(c.colorValue).withValues(alpha: 0.12), shape: BoxShape.circle),
+                child: Icon(IconData(c.iconCode, fontFamily: 'MaterialIcons'), color: Color(c.colorValue), size: 20),
+              ),
+              title: Text(c.name, style: AppTextStyles.bodyBold.copyWith(fontSize: 14)),
+              subtitle: c.description != null && c.description!.trim().isNotEmpty ? Text(c.description!, style: AppTextStyles.caption) : null,
+              onTap: () => _pickCategory(c),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildManualForm() {
+  Widget _buildFundingStep() {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: AppSizes.sm),
-          AppTextField(controller: _nameController, hint: "اسم البند", icon: Icons.edit_note),
-          const SizedBox(height: AppSizes.md),
           InkWell(
             onTap: _pickFundingSource,
             borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -181,16 +178,8 @@ class _AddReportItemSheetState extends State<_AddReportItemSheet> {
               ),
             ),
           ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            value: _savePermanently,
-            title: const Text("حفظ هذا البند بشكل دائم", style: TextStyle(fontSize: 13)),
-            subtitle: const Text("يظهر لاحقاً ضمن البنود المحفوظة عند الضغط على إضافة", style: AppTextStyles.caption),
-            onChanged: (v) => setState(() => _savePermanently = v ?? false),
-          ),
-          const SizedBox(height: AppSizes.sm),
-          ElevatedButton(onPressed: _confirmManual, style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text("إضافة")),
+          const SizedBox(height: AppSizes.md),
+          ElevatedButton(onPressed: _confirm, style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text("إضافة")),
           const SizedBox(height: AppSizes.sm),
         ],
       ),

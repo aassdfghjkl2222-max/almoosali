@@ -4,12 +4,13 @@ import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
-import '../../models/expense_category.dart';
+import '../../models/financial_category.dart';
 import '../../models/hotel.dart';
 import '../../models/pending_expense.dart';
 import '../../models/pending_expense_attachment.dart';
 import '../../models/supplier.dart';
 import '../../repositories/expense_repository.dart';
+import '../../repositories/financial_category_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/supplier_repository.dart';
 import '../../services/attachment_service.dart';
@@ -44,6 +45,7 @@ class AddPendingExpensePage extends StatefulWidget {
 
 class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   final _repository = ExpenseRepository();
+  final _categoryRepository = FinancialCategoryRepository();
   final _hotelRepository = HotelRepository();
   final _supplierRepository = SupplierRepository();
   final _formKey = GlobalKey<FormState>();
@@ -52,9 +54,9 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   final _statementController = TextEditingController();
   final _dueDateController = TextEditingController();
 
-  List<ExpenseCategory> _categories = [];
+  List<FinancialCategory> _categories = [];
   List<Hotel> _allHotels = [];
-  ExpenseCategory? _selectedCategory;
+  FinancialCategory? _selectedCategory;
   String? _paymentMethod;
   Supplier? _selectedSupplier;
   bool _isLoading = true;
@@ -78,7 +80,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   }
 
   Future<void> _loadData() async {
-    final categories = await _repository.getCategories();
+    final categories = await _categoryRepository.getCategories(type: FinancialCategory.typeExpense);
     final hotels = await _hotelRepository.getAllHotels();
     final edit = widget.editExpense;
     List<PendingExpenseAttachment> attachments = [];
@@ -378,7 +380,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
         border: Border.all(color: Colors.grey[300]!),
       ),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<ExpenseCategory>(
+        child: DropdownButton<FinancialCategory>(
           value: _selectedCategory,
           isExpanded: true,
           hint: const Text("اختر نوع المصروف"),

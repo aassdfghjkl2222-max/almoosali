@@ -25,7 +25,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 47, // Upgrade to v47: محرك توزيع المصروف المشترك (SE-000001 + مصروفات معلقة مولَّدة)
+      version: 48, // Upgrade to v48: محرك الفئات المالية الموحَّد (مصروفات + إيرادات، مصدر حقيقة واحد)
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -303,6 +303,9 @@ class DatabaseService {
           try { await db.execute('ALTER TABLE pending_expenses ADD COLUMN shared_expense_id INTEGER REFERENCES shared_expenses(id) ON DELETE CASCADE'); } catch (_) {}
           try { await db.execute('CREATE INDEX IF NOT EXISTS idx_pending_expenses_shared_expense ON pending_expenses(shared_expense_id)'); } catch (_) {}
         }
+        if (oldVersion < 48) {
+          try { await _migrateToFinancialCategories(db); } catch (_) {}
+        }
       },
     );
   }
@@ -356,7 +359,7 @@ class DatabaseService {
         'CREATE TABLE IF NOT EXISTS contract_document_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
       );
       await db.execute(
-        'CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)',
+        'CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES financial_categories (id) ON DELETE CASCADE)',
       );
       if (!await hasColumn('pending_expenses', 'shared_expense_id')) {
         await db.execute('ALTER TABLE pending_expenses ADD COLUMN shared_expense_id INTEGER REFERENCES shared_expenses(id) ON DELETE CASCADE');
@@ -444,13 +447,7 @@ class DatabaseService {
       await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
       await db.execute('CREATE TABLE IF NOT EXISTS invoice_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, username TEXT NOT NULL, operation_type TEXT NOT NULL, changed_fields TEXT, occurred_at TEXT NOT NULL)');
 
-      if (!await hasColumn('expense_categories', 'short_code')) {
-        await db.execute('ALTER TABLE expense_categories ADD COLUMN short_code TEXT');
-      }
-      if (!await hasColumn('expense_categories', 'is_default')) {
-        await db.execute('ALTER TABLE expense_categories ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0');
-      }
-      await _unifyExpenseCategories(db);
+      await _migrateToFinancialCategories(db);
 
       await db.execute('CREATE TABLE IF NOT EXISTS document_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color_value INTEGER NOT NULL, created_at TEXT NOT NULL)');
       await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_categories_name ON document_categories(name)');
@@ -525,7 +522,7 @@ class DatabaseService {
       }
 
       await db.execute(
-        'CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+        'CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES financial_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
       );
       await db.execute(
         'CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
@@ -563,15 +560,18 @@ class DatabaseService {
     await db.execute('CREATE TABLE IF NOT EXISTS financial_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, date TEXT NOT NULL, income REAL NOT NULL, expenses REAL NOT NULL, notes TEXT, increase_desc TEXT, shortage_desc TEXT, employee_name TEXT, details_json TEXT, created_at TEXT NOT NULL, is_posted INTEGER NOT NULL DEFAULT 0, report_type TEXT NOT NULL DEFAULT "main", is_locked INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS financial_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, balance REAL NOT NULL DEFAULT 0.0, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS financial_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, account_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL, balance_before REAL NOT NULL, balance_after REAL NOT NULL, description TEXT NOT NULL, reference_id INTEGER, reference_type TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (account_id) REFERENCES financial_accounts (id) ON DELETE CASCADE)');
-    // موحّدة على مستوى التطبيق بالكامل (hotel_id يبقى دوماً NULL) — مصدر الحقيقة الوحيد
-    // لتصنيفات المصروفات، يُقرأ منه: الفواتير الضريبية، المصروفات المعلقة، مركز التحليل، المركز المالي، التقارير.
-    await db.execute('CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, short_code TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
+    // محرك الفئات المالية الموحَّد — مصدر الحقيقة الوحيد لتصنيفات المصروفات
+    // والإيرادات معاً (type مميِّز)، يحل محل expense_categories/financial_report_items
+    // القديمين معاً (راجع تعليق الترحيل v48). hotel_id يبقى دوماً NULL (تصنيف
+    // عام على مستوى التطبيق بالكامل)، parent_id ذاتي الإشارة (تسلسل هرمي جاهز
+    // للمستقبل، غير مفعَّل الاستخدام بعد).
+    await db.execute('CREATE TABLE IF NOT EXISTS financial_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, code TEXT, type TEXT NOT NULL DEFAULT "expense", parent_id INTEGER, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, default_funding_source TEXT, description TEXT, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (parent_id) REFERENCES financial_categories (id) ON DELETE SET NULL)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_financial_categories_type ON financial_categories(type)');
     // محرك توزيع المصروف المشترك — راجع تعليق الترحيل v47 لسبب استقلاله عن
     // shared_expense_groups/shared_expense_shares القديم (يبقى الأخير كما هو
     // لعرض بياناته التاريخية فقط، بلا أي إنشاء جديد عبره بعد الآن).
-    await db.execute('CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, funding_source_hotel_id INTEGER, shared_expense_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE CASCADE, FOREIGN KEY (shared_expense_id) REFERENCES shared_expenses (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS shared_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, description TEXT, total_amount REAL NOT NULL, funding_source TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (category_id) REFERENCES financial_categories (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS pending_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, payment_method TEXT NOT NULL, category_id INTEGER NOT NULL, statement TEXT NOT NULL, notes TEXT, date TEXT NOT NULL, time TEXT NOT NULL, is_transferred INTEGER NOT NULL DEFAULT 0, amount_source TEXT NOT NULL DEFAULT "خارج النظام", created_at TEXT NOT NULL, supplier_id INTEGER, due_date TEXT, funding_source_hotel_id INTEGER, shared_expense_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES financial_categories (id) ON DELETE CASCADE, FOREIGN KEY (shared_expense_id) REFERENCES shared_expenses (id) ON DELETE CASCADE)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_pending_expenses_shared_expense ON pending_expenses(shared_expense_id)');
     // دين على المنشأة لمورد ناتج عن مصروف معلق بمصدر تمويل "آجل (دين)" — راجع
     // PendingExpenseDebt. مستقل عن supplier_debts (فواتير "شراء آجل" فقط)، وكلاهما
@@ -581,7 +581,7 @@ class DatabaseService {
     // "المصروف المشترك": مصروف واحد تدفعه منشأة (funding_hotel_id) بالكامل، ويُوزَّع
     // على عدة منشآت مشارِكة عبر shared_expense_shares — القيود المحاسبية تُنفَّذ فوراً
     // عند الحفظ عبر FinancialEngine.recordSharedExpense، وهذان الجدولان للتتبع/العرض فقط.
-    await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES expense_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES financial_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS shared_expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT, shared_expense_group_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (shared_expense_group_id) REFERENCES shared_expense_groups (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     // "السلفة": سحب فوري من نقد/شبكة الفندق لصالح المالك، ليست مصروفاً — القيد
     // المحاسبي (خصم فوري + ذمة owner_debt على المالك) عبر FinancialEngine.recordOwnerDrawing
@@ -666,7 +666,7 @@ class DatabaseService {
       final hId = hotel['id'] as int;
       await _initFinancialAccountsForHotel(db, hId);
     }
-    await _seedGlobalExpenseCategories(db);
+    await _seedGlobalFinancialCategories(db);
     await _seedGlobalDocumentCategories(db);
     await _provisionDocumentTypesForAllHotels(db);
     await _seedDefaultUsers(db);
@@ -742,6 +742,153 @@ class DatabaseService {
       await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name)');
     } catch (_) {}
     await _seedGlobalExpenseCategories(db);
+  }
+
+  /// يزرع الفئات المالية الافتراضية (مصروفات + إيرادات معاً) في الجدول الموحَّد
+  /// financial_categories — تُستخدَم للتثبيت الجديد فقط ([_createTables])، آمنة
+  /// للتشغيل المتكرر (تتحقق من الاسم+النوع أولاً بدل الاعتماد على فهرس UNIQUE).
+  Future<void> _seedGlobalFinancialCategories(Database db) async {
+    const expenseCats = [
+      {'n': 'مشتريات عامة', 'i': 0xe59c, 'c': 0xFF00BCD4},
+      {'n': 'صيانة', 'i': 0xe1bd, 'c': 0xFFFF9800},
+      {'n': 'رسوم حكومية', 'i': 0xe69a, 'c': 0xFF9C27B0},
+      {'n': 'منظفات', 'i': 0xe0bc, 'c': 0xFF009688},
+      {'n': 'عمولات', 'i': 0xe55b, 'c': 0xFF673AB7},
+      {'n': 'مكتب العمل', 'i': 0xe8b8, 'c': 0xFF455A64},
+      {'n': 'الاتصالات', 'i': 0xe0cd, 'c': 0xFF3F51B5},
+      {'n': 'مخالفات', 'i': 0xe3f1, 'c': 0xFF212121},
+      {'n': 'أثاث الفندق', 'i': 0xe190, 'c': 0xFF607D8B},
+      {'n': 'كهرباء', 'i': 0xe098, 'c': 0xFFFFEB3B},
+      {'n': 'مياه', 'i': 0xe6e4, 'c': 0xFF2196F3},
+      {'n': 'رواتب', 'i': 0xe4f4, 'c': 0xFF4CAF50},
+      {'n': 'إيجار', 'i': 0xe317, 'c': 0xFFF44336},
+      {'n': 'أخرى', 'i': 0xe570, 'c': 0xFF795548},
+    ];
+    const revenueCats = [
+      {'n': 'إيراد الغرف', 'i': 0xe318, 'c': 0xFF2E7D32},
+      {'n': 'إيراد المواقف', 'i': 0xe1b2, 'c': 0xFF00838F},
+      {'n': 'إيراد المغسلة', 'i': 0xe57e, 'c': 0xFF6D4C41},
+      {'n': 'إيراد المطعم', 'i': 0xe56c, 'c': 0xFFD84315},
+      {'n': 'إيراد آخر', 'i': 0xe227, 'c': 0xFF558B2F},
+    ];
+    final now = DateTime.now().toIso8601String();
+    var order = 0;
+    for (final cat in expenseCats) {
+      await db.insert('financial_categories', {
+        'hotel_id': null, 'name': cat['n'], 'type': 'expense', 'is_basic': 1, 'sort_order': order,
+        'icon_code': cat['i'], 'color_value': cat['c'], 'created_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      order++;
+    }
+    order = 0;
+    for (final cat in revenueCats) {
+      await db.insert('financial_categories', {
+        'hotel_id': null, 'name': cat['n'], 'type': 'revenue', 'is_basic': 1, 'sort_order': order,
+        'icon_code': cat['i'], 'color_value': cat['c'], 'created_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      order++;
+    }
+  }
+
+  /// يرقّي جدول expense_categories القديم إلى محرك الفئات المالية الموحَّد
+  /// financial_categories (مصروفات + إيرادات، راجع تعليق _createTables) —
+  /// إعادة تسمية الجدول (SQLite تُحدِّث تلقائياً كل قيود FOREIGN KEY المُعرَّفة
+  /// في جداول أخرى تشير إليه بالاسم القديم: pending_expenses, shared_expenses,
+  /// shared_expense_groups)، ثم إضافة الأعمدة الجديدة، ثم دمج بيانات
+  /// financial_report_items القديم (بلا أي مفتاح خارجي يشير إليه أصلاً — راجع
+  /// تعليق FinancialReportItem — فالدمج مجرد نسخ صفوف، لا إعادة توجيه). آمنة
+  /// للتشغيل المتكرر عند كل فتح لقاعدة البيانات (كل خطوة تتحقق من حالتها أولاً).
+  Future<void> _migrateToFinancialCategories(Database db) async {
+    final tableNames = (await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('expense_categories','financial_categories')"))
+        .map((r) => r['name'] as String)
+        .toSet();
+    if (tableNames.contains('expense_categories') && !tableNames.contains('financial_categories')) {
+      await db.execute('ALTER TABLE expense_categories RENAME TO financial_categories');
+    }
+    if (!tableNames.contains('financial_categories') && !tableNames.contains('expense_categories')) {
+      return;
+    }
+
+    Future<bool> hasCol(String col) async {
+      final info = await db.rawQuery('PRAGMA table_info(financial_categories)');
+      return info.any((c) => c['name'] == col);
+    }
+
+    if (!await hasCol('type')) {
+      await db.execute("ALTER TABLE financial_categories ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'");
+    }
+    if (!await hasCol('parent_id')) {
+      await db.execute('ALTER TABLE financial_categories ADD COLUMN parent_id INTEGER REFERENCES financial_categories(id) ON DELETE SET NULL');
+    }
+    if (!await hasCol('description')) {
+      await db.execute('ALTER TABLE financial_categories ADD COLUMN description TEXT');
+    }
+    if (!await hasCol('updated_at')) {
+      await db.execute('ALTER TABLE financial_categories ADD COLUMN updated_at TEXT');
+    }
+    if (!await hasCol('default_funding_source')) {
+      await db.execute('ALTER TABLE financial_categories ADD COLUMN default_funding_source TEXT');
+    }
+    if (!await hasCol('code') && await hasCol('short_code')) {
+      await db.execute('ALTER TABLE financial_categories RENAME COLUMN short_code TO code');
+    } else if (!await hasCol('code')) {
+      await db.execute('ALTER TABLE financial_categories ADD COLUMN code TEXT');
+    }
+
+    try { await db.execute('DROP INDEX IF EXISTS idx_expense_categories_name'); } catch (_) {}
+    try { await db.execute('CREATE INDEX IF NOT EXISTS idx_financial_categories_type ON financial_categories(type)'); } catch (_) {}
+
+    final hasOldItemsTable = Sqflite.firstIntValue(
+          await db.rawQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='financial_report_items'"),
+        ) ??
+        0;
+    if (hasOldItemsTable > 0) {
+      final oldItems = await db.query('financial_report_items');
+      if (oldItems.isNotEmpty) {
+        final existing = await db.query('financial_categories', columns: ['name', 'type']);
+        final existingKeys = existing.map((r) => '${r['name']}|${r['type']}').toSet();
+        final maxOrderRow = await db.rawQuery('SELECT COALESCE(MAX(sort_order), -1) as m FROM financial_categories');
+        var order = ((maxOrderRow.first['m'] as int?) ?? -1) + 1;
+        final now = DateTime.now().toIso8601String();
+        for (final item in oldItems) {
+          final key = '${item['name']}|${item['type']}';
+          if (existingKeys.contains(key)) continue;
+          final isRevenue = item['type'] == 'revenue';
+          await db.insert('financial_categories', {
+            'name': item['name'],
+            'type': item['type'],
+            'default_funding_source': item['default_funding_source'],
+            'is_visible': item['is_visible'],
+            'sort_order': order,
+            'icon_code': isRevenue ? 0xe227 : 0xe570,
+            'color_value': isRevenue ? 0xFF2E7D32 : 0xFF795548,
+            'created_at': (item['created_at'] as String?) ?? now,
+          });
+          existingKeys.add(key);
+          order++;
+        }
+      }
+    }
+
+    final revenueCount = Sqflite.firstIntValue(await db.rawQuery("SELECT COUNT(*) FROM financial_categories WHERE type = 'revenue'")) ?? 0;
+    if (revenueCount == 0) {
+      const revenueCats = [
+        {'n': 'إيراد الغرف', 'i': 0xe318, 'c': 0xFF2E7D32},
+        {'n': 'إيراد المواقف', 'i': 0xe1b2, 'c': 0xFF00838F},
+        {'n': 'إيراد المغسلة', 'i': 0xe57e, 'c': 0xFF6D4C41},
+        {'n': 'إيراد المطعم', 'i': 0xe56c, 'c': 0xFFD84315},
+        {'n': 'إيراد آخر', 'i': 0xe227, 'c': 0xFF558B2F},
+      ];
+      final now = DateTime.now().toIso8601String();
+      var order = 0;
+      for (final cat in revenueCats) {
+        await db.insert('financial_categories', {
+          'name': cat['n'], 'type': 'revenue', 'is_basic': 1, 'sort_order': order,
+          'icon_code': cat['i'], 'color_value': cat['c'], 'created_at': now,
+        });
+        order++;
+      }
+    }
   }
 
   /// يزرع 5 فئات افتراضية لأنواع المستندات المرجعية — مرة واحدة فقط، آمنة
@@ -1037,12 +1184,66 @@ class DatabaseService {
     return results.isNotEmpty ? results.first : null;
   }
 
-  /// قائمة تصنيفات المصروفات الموحدة على مستوى التطبيق بالكامل (لا فلترة بفندق).
-  Future<List<Map<String, dynamic>>> getExpenseCategories({bool includeHidden = false}) async {
+  // ---------------- محرك الفئات المالية الموحَّد (financial_categories) ----------------
+  // مصدر الحقيقة الوحيد لتصنيفات المصروفات والإيرادات معاً — راجع تعليق
+  // _migrateToFinancialCategories/_createTables لسبب توحيد الجدولين القديمين فيه.
+
+  /// [type] = 'expense' أو 'revenue'. [includeArchived] لشاشة الإدارة (تعرض
+  /// المؤرشَف أيضاً)؛ الشاشات التشغيلية (اختيار فئة عند إنشاء عملية) تستخدم
+  /// الافتراضي false دائماً حتى تختفي الفئات المؤرشَفة تلقائياً من كل مكان.
+  Future<List<Map<String, dynamic>>> getFinancialCategories({required String type, bool includeArchived = false}) async {
     final db = await database;
-    return await db.query('expense_categories', where: includeHidden ? null : 'is_visible = 1', orderBy: 'is_pinned DESC, sort_order ASC');
+    final where = <String>['type = ?'];
+    final args = <Object?>[type];
+    if (!includeArchived) where.add('is_visible = 1');
+    return await db.query('financial_categories', where: where.join(' AND '), whereArgs: args, orderBy: 'is_pinned DESC, sort_order ASC');
   }
-  Future<int> insertExpenseCategory(Map<String, dynamic> data) async { final db = await database; return await db.insert('expense_categories', data); }
+
+  Future<Map<String, dynamic>?> getFinancialCategoryById(int id) async {
+    final db = await database;
+    final rows = await db.query('financial_categories', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getAllFinancialCategories() async {
+    final db = await database;
+    return await db.query('financial_categories', orderBy: 'type ASC, is_pinned DESC, sort_order ASC');
+  }
+
+  Future<int> insertFinancialCategory(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_categories', data); }
+  Future<int> updateFinancialCategory(int id, Map<String, dynamic> data) async { final db = await database; return await db.update('financial_categories', data, where: 'id = ?', whereArgs: [id]); }
+  Future<int> deleteFinancialCategory(int id) async { final db = await database; return await db.delete('financial_categories', where: 'id = ?', whereArgs: [id]); }
+
+  Future<void> reorderFinancialCategories(List<int> orderedIds) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (var i = 0; i < orderedIds.length; i++) {
+        await txn.update('financial_categories', {'sort_order': i}, where: 'id = ?', whereArgs: [orderedIds[i]]);
+      }
+    });
+  }
+
+  /// هل هذه الفئة مستخدَمة في أي مصروف معلَّق/مصروف مشترك/فاتورة (بالاسم —
+  /// invoices.expense_category لا يزال نصاً حراً، خارج نطاق هذه المهمة) حتى
+  /// الآن؟ إن true يُمنَع الحذف النهائي (أرشفة فقط).
+  Future<bool> isFinancialCategoryInUse(int id, String name) async {
+    final db = await database;
+    final pending = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM pending_expenses WHERE category_id = ?', [id])) ?? 0;
+    if (pending > 0) return true;
+    final shared = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM shared_expenses WHERE category_id = ?', [id])) ?? 0;
+    if (shared > 0) return true;
+    final invoices = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM invoices WHERE expense_category = ?', [name])) ?? 0;
+    if (invoices > 0) return true;
+    // بنود التقرير اليومي الجديدة (بعد هذا الترحيل) تُخزِّن category_id داخل
+    // details_json — لا FK حقيقياً، لذا فحص تقريبي بمطابقة النص المُصدَّر من
+    // jsonEncode لنفس الصياغة التي تكتبها الواجهة تماماً (راجع financial_summary_page.dart).
+    final reports = Sqflite.firstIntValue(await db.rawQuery(
+          "SELECT COUNT(*) FROM financial_reports WHERE details_json LIKE ? OR details_json LIKE ?",
+          ['%"category_id":$id,%', '%"category_id":$id}%'],
+        )) ??
+        0;
+    return reports > 0;
+  }
 
   Future<List<Map<String, dynamic>>> getPendingExpenses({required int hotelId, bool? isTransferred}) async {
     final db = await database;
@@ -1050,12 +1251,12 @@ class DatabaseService {
     if (isTransferred != null) { where += ' AND pe.is_transferred = ?'; args.add(isTransferred ? 1 : 0); }
     return await db.rawQuery(
       'SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value, s.official_name as supplier_name '
-      'FROM pending_expenses pe JOIN expense_categories ec ON pe.category_id = ec.id '
+      'FROM pending_expenses pe JOIN financial_categories ec ON pe.category_id = ec.id '
       'LEFT JOIN suppliers s ON s.id = pe.supplier_id WHERE $where ORDER BY pe.date DESC, pe.time DESC',
       args,
     );
   }
-  Future<int> insertPendingExpense(Map<String, dynamic> data) async { final db = await database; await db.execute('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]); return await db.insert('pending_expenses', data); }
+  Future<int> insertPendingExpense(Map<String, dynamic> data) async { final db = await database; await db.execute('UPDATE financial_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]); return await db.insert('pending_expenses', data); }
   Future<void> transferPendingExpenses(List<int> ids) async { final db = await database; await db.transaction((txn) async { for (var id in ids) { await txn.update('pending_expenses', {'is_transferred': 1}, where: 'id = ?', whereArgs: [id]); } }); }
   /// إلغاء ترحيل مصروفات معلقة (عكس [transferPendingExpenses]) — تُستخدم عند
   /// "إلغاء ترحيل المصروف" من داخل التقرير اليومي، لإعادتها إلى المصروفات
@@ -1154,7 +1355,7 @@ class DatabaseService {
     return await db.rawQuery(
       'SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value, h.arabic_name as hotel_name '
       'FROM pending_expenses pe '
-      'JOIN expense_categories ec ON pe.category_id = ec.id '
+      'JOIN financial_categories ec ON pe.category_id = ec.id '
       'JOIN hotels h ON h.id = pe.hotel_id '
       'WHERE pe.shared_expense_id = ? ORDER BY h.arabic_name COLLATE NOCASE ASC',
       [sharedExpenseId],
@@ -1176,7 +1377,7 @@ class DatabaseService {
       for (final row in pendingExpenseRows) {
         final data = {...row, 'shared_expense_id': headerId};
         await txn.insert('pending_expenses', data);
-        await txn.rawUpdate('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
+        await txn.rawUpdate('UPDATE financial_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
       }
       return headerId;
     });
@@ -1204,7 +1405,7 @@ class DatabaseService {
       for (final row in toInsert) {
         final data = {...row, 'shared_expense_id': sharedExpenseId};
         await txn.insert('pending_expenses', data);
-        await txn.rawUpdate('UPDATE expense_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
+        await txn.rawUpdate('UPDATE financial_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]);
       }
     });
   }

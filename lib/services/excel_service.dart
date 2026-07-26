@@ -110,9 +110,8 @@ class ExcelService {
           final expense = details['expense_details'] ?? {};
           final others = expense['other'] as List? ?? [];
           for (var item in others) {
-            if (item['type'] != null && item['type'].toString().isNotEmpty) {
-              dynamicExpenseTypes.add(item['type'].toString());
-            }
+            final label = _expenseGroupLabel(item);
+            if (label != null) dynamicExpenseTypes.add(label);
           }
         } catch (_) {}
       }
@@ -216,7 +215,7 @@ class ExcelService {
       
       for (var item in others) {
         double amt = _toDouble(item['amount']);
-        String type = item['type']?.toString() ?? "أخرى";
+        String type = _expenseGroupLabel(item) ?? "أخرى";
         if (item['method'] == "نقد") {
           otherCashMap[type] = (otherCashMap[type] ?? 0) + amt;
           totalOtherCash += amt;
@@ -526,6 +525,19 @@ class ExcelService {
   static double _toDouble(dynamic val) {
     if (val == null) return 0;
     return double.tryParse(val.toString()) ?? 0;
+  }
+
+  /// تسمية عمود التجميع لبند مصروف "أخرى" — تُستخدَم لتحديد عمود Excel
+  /// الديناميكي الذي ينتمي إليه هذا البند. البنود الحرة (مُضافة عبر اختيار
+  /// فئة مباشرة) اسمها = اسم الفئة نفسه فيُستخدَم كما هو؛ البنود المولَّدة من
+  /// مصروف معلَّق مُرحَّل يُخزَّن اسمها بصيغة "اسم الفئة: البيان" (راجع
+  /// _buildOtherExpensesDetails في financial_summary_page.dart) فيُؤخَذ الجزء
+  /// قبل أول ":" فقط حتى لا يتشظى كل بيان حر لعمود منفصل خاص به.
+  static String? _expenseGroupLabel(dynamic item) {
+    final name = item['name']?.toString();
+    if (name == null || name.isEmpty) return null;
+    final colonIndex = name.indexOf(':');
+    return colonIndex == -1 ? name : name.substring(0, colonIndex).trim();
   }
 
   static String _getDayName(int day) {

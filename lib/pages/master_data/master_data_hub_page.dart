@@ -5,7 +5,7 @@ import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../widgets/common/coming_soon_page.dart';
 import '../document_types/document_types_page.dart';
-import '../expenses/manage_categories_page.dart';
+import '../settings/financial_categories_page.dart';
 
 /// وصف عنصر واحد ضمن قسم "البيانات المرجعية" — [builder] فارغ يعني أن هذا
 /// العنصر لم يُنفَّذ بعد فيُفتح بصفحة "قيد الإعداد" الموحّدة تلقائياً.
@@ -43,10 +43,10 @@ class _MasterDataSection {
 ///   `builder` يفتح تلك الشاشة بدل تركه فارغاً (فارغ = "قيد الإعداد"
 ///   تلقائياً عبر [ComingSoonPage]).
 ///
-/// العنصر الوحيد المفعَّل فعلياً حالياً هو "تصنيفات المصروفات" (يفتح
-/// ManageCategoriesPage الحقيقية على جدول expense_categories الموحّد من
-/// مهمة سابقة)، وبقية العناصر "قيد الإعداد" ريثما تُنفَّذ كل واحدة في
-/// مهمتها المستقلة.
+/// العنصر الوحيد المفعَّل فعلياً حالياً هو "الفئات المالية" (يفتح
+/// FinancialCategoriesPage — محرك موحَّد بتبويبين مصروفات/إيرادات، راجع
+/// تعليق جدول financial_categories في database_service.dart)، وبقية
+/// العناصر "قيد الإعداد" ريثما تُنفَّذ كل واحدة في مهمتها المستقلة.
 class MasterDataHubPage extends StatelessWidget {
   const MasterDataHubPage({super.key});
 
@@ -77,15 +77,10 @@ class MasterDataHubPage extends StatelessWidget {
       title: "التصنيفات والأنواع",
       entries: [
         _MasterDataEntry(
-          title: "تصنيفات المصروفات",
-          subtitle: "تصنيف بنود المصروفات المستخدَمة في كل الفنادق",
+          title: "الفئات المالية",
+          subtitle: "تصنيفات المصروفات والإيرادات — مصدر واحد لكل الفنادق",
           icon: Icons.category_outlined,
-          builder: (_) => const ManageCategoriesPage(),
-        ),
-        const _MasterDataEntry(
-          title: "تصنيفات الإيرادات",
-          subtitle: "تصنيف مصادر الإيرادات المستخدَمة في كل الفنادق",
-          icon: Icons.monetization_on_outlined,
+          builder: (_) => const FinancialCategoriesPage(),
         ),
         _MasterDataEntry(
           title: "أنواع المستندات",

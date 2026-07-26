@@ -5,13 +5,13 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/hotel_visual_identity.dart';
-import '../../models/expense_category.dart';
+import '../../models/financial_category.dart';
 import '../../models/extracted_invoice_data.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../models/invoice_audit_log_entry.dart';
 import '../../models/supplier.dart';
-import '../../repositories/expense_repository.dart';
+import '../../repositories/financial_category_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../repositories/supplier_repository.dart';
@@ -37,7 +37,7 @@ class QuickInvoiceReviewPage extends StatefulWidget {
 class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   final _supplierRepository = SupplierRepository();
   final _invoiceRepository = InvoiceRepository();
-  final _expenseRepository = ExpenseRepository();
+  final _categoryRepository = FinancialCategoryRepository();
   final _hotelRepository = HotelRepository();
 
   Color get _identityColor => HotelVisualIdentity.colorForHotel(widget.hotel);
@@ -46,7 +46,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   bool _isSaving = false;
 
   Supplier? _matchedSupplier;
-  List<ExpenseCategory> _categories = [];
+  List<FinancialCategory> _categories = [];
   String? _selectedCategory;
 
   String? _fundingSource;
@@ -89,7 +89,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   Future<void> _bootstrap() async {
     final allHotels = await _hotelRepository.getAllHotels();
     _otherHotels = allHotels.where((h) => h.id != widget.hotel.id).toList();
-    _categories = await _expenseRepository.getCategories();
+    _categories = await _categoryRepository.getCategories(type: FinancialCategory.typeExpense);
 
     final vatNumber = widget.extractedData.vatNumber;
     if (vatNumber != null) {

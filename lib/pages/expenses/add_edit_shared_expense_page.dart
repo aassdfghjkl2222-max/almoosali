@@ -6,11 +6,11 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/expense_distribution_engine.dart';
-import '../../models/expense_category.dart';
+import '../../models/financial_category.dart';
 import '../../models/hotel.dart';
 import '../../models/pending_expense.dart';
 import '../../models/shared_expense.dart';
-import '../../repositories/expense_repository.dart';
+import '../../repositories/financial_category_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/shared_expense_distribution_repository.dart';
 import '../../widgets/app_button.dart';
@@ -34,16 +34,16 @@ class AddEditSharedExpensePage extends StatefulWidget {
 
 class _AddEditSharedExpensePageState extends State<AddEditSharedExpensePage> {
   final _repository = SharedExpenseDistributionRepository();
-  final _expenseRepository = ExpenseRepository();
+  final _categoryRepository = FinancialCategoryRepository();
   final _hotelRepository = HotelRepository();
 
   final _totalController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _notesController = TextEditingController();
 
-  List<ExpenseCategory> _categories = [];
+  List<FinancialCategory> _categories = [];
   List<Hotel> _operationalHotels = [];
-  ExpenseCategory? _selectedCategory;
+  FinancialCategory? _selectedCategory;
   String? _fundingSource;
   DateTime _date = DateTime.now();
   bool _isLoading = true;
@@ -97,7 +97,7 @@ class _AddEditSharedExpensePageState extends State<AddEditSharedExpensePage> {
   }
 
   Future<void> _loadData() async {
-    final categories = await _expenseRepository.getCategories();
+    final categories = await _categoryRepository.getCategories(type: FinancialCategory.typeExpense);
     final hotels = await _hotelRepository.getOperationalHotels();
     if (!mounted) return;
     setState(() {
@@ -315,7 +315,7 @@ class _AddEditSharedExpensePageState extends State<AddEditSharedExpensePage> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(AppRadius.md), border: Border.all(color: Colors.grey[300]!)),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<ExpenseCategory>(
+        child: DropdownButton<FinancialCategory>(
           value: _selectedCategory,
           isExpanded: true,
           hint: const Text("اختر نوع المصروف"),

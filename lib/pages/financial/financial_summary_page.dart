@@ -13,13 +13,11 @@ import '../../core/app_text_styles.dart';
 import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
 import '../../models/financial_report.dart';
-import '../../models/financial_report_item.dart';
+import '../../models/financial_category.dart';
 import '../../models/pending_expense.dart';
-import '../../models/expense_category.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/financial_repository.dart';
 import '../../repositories/expense_repository.dart';
-import '../../repositories/financial_report_item_repository.dart';
 import '../../repositories/vault_repository.dart';
 import '../../repositories/shared_expense_repository.dart';
 import '../../models/deposited_fund.dart';
@@ -34,22 +32,27 @@ import '../../widgets/common/hotel_identity_title.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/financial/add_report_item_sheet.dart';
 import '../../widgets/financial/funding_source_picker.dart';
-import 'manage_report_items_page.dart';
+import '../settings/financial_categories_page.dart';
 import 'monthly_report_page.dart';
 import 'previous_reports_page.dart';
 import 'report_preview_page.dart';
 import '../expenses/pending_expense_selector.dart';
 import '../vault/unposted_funds_page.dart';
 
-/// بند إيراد حر داخل التقرير — إما مُدخَل يدوياً أو مُضاف من كتالوج البنود
-/// الدائمة (financial_report_items نوع 'revenue') عبر "➕" بجانب التحويل
-/// البنكي. لا يوجد له مفهوم "مصروف معلّق مرحَّل" (خاص بـExpenseItem فقط).
+/// بند إيراد حر داخل التقرير — يُضاف عبر "➕" بجانب التحويل البنكي باختيار فئة
+/// إيراد من محرك الفئات المالية الموحَّد (financial_categories نوع 'revenue').
+/// لا يوجد له مفهوم "مصروف معلّق مرحَّل" (خاص بـExpenseItem فقط).
 class IncomeItem {
   final TextEditingController nameController;
   final TextEditingController amountController;
   String paymentMethod;
 
-  IncomeItem({required this.nameController, required this.amountController, this.paymentMethod = "نقد"});
+  /// معرّف الفئة المالية (financial_categories) — يُخزَّن في details_json
+  /// للتقارير الجديدة (راجع Core Principle: كل عملية تُخزِّن category_id).
+  /// null فقط للبنود القديمة المحمَّلة من تقرير سابق قبل هذا الترحيل (v48).
+  final int? categoryId;
+
+  IncomeItem({required this.nameController, required this.amountController, this.paymentMethod = "نقد", this.categoryId});
 
   void dispose() {
     nameController.dispose();
@@ -74,6 +77,11 @@ class ExpenseItem {
   /// أصبح مُرحَّلاً)، ليبقى ظاهراً في نص المشاركة/PDF ("أجل - اسم المورد").
   final String? supplierName;
 
+  /// معرّف الفئة المالية (financial_categories) لبند حر مُضاف عبر "➕" —
+  /// null لبند مصدره مصروف معلَّق مُرحَّل (categoryId الحقيقي موجود أصلاً على
+  /// PendingExpense.categoryId ولا يُكرَّر هنا) أو لبند قديم قبل هذا الترحيل.
+  final int? categoryId;
+
   ExpenseItem({
     required this.nameController,
     required this.amountController,
@@ -82,6 +90,7 @@ class ExpenseItem {
     required this.amountFocus,
     this.pendingExpenseId,
     this.supplierName,
+    this.categoryId,
   });
 
   void dispose() {
@@ -125,7 +134,6 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
 
   final List<ExpenseItem> _otherExpenses = [];
   final List<IncomeItem> _otherIncomes = [];
-  final _reportItemRepository = FinancialReportItemRepository();
   final _cashFocus = FocusNode();
   final _posFocus = FocusNode();
   final _transferFocus = FocusNode();
@@ -251,6 +259,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               nameFocus: FocusNode(), amountFocus: FocusNode(),
               pendingExpenseId: item['is_pending_transferred'] == true ? item['pending_id'] as int? : null,
               supplierName: item['supplier_name'] as String?,
+              categoryId: item['category_id'] as int?,
             ));
           }
           if (_otherExpenses.isNotEmpty) _showMoreExpenses = true;
@@ -262,6 +271,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
               nameController: TextEditingController(text: item['name']),
               amountController: TextEditingController(text: _fmtAmount(item['amount'])),
               paymentMethod: item['method'] ?? "نقد",
+              categoryId: item['category_id'] as int?,
             ));
           }
 
@@ -385,11 +395,11 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurface, size: 20),
             onSelected: (v) {
-              if (v == 'items') Navigator.push(context, MaterialPageRoute(builder: (_) => ManageReportItemsPage(hotel: widget.hotel)));
+              if (v == 'items') Navigator.push(context, MaterialPageRoute(builder: (_) => FinancialCategoriesPage(hotel: widget.hotel)));
               if (v == 'history') Navigator.push(context, MaterialPageRoute(builder: (_) => PreviousReportsPage(hotel: widget.hotel)));
             },
             itemBuilder: (context) => const [
-              PopupMenuItem(value: 'items', child: Row(children: [Icon(Icons.tune, size: 18), SizedBox(width: 8), Text("إدارة البنود")])),
+              PopupMenuItem(value: 'items', child: Row(children: [Icon(Icons.tune, size: 18), SizedBox(width: 8), Text("الفئات المالية")])),
               PopupMenuItem(value: 'history', child: Row(children: [Icon(Icons.history, size: 18), SizedBox(width: 8), Text("التقارير السابقة")])),
             ],
           ),
@@ -644,27 +654,20 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     ]);
   }
 
-  /// "➕" بجانب التحويل البنكي — يفتح النافذة الموحّدة لإضافة بند إيراد (حر
-  /// أو من الكتالوج)، ويُضيفه فوراً لهذا التقرير فقط. حفظه بشكل دائم اختياري.
+  /// "➕" بجانب التحويل البنكي — يفتح النافذة الموحّدة لاختيار فئة إيراد من
+  /// محرك الفئات المالية (بلا كتابة اسم حر — راجع Core Principle)، ويُضيفها
+  /// فوراً لهذا التقرير.
   Future<void> _addIncomeItem() async {
     if (_isLocked) return;
-    final result = await showAddReportItemSheet(context, itemType: FinancialReportItem.typeRevenue, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
+    final result = await showAddReportItemSheet(context, itemType: FinancialCategory.typeRevenue, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
     if (result == null) return;
     setState(() => _otherIncomes.add(IncomeItem(
           nameController: TextEditingController(text: result.name),
           amountController: TextEditingController(),
           paymentMethod: result.fundingSource,
+          categoryId: result.categoryId,
         )));
     _calculateTotals();
-    if (result.savePermanently && await _reportItemRepository.getItemByName(result.name, FinancialReportItem.typeRevenue) == null) {
-      await _reportItemRepository.addItem(FinancialReportItem(
-        name: result.name,
-        type: FinancialReportItem.typeRevenue,
-        defaultFundingSource: result.fundingSource,
-        sortOrder: 0,
-        createdAt: DateTime.now().toIso8601String(),
-      ));
-    }
   }
 
   Widget _buildTinyActionBtn({required String label, required IconData icon, required VoidCallback onTap, bool isActive = false}) {
@@ -962,6 +965,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       'name': e.nameController.text,
       'amount': ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0,
       'method': e.paymentMethod,
+      if (e.categoryId != null) 'category_id': e.categoryId,
       if (e.pendingExpenseId != null) 'is_pending_transferred': true,
       if (e.pendingExpenseId != null) 'pending_id': e.pendingExpenseId,
       if (e.supplierName != null) 'supplier_name': e.supplierName,
@@ -972,6 +976,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           'name': "${e.categoryName}: ${e.statement}",
           'amount': e.amount,
           'method': e.paymentMethod,
+          'category_id': e.categoryId,
           'is_pending_transferred': true,
           'pending_id': e.id!,
           if (e.supplierName != null) 'supplier_name': e.supplierName,
@@ -1000,6 +1005,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       'name': i.nameController.text,
       'amount': ThousandsSeparatorInputFormatter.parse(i.amountController.text) ?? 0,
       'method': i.paymentMethod,
+      if (i.categoryId != null) 'category_id': i.categoryId,
     }).toList();
   }
 
@@ -1177,11 +1183,11 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     }
   }
 
-  /// "بند مصروف مخصص" — يفتح النافذة الموحّدة لإضافة بند مصروف (حر أو من
-  /// الكتالوج)، بدل إضافة صفّ فارغ مباشرة كما كان سابقاً.
+  /// "بند مصروف مخصص" — يفتح النافذة الموحّدة لاختيار فئة مصروف من محرك
+  /// الفئات المالية (بلا كتابة اسم حر — راجع Core Principle).
   Future<void> _addExpense() async {
     if (_isLocked) return;
-    final result = await showAddReportItemSheet(context, itemType: FinancialReportItem.typeExpense, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
+    final result = await showAddReportItemSheet(context, itemType: FinancialCategory.typeExpense, hotelId: widget.hotel.id!, otherHotels: _otherHotels);
     if (result == null) return;
     setState(() => _otherExpenses.add(ExpenseItem(
           nameController: TextEditingController(text: result.name),
@@ -1189,16 +1195,9 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           paymentMethod: result.fundingSource,
           nameFocus: FocusNode(),
           amountFocus: FocusNode(),
+          categoryId: result.categoryId,
         )));
     _calculateTotals();
-    if (result.savePermanently && await _reportItemRepository.getItemByName(result.name, FinancialReportItem.typeExpense) == null) {
-      await _reportItemRepository.addItem(FinancialReportItem(
-        name: result.name,
-        type: FinancialReportItem.typeExpense,
-        sortOrder: 0,
-        createdAt: DateTime.now().toIso8601String(),
-      ));
-    }
   }
   
   Future<void> _selectDate() async {

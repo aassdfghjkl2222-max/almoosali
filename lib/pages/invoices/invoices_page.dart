@@ -12,7 +12,7 @@ import '../../models/invoice.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../widgets/common/app_drawer.dart';
-import '../expenses/manage_categories_page.dart';
+import '../settings/financial_categories_page.dart';
 import 'add_invoice_page.dart';
 import 'invoice_capture_processing_page.dart';
 import 'invoice_capture_sheet.dart';
@@ -421,10 +421,10 @@ class _InvoicesPageState extends State<InvoicesPage> {
                               child: TextButton.icon(
                                 onPressed: () {
                                   Navigator.pop(sheetContext);
-                                  Navigator.push(context, MaterialPageRoute(builder: (_) => ManageCategoriesPage(hotel: widget.hotel)));
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => FinancialCategoriesPage(hotel: widget.hotel)));
                                 },
                                 icon: const Icon(Icons.settings_outlined, size: 16),
-                                label: const Text("إدارة تصنيفات المصروفات", style: TextStyle(fontSize: 12)),
+                                label: const Text("إدارة الفئات المالية", style: TextStyle(fontSize: 12)),
                               ),
                             ),
                             const Divider(height: AppSizes.lg),

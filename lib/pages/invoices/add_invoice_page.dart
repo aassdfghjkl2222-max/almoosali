@@ -7,13 +7,13 @@ import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
 import '../../core/hotel_visual_identity.dart';
-import '../../models/expense_category.dart';
+import '../../models/financial_category.dart';
 import '../../models/extracted_invoice_data.dart';
 import '../../models/hotel.dart';
 import '../../models/invoice.dart';
 import '../../models/invoice_audit_log_entry.dart';
 import '../../models/supplier.dart';
-import '../../repositories/expense_repository.dart';
+import '../../repositories/financial_category_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../repositories/supplier_repository.dart';
@@ -75,7 +75,7 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   final _invoiceRepository = InvoiceRepository();
   final _supplierRepository = SupplierRepository();
   final _hotelRepository = HotelRepository();
-  final _expenseRepository = ExpenseRepository();
+  final _categoryRepository = FinancialCategoryRepository();
 
   final _invoiceNumberController = TextEditingController();
   final _dateController = TextEditingController();
@@ -108,7 +108,7 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   double? _computedVat;
   double? _computedBeforeTax;
 
-  List<ExpenseCategory> _categories = [];
+  List<FinancialCategory> _categories = [];
   String? _selectedCategory;
   String? _fundingSource;
   String? _paymentMethod;
@@ -161,7 +161,7 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
   Future<void> _bootstrap() async {
     final allHotels = await _hotelRepository.getAllHotels();
     _otherHotels = allHotels.where((h) => h.id != widget.hotel.id).toList();
-    _categories = await _expenseRepository.getCategories();
+    _categories = await _categoryRepository.getCategories(type: FinancialCategory.typeExpense);
 
     if (_isEditMode) {
       final inv = widget.invoice!;
