@@ -480,15 +480,19 @@ class _MonthlyReportPageState extends State<MonthlyReportPage> {
 
           aggSubsistence += sub; aggRefund += ref; aggCashToPos += c2p;
 
-          double otherCash = 0, otherPos = 0;
+          // فقط "نقد" يُخصَم من صافي اليوم — أي طريقة أخرى (شبكة/بنك، الخزنة،
+          // شخصي، آجل (دين)، ...) لا تُخصَم من صافي النقد ولا صافي الشبكة هنا
+          // إطلاقاً بعد الآن (نفس تصنيف oCash/oDebt في
+          // FinancialSummaryPage._calculateTotals — "لا فرق بين البنك
+          // والشبكة"، والخصم الفعلي من رصيد البنك يحدث فقط عند الترحيل عبر
+          // VaultRepository._postNetworkFundedExpenses). كانت "شبكة" و"آجل"
+          // تُصنَّفان خطأً كمصروف شبكة هنا سابقاً.
+          double otherCash = 0;
           final others = expense['other'] as List? ?? [];
           for (var item in others) {
             double amt = double.tryParse(item['amount']?.toString() ?? "0") ?? 0;
-            if (item['method'] == "نقد") {
-              otherCash += amt;
-            } else {
-              otherPos += amt;
-            }
+            final method = item['method']?.toString() ?? "";
+            if (method == "نقد") otherCash += amt;
             aggOtherExpenses += amt;
           }
 
@@ -501,9 +505,9 @@ class _MonthlyReportPageState extends State<MonthlyReportPage> {
 
           aggNetCash += (cash + pCash + (incEff == "نقد" ? inc : 0)) -
               ((subM == "نقد" ? sub : 0) + (refM == "نقد" ? ref : 0) + c2p + otherCash + (shoEff == "نقد" ? sho : 0));
-          
+
           aggNetPos += (pos + pPos + (incEff == "شبكة" ? inc : 0) + c2p) -
-              ((subM == "شبكة" ? sub : 0) + (refM == "شبكة" ? ref : 0) + otherPos + (shoEff == "شبكة" ? sho : 0));
+              (shoEff == "شبكة" ? sho : 0);
         } catch (_) {}
       }
     }

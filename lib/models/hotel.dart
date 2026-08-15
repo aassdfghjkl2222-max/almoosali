@@ -59,6 +59,20 @@ class Hotel {
   final String? dateFormat;
   final String? timeFormat;
 
+  // ---------------- مزامنة سحابية (Supabase) ----------------
+  /// آخر وقت تعديل محلي — يُستخدَم لحسم التعارضات (Last-Write-Wins) عند
+  /// المزامنة. لا علاقة له بأي عرض في الواجهة حالياً.
+  final String? updatedAt;
+
+  /// معرّف الصف المطابق في جدول hotels السحابي (UUID) بعد أول رفع/تنزيل —
+  /// null يعني "لم تتم مزامنته بعد بتاتاً". لا يغيّر هذا [id] المحلي
+  /// (الذي يبقى INTEGER كما هو في كل مكان آخر بالتطبيق).
+  final String? cloudId;
+
+  /// true يعني وجود تعديلات محلية لم تُرفَع للسحابة بعد — تُعيَّن تلقائياً
+  /// عند كل إضافة/تعديل/أرشفة/استعادة عبر HotelRepository.
+  final bool pendingSync;
+
   const Hotel({
     this.id,
     required this.arabicName,
@@ -94,6 +108,9 @@ class Hotel {
     this.timeZone,
     this.dateFormat,
     this.timeFormat,
+    this.updatedAt,
+    this.cloudId,
+    this.pendingSync = true,
   });
 
   bool get isArchived => !active;
@@ -134,6 +151,9 @@ class Hotel {
       'time_zone': timeZone,
       'date_format': dateFormat,
       'time_format': timeFormat,
+      'updated_at': updatedAt,
+      'cloud_id': cloudId,
+      'pending_sync': pendingSync ? 1 : 0,
     };
   }
 
@@ -173,6 +193,9 @@ class Hotel {
       timeZone: map['time_zone'] as String?,
       dateFormat: map['date_format'] as String?,
       timeFormat: map['time_format'] as String?,
+      updatedAt: map['updated_at'] as String?,
+      cloudId: map['cloud_id'] as String?,
+      pendingSync: (map['pending_sync'] as int? ?? 1) == 1,
     );
   }
 
@@ -211,6 +234,9 @@ class Hotel {
     String? timeZone,
     String? dateFormat,
     String? timeFormat,
+    String? updatedAt,
+    String? cloudId,
+    bool? pendingSync,
   }) {
     return Hotel(
       id: id ?? this.id,
@@ -247,6 +273,9 @@ class Hotel {
       timeZone: timeZone ?? this.timeZone,
       dateFormat: dateFormat ?? this.dateFormat,
       timeFormat: timeFormat ?? this.timeFormat,
+      updatedAt: updatedAt ?? this.updatedAt,
+      cloudId: cloudId ?? this.cloudId,
+      pendingSync: pendingSync ?? this.pendingSync,
     );
   }
 }

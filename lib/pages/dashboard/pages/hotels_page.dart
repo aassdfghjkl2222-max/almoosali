@@ -12,8 +12,10 @@ import '../../../core/app_page_route.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/hotel_repository.dart';
 import '../../../repositories/document_repository.dart';
+import '../../../services/permission_service.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/app_drawer.dart';
+import '../../search/global_search_page.dart';
 import '../dashboard_page.dart';
 import 'documents_page.dart';
 
@@ -54,7 +56,14 @@ class _HotelsPageState extends State<HotelsPage> {
         // فندق تحت الصيانة أو "قريباً" يبقى غير مؤرشَف (يظهر في إدارة الفنادق)
         // لكن لا يجب أن يظهر هنا كخيار تشغيلي فعلي للموظفين — راجع
         // HotelRepository.getOperationalHotels وHotel.status.
-        final hotels = await repository.getOperationalHotels();
+        var hotels = await repository.getOperationalHotels();
+        // موظف مقيَّد بفنادق محدَّدة يجب ألا يرى حتى بطاقة فندق غير مصرَّح له
+        // به هنا إطلاقاً — القيد على مستوى الوصول للفندق نفسه، لا فقط على
+        // الأقسام داخل لوحة تحكمه (راجع PermissionService.canAccessHotel).
+        final allowed = PermissionService.instance.allowedHotelIds;
+        if (allowed != null) {
+          hotels = hotels.where((h) => allowed.contains(h.id)).toList();
+        }
         await _loadAllAlerts(hotels);
         return hotels;
       });
@@ -124,36 +133,51 @@ class _HotelsPageState extends State<HotelsPage> {
   /// ترويسة هادئة بلا أي كتلة لون صلبة — اسم الشركة الرسمي (عربي بارز، إنجليزي
   /// أخف وأصغر تحته) بدل أي عنوان وصفي، وزر قائمة جانبية أنيق بدل شريط تطبيق
   /// تقليدي، ينسجم مع خلفية الشاشة المحايدة.
+  /// الرأس: زر القائمة أقصى اليمين، زر البحث الشامل يساره مباشرة، ثم اسم
+  /// الشركة (عربي فوق إنجليزي) يملأ المساحة المتبقية — راجع طلب "Phase 6"
+  /// لسبب هذا الترتيب تحديداً. بطاقات الفنادق أسفله لم تُمَس إطلاقاً.
   Widget _buildHeader() {
+    final isWideScreen = MediaQuery.sizeOf(context).width >= 600;
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, AppSizes.md),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildHeaderIconButton(icon: Icons.menu_rounded, onTap: () => _scaffoldKey.currentState?.openDrawer()),
+          const SizedBox(width: AppSizes.sm),
+          _buildHeaderIconButton(
+            icon: Icons.search_rounded,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GlobalSearchPage())),
+          ),
+          const SizedBox(width: AppSizes.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   AppConfig.companyNameAr,
-                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold, color: _ink, letterSpacing: -0.2, height: 1.25),
+                  style: TextStyle(fontSize: isWideScreen ? 24 : 21, fontWeight: FontWeight.bold, color: _ink, letterSpacing: -0.2, height: 1.25),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
                   AppConfig.companyNameEn,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: Colors.grey.shade500, letterSpacing: 0.3),
+                  style: TextStyle(fontSize: isWideScreen ? 13 : 12, fontWeight: FontWeight.w400, color: Colors.grey.shade500, letterSpacing: 0.3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-          const SizedBox(width: AppSizes.md),
-          _buildMenuButton(),
         ],
       ),
     );
   }
 
-  Widget _buildMenuButton() {
+  /// نمط زر رأس موحَّد (قائمة/بحث) — نفس الشكل البصري تماماً الذي كان لزر
+  /// القائمة وحده سابقاً، مُعمَّم الآن لخدمة الزرَّين معاً بلا أي تكرار.
+  Widget _buildHeaderIconButton({required IconData icon, required VoidCallback onTap}) {
     return Material(
       color: Colors.white,
       shape: RoundedRectangleBorder(
@@ -162,7 +186,7 @@ class _HotelsPageState extends State<HotelsPage> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.md),
-        onTap: () => _scaffoldKey.currentState?.openDrawer(),
+        onTap: onTap,
         child: Container(
           width: 46,
           height: 46,
@@ -171,7 +195,7 @@ class _HotelsPageState extends State<HotelsPage> {
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
           ),
-          child: const Icon(Icons.menu_rounded, color: _ink, size: 22),
+          child: Icon(icon, color: _ink, size: 22),
         ),
       ),
     );

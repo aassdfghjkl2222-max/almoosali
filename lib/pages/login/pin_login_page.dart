@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/app_colors.dart';
+import '../../core/app_preferences.dart';
 import '../../core/app_text_styles.dart';
 import '../../services/security_service.dart';
 import '../dashboard/pages/hotels_page.dart';
+import 'user_login_page.dart';
 
 class PinLoginPage extends StatefulWidget {
   const PinLoginPage({super.key});
@@ -47,14 +49,20 @@ class _PinLoginPageState extends State<PinLoginPage> with SingleTickerProviderSt
   Future<void> _authenticateWithBiometrics() async {
     final success = await _securityService.authenticateWithBiometrics();
     if (success) {
-      _onLoginSuccess();
+      await _onLoginSuccess();
     }
   }
 
-  void _onLoginSuccess() {
+  /// PIN صحيح يثبت أن هذا جهاز موثوق فقط — إن فعَّل المدير نظام تعدد
+  /// المستخدمين (AppPreferences.keyMultiUserLoginEnabled، معطَّل افتراضياً)
+  /// تظهر شاشة دخول مستخدم إضافية بعده؛ غير ذلك السلوك كما هو تماماً قبل
+  /// هذه الميزة (بلا أي أثر على تنصيبات PIN وحده).
+  Future<void> _onLoginSuccess() async {
+    final multiUserEnabled = await AppPreferences.getBool(AppPreferences.keyMultiUserLoginEnabled);
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const HotelsPage()),
+      MaterialPageRoute(builder: (_) => multiUserEnabled ? const UserLoginPage() : const HotelsPage()),
     );
   }
 
@@ -81,7 +89,7 @@ class _PinLoginPageState extends State<PinLoginPage> with SingleTickerProviderSt
   Future<void> _verifyPin() async {
     final isValid = await _securityService.verifyPin(_enteredPin);
     if (isValid) {
-      _onLoginSuccess();
+      await _onLoginSuccess();
     } else {
       HapticFeedback.vibrate();
       _shakeController.forward(from: 0);

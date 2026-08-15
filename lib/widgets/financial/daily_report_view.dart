@@ -59,6 +59,14 @@ class DailyReportView extends StatelessWidget {
           const SizedBox(height: AppSizes.md),
           _buildUnwithdrawnCard(context),
         ],
+        if (template.ownerWithdrawalLines.isNotEmpty) ...[
+          const SizedBox(height: AppSizes.md),
+          _buildOwnerWithdrawalCard(context),
+        ],
+        if (template.transferLines.isNotEmpty) ...[
+          const SizedBox(height: AppSizes.md),
+          _buildTransferCard(context),
+        ],
         if (template.sharedExpenseLines.isNotEmpty) ...[
           const SizedBox(height: AppSizes.md),
           _buildSharedExpenseCard(context),
@@ -139,9 +147,6 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
-  /// بلا أي عنوان للقسم عمداً — مجرد ظهور هذه البطاقة بعد "🏁 الإجمالي
-  /// الصافي" مباشرة يعني أنها مبالغ لم تخرج من خزنة الفندق (راجع تعليق
-  /// UnwithdrawnTemplateLine).
   Widget _buildUnwithdrawnCard(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(AppSizes.md),
@@ -153,23 +158,93 @@ class DailyReportView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text("📤 مصروفات خارج إيراد اليوم", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.warning)),
+          const SizedBox(height: AppSizes.sm),
           for (final l in template.unwithdrawnLines) ...[
             Row(
               children: [
+                Text(l.icon, style: const TextStyle(fontSize: 13)),
+                const SizedBox(width: 4),
                 Expanded(child: Text(l.itemName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 6),
                 Text(_currency.format(l.amount), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.warning)),
               ],
             ),
             const SizedBox(height: 2),
-            Row(
-              children: [
-                Text(l.icon, style: const TextStyle(fontSize: 12)),
-                const SizedBox(width: 4),
-                Expanded(child: Text(l.label, style: const TextStyle(fontSize: 11, color: AppColors.warning), maxLines: 1, overflow: TextOverflow.ellipsis)),
-              ],
+            Text(
+              l.methodLabel != null ? "${l.label} — ${l.methodLabel}" : l.label,
+              style: const TextStyle(fontSize: 11, color: AppColors.warning),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             if (l != template.unwithdrawnLines.last) const Divider(height: AppSizes.md),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// تظهر فقط عند وجود سحوبات مالك فعلية بهذا التاريخ (راجع البند 9 من
+  /// متطلبات إعادة تصميم التقرير) — عرض معلوماتي بحت، لا تدخل ضمن أي مجموع.
+  Widget _buildOwnerWithdrawalCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSizes.md),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: Colors.amber.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("👤 مسحوبات المالك", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.amber)),
+          const SizedBox(height: AppSizes.sm),
+          for (final l in template.ownerWithdrawalLines) ...[
+            Row(
+              children: [
+                const Text("💰", style: TextStyle(fontSize: 13)),
+                const SizedBox(width: 4),
+                Expanded(child: Text(l.methodLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                Text(_currency.format(l.amount), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.amber)),
+              ],
+            ),
+            if (l != template.ownerWithdrawalLines.last) const Divider(height: AppSizes.md),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// تظهر فقط عند وجود تحويلات معلَّقة فعلية بهذا التاريخ — عرض معلوماتي بحت
+  /// (ليست مصروفاً، لا تدخل ضمن أي مجموع بهذا التقرير — راجع
+  /// InterHotelTransferTemplateLine).
+  Widget _buildTransferCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSizes.md),
+      decoration: BoxDecoration(
+        color: Colors.indigo.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: Colors.indigo.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("🔄 تحويل بين المنشآت", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.indigo)),
+          const SizedBox(height: AppSizes.sm),
+          for (final l in template.transferLines) ...[
+            Row(
+              children: [
+                Expanded(child: Text(l.statement, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 6),
+                Text(_currency.format(l.amount), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.indigo)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              l.isOutgoing ? "إلى ${l.counterpartHotelName}" : "من ${l.counterpartHotelName}",
+              style: const TextStyle(fontSize: 11, color: Colors.indigo),
+            ),
+            if (l != template.transferLines.last) const Divider(height: AppSizes.md),
           ],
         ],
       ),

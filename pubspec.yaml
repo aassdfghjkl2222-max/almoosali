@@ -35,6 +35,7 @@ dependencies:
   open_filex: ^4.7.0
   local_auth: ^2.3.0
   flutter_secure_storage: ^9.2.2
+  crypto: ^3.0.6
 
   # رسوم بيانية (قسم التحليل المالي داخل مركز التحليل)
   fl_chart: ^0.69.0
@@ -54,6 +55,11 @@ dependencies:
   # تنبيهات انتهاء المستندات (محلية، بلا خادم)
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
+
+  # تكامل Supabase (Phase 2: الفئات المالية + التقارير المالية اليومية) —
+  # طبقة بيانات جديدة مستقلة (lib/data/supabase/)، غير مُهيَّأة من main.dart
+  # بعد ولا مربوطة بأي شاشة حالية. راجع lib/data/supabase/supabase_config.dart.
+  supabase_flutter: ^2.8.0
 
 dev_dependencies:
   flutter_test:

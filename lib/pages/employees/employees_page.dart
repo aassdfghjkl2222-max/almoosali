@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/app_colors.dart';
+import '../../core/app_permissions.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -8,10 +9,12 @@ import '../../models/employee.dart';
 import '../../models/hotel.dart';
 import '../../repositories/employee_repository.dart';
 import '../../services/payroll_service.dart';
+import '../../services/permission_service.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_loading.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../../widgets/common/app_drawer.dart';
+import '../../widgets/common/permission_gate.dart';
 import 'add_employee_page.dart';
 import 'employee_archive_page.dart';
 import 'employee_details_page.dart';
@@ -48,7 +51,10 @@ class _EmployeesPageState extends State<EmployeesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PermissionGate(
+      permission: AppPermissions.employeesView,
+      hotelId: widget.hotel.id,
+      child: Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: HotelIdentityTitle(title: "الموظفون", hotel: widget.hotel),
@@ -125,17 +131,20 @@ class _EmployeesPageState extends State<EmployeesPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => AddEmployeePage(hotel: widget.hotel)),
-          );
-          if (result == true) _load();
-        },
-        backgroundColor: _identityColor,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.person_add),
+      floatingActionButton: !PermissionService.instance.hasPermission(AppPermissions.employeesCreate, hotelId: widget.hotel.id)
+          ? null
+          : FloatingActionButton(
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => AddEmployeePage(hotel: widget.hotel)),
+                );
+                if (result == true) _load();
+              },
+              backgroundColor: _identityColor,
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.person_add),
+            ),
       ),
     );
   }

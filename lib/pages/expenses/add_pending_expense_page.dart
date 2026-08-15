@@ -18,6 +18,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/financial/financial_category_picker.dart';
 import '../../widgets/suppliers/supplier_picker_sheet.dart';
 import '../common/transaction_review_page.dart';
 
@@ -25,13 +26,15 @@ class AddPendingExpensePage extends StatefulWidget {
   final Hotel hotel;
   final PendingExpense? editExpense;
 
-  /// true فقط عند تعديل مصروف معلّق قديم بمصدر تمويل "مسحوبات المالك" (مسار
-  /// قديم مُستبدَل — راجع [PendingExpense.paymentMethodOwnerDrawing]) — يُقفل
-  /// مصدر التمويل ويُبسِّط الواجهة. لا يوجد أي زر إضافة جديد يفتح بهذا الوضع
-  /// بعد الآن؛ يبقى فقط لعرض/تعديل مصروفات قديمة مُنشأة به قبل الاستبدال.
+  /// "مسحوبات المالك" — يُقفل مصدر التمويل على
+  /// [PendingExpense.paymentMethodOwnerDrawing] ويُبسِّط الواجهة (بلا بطاقة
+  /// مصدر تمويل كاملة). هذا هو مسار الإضافة الأساسي الآن (راجع دورة الحياة
+  /// المحاسبية: معلّق ← تقرير يومي ← ترحيل — لم تعد مسحوبات المالك تُنفَّذ
+  /// فوراً عبر AddOwnerWithdrawalPage، الذي بقي فقط لعرض/تعديل/حذف سحوبات
+  /// قديمة نُفِّذت فوراً بالمسار السابق قبل هذا التغيير).
   final bool lockToOwnerDrawing;
 
-  /// true عند الفتح من قسم "عهدة الفندق" المخصَّص — يُقفل مصدر التمويل على
+  /// true عند الفتح من قسم "عهدة على الفندق" المخصَّص — يُقفل مصدر التمويل على
   /// [PendingExpense.paymentMethodHotelAdvance] ('شخصي': المالك يموِّل مصروف
   /// الفندق من ماله الخاص) ويُبسِّط الواجهة (بلا بطاقة مصدر تمويل كاملة ولا
   /// أي اختيار نقد/خزنة/شبكة — المالك هو مصدر التمويل الوحيد دائماً).
@@ -54,7 +57,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   final _statementController = TextEditingController();
   final _dueDateController = TextEditingController();
 
-  List<FinancialCategory> _categories = [];
   List<Hotel> _allHotels = [];
   FinancialCategory? _selectedCategory;
   String? _paymentMethod;
@@ -102,7 +104,6 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
 
     if (mounted) {
       setState(() {
-        _categories = categories;
         _allHotels = hotels.where((h) => h.id != widget.hotel.id).toList();
         _existingAttachments = attachments;
         if (edit != null) {
@@ -246,19 +247,10 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
               await _repository.updatePendingExpense(expense);
             }
 
-            if (_isDeferred) {
-              await _supplierRepository.ensureDebtForPendingExpense(
-                hotelId: widget.hotel.id!,
-                supplierId: _selectedSupplier!.id!,
-                pendingExpenseId: expenseId,
-                amount: expense.amount,
-                statement: expense.statement,
-                dueDate: expense.dueDate,
-              );
-            } else if (widget.editExpense != null) {
-              // تغيير مصدر التمويل بعيداً عن "آجل" أثناء التعديل — يزيل أي دين قديم كان مرتبطاً بهذا المصروف.
-              await _supplierRepository.deleteDebtForPendingExpense(expenseId);
-            }
+            // لا يُنشأ أي دين على المورد هنا — المصروف المعلَّق "آجل" مجرد سجل
+            // مؤقت غير معتمَد، بلا أي أثر على المركز المالي حتى يُرحَّل تقرير
+            // يومه فعلياً (راجع VaultRepository._postSpecialPendingExpenses
+            // وتعليقها — الدين يُنشأ هناك فقط، عند الترحيل).
 
             for (final a in _newAttachments) {
               await _repository.addAttachment(PendingExpenseAttachment(
@@ -288,7 +280,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
       appBar: AppBar(
         title: HotelIdentityTitle(
           title: widget.lockToHotelAdvance
-              ? (widget.editExpense == null ? "إضافة عهدة الفندق" : "تعديل عهدة الفندق")
+              ? (widget.editExpense == null ? "إضافة عهدة على الفندق" : "تعديل عهدة على الفندق")
               : widget.lockToOwnerDrawing
                   ? (widget.editExpense == null ? "إضافة مسحوب مالك" : "تعديل مسحوب مالك")
                   : (widget.editExpense == null ? "إضافة مصروف معلق" : "تعديل مصروف"),
@@ -371,30 +363,38 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
     );
   }
 
+  Future<void> _pickCategory() async {
+    if (_isLocked) return;
+    final picked = await showFinancialCategoryPicker(context, type: FinancialCategory.typeExpense, current: _selectedCategory);
+    if (picked != null && mounted) setState(() => _selectedCategory = picked);
+  }
+
   Widget _buildCategoryDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<FinancialCategory>(
-          value: _selectedCategory,
-          isExpanded: true,
-          hint: const Text("اختر نوع المصروف"),
-          items: _categories.map((c) => DropdownMenuItem(
-            value: c,
-            child: Row(
-              children: [
-                Icon(IconData(c.iconCode, fontFamily: 'MaterialIcons'), color: Color(c.colorValue), size: 20),
-                const SizedBox(width: 12),
-                Text(c.name),
-              ],
+    final selected = _selectedCategory;
+    return InkWell(
+      onTap: _isLocked ? null : _pickCategory,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Row(
+          children: [
+            if (selected != null) ...[
+              Icon(IconData(selected.iconCode, fontFamily: 'MaterialIcons'), color: Color(selected.colorValue), size: 20),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Text(
+                selected?.name ?? "اختر نوع المصروف",
+                style: TextStyle(color: selected == null ? Colors.grey[600] : null),
+              ),
             ),
-          )).toList(),
-          onChanged: _isLocked ? null : (v) => setState(() => _selectedCategory = v),
+            Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+          ],
         ),
       ),
     );
@@ -450,7 +450,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   }
 
   /// بطاقة مبسَّطة تحل محل [_buildFundingRow] الكاملة عند [AddPendingExpensePage.lockToOwnerDrawing]
-  /// — مسار قديم مُستبدَل (راجع تعليق الحقل)، تبقى فقط لتعديل مصروفات قديمة.
+  /// — مصدر التمويل هو "مسحوبات المالك" دائماً، فلا معنى لعرض أي اختيار آخر.
   Widget _buildOwnerDrawingFundingCard() {
     return AppCard(
       child: Row(
@@ -459,7 +459,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
           const SizedBox(width: AppSizes.sm),
           const Expanded(
             child: Text(
-              "مصدر التمويل: مسحوبات المالك (مسار قديم) — يُخصَم من خزنة الفندق عند الترحيل وتُنشأ ذمة على المالك تلقائياً.",
+              "مصدر التمويل: مسحوبات المالك — سجل مؤقت بلا أي أثر على المركز المالي الآن؛ يُخصَم من خزنة الفندق وتُنشأ ذمة على المالك تلقائياً فقط عند ترحيل تقرير هذا اليوم.",
               style: AppTextStyles.caption,
             ),
           ),
@@ -469,7 +469,7 @@ class _AddPendingExpensePageState extends State<AddPendingExpensePage> {
   }
 
   /// بطاقة مبسَّطة تحل محل [_buildFundingRow] الكاملة عند [AddPendingExpensePage.lockToHotelAdvance]
-  /// — "عهدة الفندق": المالك هو مصدر التمويل الوحيد دائماً، فلا معنى لعرض
+  /// — "عهدة على الفندق": المالك هو مصدر التمويل الوحيد دائماً، فلا معنى لعرض
   /// أي اختيار نقد/خزنة/شبكة (راجع البند 4 من متطلبات إعادة التصميم).
   Widget _buildHotelAdvanceFundingCard() {
     return AppCard(

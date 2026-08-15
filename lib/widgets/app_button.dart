@@ -61,6 +61,13 @@ class _AppButtonState extends State<AppButton> {
         onTapDown: (_) => _setPressed(true),
         onTapUp: (_) => _setPressed(false),
         onTapCancel: () => _setPressed(false),
+        // مطابقة صريحة لـ onPressed هنا أيضاً — بدون هذا، المُتحسِّس الخارجي
+        // (لأجل حركة الانكماش فقط) والمُتحسِّس الداخلي لـ ElevatedButton
+        // يتنافسان على نفس اللمسة، وحسم "ساحة الإيماءات" (gesture arena) قد
+        // يختلف بين لمسة إصبع حقيقية ولمسة مُحاكاة (مثل أدوات الاختبار) —
+        // وجدنا هذا فعلياً: لمسات ADB المُصطنَعة كانت تُبتلَع بصمت بلا استدعاء
+        // onPressed إطلاقاً رغم وصولها الفعلي للتطبيق.
+        onTap: widget.isLoading ? null : widget.onPressed,
         child: AnimatedScale(
           scale: _pressed ? 0.97 : 1.0,
           duration: const Duration(milliseconds: 120),

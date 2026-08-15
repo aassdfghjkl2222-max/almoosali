@@ -21,6 +21,7 @@ import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/financial/financial_category_picker.dart';
 
 /// وصف مصدر تمويل واحد ضمن الخمسة الأساسية. hasPaymentMethod=false تعني
 /// عدم وجود طريقة دفع (حالة "شراء آجل" فقط — المبلغ لم يُدفع بعد).
@@ -110,6 +111,7 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
 
   List<FinancialCategory> _categories = [];
   String? _selectedCategory;
+  int? _selectedCategoryId;
   String? _fundingSource;
   String? _paymentMethod;
   int? _relatedHotelId;
@@ -172,6 +174,15 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
       _computedVat = inv.vat;
       _computedBeforeTax = inv.amountBeforeTax;
       _selectedCategory = inv.expenseCategory;
+      _selectedCategoryId = inv.categoryId;
+      if (_selectedCategoryId == null && _selectedCategory != null) {
+        // فواتير قديمة (قبل v49) لا تحمل category_id — مطابقة تقريبية بالاسم
+        // فقط لتحديد الشريحة صحيحة في الواجهة عند التعديل، بلا أي تعديل فعلي
+        // على السجل التاريخي إلا إن حفظ المستخدم صراحةً بعد ذلك.
+        for (final c in _categories) {
+          if (c.name == _selectedCategory) { _selectedCategoryId = c.id; break; }
+        }
+      }
       // تُقبَل قيمة amountSource القديمة فقط إن كانت مطابقة لأحد مصادر
       // التمويل الخمسة الحالية — الفواتير القديمة (قبل هذه المهمة) تبقى
       // بلا مصدر مُحدَّد مسبقاً، فيُطلب من المستخدم اختياره عند التعديل.
@@ -224,7 +235,10 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
     }
 
     final defaultCategory = _categories.where((c) => c.isDefault).toList();
-    if (defaultCategory.isNotEmpty) _selectedCategory = defaultCategory.first.name;
+    if (defaultCategory.isNotEmpty) {
+      _selectedCategory = defaultCategory.first.name;
+      _selectedCategoryId = defaultCategory.first.id;
+    }
     if (mounted) setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_supplierConfirmed) _companySearchFocus.requestFocus();
@@ -450,6 +464,7 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
         totalAmount: total,
         facilityName: widget.hotel.arabicName,
         expenseCategory: _selectedCategory,
+        categoryId: _selectedCategoryId,
         amountSource: _fundingSource ?? 'خارج النظام',
         paymentMethod: _paymentMethod,
         relatedHotelId: _relatedHotelId,
@@ -780,30 +795,41 @@ class _AddInvoicePageState extends State<AddInvoicePage> {
 
   // ---------------- تصنيف المصروف ----------------
 
+  Future<void> _pickCategory() async {
+    final matches = _categories.where((c) => c.id == _selectedCategoryId);
+    final current = matches.isEmpty ? null : matches.first;
+    final picked = await showFinancialCategoryPicker(context, type: FinancialCategory.typeExpense, current: current);
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selectedCategory = picked.name;
+      _selectedCategoryId = picked.id;
+    });
+    _maybeFocusAmount();
+  }
+
   Widget _buildCategorySection() {
+    final selectedName = _selectedCategory;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text("تصنيف المصروف", style: AppTextStyles.bodyBold),
           const SizedBox(height: AppSizes.sm),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _categories.map((category) {
-              final isSelected = _selectedCategory == category.name;
-              return ChoiceChip(
-                label: Text(category.name, style: const TextStyle(fontSize: 12)),
-                avatar: Icon(IconData(category.iconCode, fontFamily: 'MaterialIcons'), size: 16, color: isSelected ? Colors.white : _identityColor),
-                selected: isSelected,
-                selectedColor: _identityColor,
-                labelStyle: TextStyle(color: isSelected ? Colors.white : null, fontWeight: isSelected ? FontWeight.bold : null),
-                onSelected: (_) {
-                  setState(() => _selectedCategory = category.name);
-                  _maybeFocusAmount();
-                },
-              );
-            }).toList(),
+          InkWell(
+            onTap: _pickCategory,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(AppRadius.md)),
+              child: Row(
+                children: [
+                  Icon(Icons.category_outlined, color: selectedName == null ? Colors.grey[600] : _identityColor),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(selectedName ?? "اختر تصنيف المصروف", style: TextStyle(color: selectedName == null ? Colors.grey[600] : null, fontWeight: selectedName == null ? null : FontWeight.bold))),
+                  Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+                ],
+              ),
+            ),
           ),
         ],
       ),

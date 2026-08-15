@@ -7,6 +7,12 @@ class DepositedFund {
   final double networkAmount;
   final String cashStatus;
   final String networkStatus;
+
+  /// حالة "ترحيل التقرير" — كل شيء ما عدا صافي النقد (شبكة/بنك + المصروفات
+  /// الخاصة: مسحوبات المالك القديمة/عهدة على الفندق/ممول من فندق آخر/الخزنة)،
+  /// مستقلة تماماً عن [cashStatus] (راجع VaultRepository.postReportComponents
+  /// وVaultRepository.transferCashToVault). 'pending' أو 'posted'.
+  final String reportStatus;
   final bool isArchived;
   final String? postedAt;
   final String? postedBy;
@@ -20,6 +26,7 @@ class DepositedFund {
     required this.networkAmount,
     this.cashStatus = 'pending',
     this.networkStatus = 'pending',
+    this.reportStatus = 'pending',
     this.isArchived = false,
     this.postedAt,
     this.postedBy,
@@ -35,6 +42,7 @@ class DepositedFund {
       'network_amount': networkAmount,
       'cash_status': cashStatus,
       'network_status': networkStatus,
+      'report_status': reportStatus,
       'is_archived': isArchived ? 1 : 0,
       'posted_at': postedAt,
       'posted_by': postedBy,
@@ -51,6 +59,7 @@ class DepositedFund {
       networkAmount: (map['network_amount'] as num?)?.toDouble() ?? 0.0,
       cashStatus: map['cash_status'] ?? 'pending',
       networkStatus: map['network_status'] ?? 'pending',
+      reportStatus: map['report_status'] ?? 'pending',
       isArchived: (map['is_archived'] ?? 0) == 1,
       postedAt: map['posted_at'],
       postedBy: map['posted_by'],
@@ -66,6 +75,7 @@ class DepositedFund {
     double? networkAmount,
     String? cashStatus,
     String? networkStatus,
+    String? reportStatus,
     bool? isArchived,
     String? postedAt,
     String? postedBy,
@@ -79,6 +89,7 @@ class DepositedFund {
       networkAmount: networkAmount ?? this.networkAmount,
       cashStatus: cashStatus ?? this.cashStatus,
       networkStatus: networkStatus ?? this.networkStatus,
+      reportStatus: reportStatus ?? this.reportStatus,
       isArchived: isArchived ?? this.isArchived,
       postedAt: postedAt ?? this.postedAt,
       postedBy: postedBy ?? this.postedBy,

@@ -7,7 +7,6 @@ import '../../../core/app_radius.dart';
 import '../../../models/hotel.dart';
 import '../../../models/deposited_fund.dart';
 import '../../../repositories/vault_repository.dart';
-import '../../../services/financial_engine.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
 import '../common/transaction_review_page.dart';
@@ -22,7 +21,6 @@ class UnpostedFundsPage extends StatefulWidget {
 
 class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
   final _vaultRepository = VaultRepository();
-  final _engine = FinancialEngine();
   List<DepositedFund> _funds = [];
   bool _isLoading = true;
 
@@ -43,39 +41,35 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
 
   String _format(double val) => NumberFormat("#,##0.##").format(val);
 
+  /// إجراءا الترحيل الوحيدان الظاهران للمستخدم الآن (راجع البند 4 من متطلبات
+  /// إعادة تصميم سير العمل المالي): "ترحيل التقرير" = كل شيء في التقرير ما
+  /// عدا صافي النقد (VaultRepository.postReportComponents)، و"ترحيل صافي
+  /// النقد" = صافي النقد فقط (VaultRepository.transferCashToVault). مستقلان
+  /// تماماً — لا أحدهما ينتظر الآخر ولا يكرِّر عمل الآخر.
   Future<void> _confirmAndPost({
     required DepositedFund fund,
-    required String type, // 'cash', 'bank', 'all'
-    required double amount,
+    required String type, // 'report' or 'cash'
   }) async {
     final List<ReviewItem> reviewItems = [
       ReviewItem(label: "تاريخ التقرير", value: fund.date),
+      if (type == 'report')
+        ReviewItem(label: "ترحيل التقرير (الشبكة + المصروفات الخاصة)", value: "${_format(fund.networkAmount)} ريال", color: Colors.purple)
+      else
+        ReviewItem(label: "ترحيل صافي النقد", value: "${_format(fund.cashAmount)} ريال", color: Colors.green),
     ];
-
-    if (type == 'cash' || type == 'all') {
-      if (fund.cashStatus == 'pending') {
-        reviewItems.add(ReviewItem(label: "ترحيل للنقد", value: "${_format(fund.cashAmount)} ريال", color: Colors.green));
-      }
-    }
-    if (type == 'bank' || type == 'all') {
-      if (fund.networkStatus == 'pending') {
-        reviewItems.add(ReviewItem(label: "ترحيل للبنك", value: "${_format(fund.networkAmount)} ريال", color: Colors.purple));
-      }
-    }
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionReviewPage(
-          title: "تأكيد عملية الترحيل",
+          title: type == 'report' ? "تأكيد ترحيل التقرير" : "تأكيد ترحيل صافي النقد",
           items: reviewItems,
           confirmLabel: "ترحيل الآن",
           onConfirm: () async {
-            if (type == 'cash' || type == 'all') {
+            if (type == 'report') {
+              await _vaultRepository.postReportComponents(fund);
+            } else {
               await _vaultRepository.transferCashToVault(fund);
-            }
-            if (type == 'bank' || type == 'all') {
-              await _vaultRepository.transferNetworkToBank(fund);
             }
             if (mounted) {
               Navigator.pop(context); // Close Review
@@ -112,8 +106,8 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
   }
 
   Widget _buildFundCard(DepositedFund fund, Color identityColor) {
+    bool reportPending = fund.reportStatus == 'pending';
     bool cashPending = fund.cashStatus == 'pending';
-    bool bankPending = fund.networkStatus == 'pending';
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: AppSizes.md),
@@ -138,68 +132,78 @@ class _UnpostedFundsPageState extends State<UnpostedFundsPage> {
             ],
           ),
           const Divider(height: 32),
+          // حالتان مستقلتان تماماً (راجع البند 4 من متطلبات إعادة تصميم سير
+          // العمل المالي) — لا مؤشر ثالث مجمَّع بينهما حتى لا يوحي بترابط.
           Row(
             children: [
-              _buildAmountInfo("💵 صافي النقد", fund.cashAmount, cashPending ? Colors.orange : Colors.green, !cashPending),
-              _buildAmountInfo("🏦 صافي البنك", fund.networkAmount, bankPending ? Colors.orange : Colors.green, !bankPending),
+              _buildStatusInfo("📋 التقرير", reportPending, "بانتظار الترحيل", "تم ترحيل التقرير"),
+              _buildStatusInfo("💵 صافي النقد", cashPending, "بانتظار الترحيل", "تم ترحيل صافي النقد"),
+            ],
+          ),
+          const SizedBox(height: AppSizes.sm),
+          Row(
+            children: [
+              _buildAmountInfo("الشبكة + المصروفات الخاصة", fund.networkAmount, reportPending ? Colors.orange : Colors.green),
+              _buildAmountInfo("صافي النقد", fund.cashAmount, cashPending ? Colors.orange : Colors.green),
             ],
           ),
           const SizedBox(height: AppSizes.lg),
-          _buildActionButtons(fund, cashPending, bankPending),
+          _buildActionButtons(fund, reportPending, cashPending),
         ],
       ),
     );
   }
 
-  Widget _buildAmountInfo(String label, double amount, Color color, bool isPosted) {
+  Widget _buildStatusInfo(String label, bool isPending, String pendingLabel, String postedLabel) {
+    final color = isPending ? Colors.orange : Colors.green;
+    return Expanded(
+      child: Column(
+        children: [
+          Text(label, style: AppTextStyles.caption),
+          const SizedBox(height: 2),
+          Text(
+            isPending ? "⌛ $pendingLabel" : "✔ $postedLabel",
+            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmountInfo(String label, double amount, Color color) {
     return Expanded(
       child: Column(
         children: [
           Text(label, style: AppTextStyles.caption),
           Text(_format(amount), style: AppTextStyles.bodyBold.copyWith(color: color, fontSize: 18)),
-          if (isPosted)
-            const Text("✔ تم الترحيل", style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold))
-          else
-            const Text("⌛ معلق", style: TextStyle(color: Colors.orange, fontSize: 10)),
         ],
       ),
     );
   }
 
-  Widget _buildActionButtons(DepositedFund fund, bool cashPending, bool bankPending) {
-    // "ترحيل إلى الخزنة" هو الإجراء الأساسي الظاهر بارزاً (يُحدّث الخزنة
-    // والمركز المالي والحركة المالية فوراً ويقفل التقرير) — خياري "النقد
-    // فقط"/"البنك فقط" أدناه يبقيان متاحين للمحاسب الذي يحتاج ترحيل جزئياً،
-    // بلا حذف أي وظيفة قائمة.
-    return Column(
+  /// إجراءا الترحيل الوحيدان الظاهران — بلا أي خيار ترحيل جزئي/بديل آخر
+  /// (راجع البند 4 من متطلبات إعادة تصميم سير العمل المالي: "لا أزرار ترحيل
+  /// منفصلة زائدة عن الحاجة").
+  Widget _buildActionButtons(DepositedFund fund, bool reportPending, bool cashPending) {
+    return Row(
       children: [
-        _postBtn(
-          "🏦 ترحيل إلى الخزنة",
-          Icons.done_all,
-          Colors.green,
-          (cashPending || bankPending) ? () => _confirmAndPost(fund: fund, type: 'all', amount: 0) : null,
+        Expanded(
+          child: _postBtn(
+            reportPending ? "📋 ترحيل التقرير" : "✔ تم ترحيل التقرير",
+            Icons.assignment_turned_in_outlined,
+            Colors.purple,
+            reportPending ? () => _confirmAndPost(fund: fund, type: 'report') : null,
+          ),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _postBtn(
-                cashPending ? "ترحيل النقد فقط" : "✔ تم ترحيل النقد",
-                Icons.money,
-                Colors.blue,
-                cashPending ? () => _confirmAndPost(fund: fund, type: 'cash', amount: fund.cashAmount) : null
-              )
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _postBtn(
-                bankPending ? "ترحيل البنك فقط" : "✔ تم ترحيل البنك",
-                Icons.account_balance,
-                Colors.purple,
-                bankPending ? () => _confirmAndPost(fund: fund, type: 'bank', amount: fund.networkAmount) : null
-              )
-            ),
-          ],
+        const SizedBox(width: 8),
+        Expanded(
+          child: _postBtn(
+            cashPending ? "💵 ترحيل صافي النقد" : "✔ تم ترحيل صافي النقد",
+            Icons.money,
+            Colors.green,
+            cashPending ? () => _confirmAndPost(fund: fund, type: 'cash') : null,
+          ),
         ),
       ],
     );

@@ -88,7 +88,15 @@ class TransactionReviewPage extends StatelessWidget {
                   child: AppButton(
                     text: "✅ $confirmLabel",
                     onPressed: () async {
-                      await onConfirm();
+                      try {
+                        await onConfirm();
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red),
+                          );
+                        }
+                      }
                     },
                     backgroundColor: Colors.green,
                   ),

@@ -6,6 +6,7 @@ import 'core/app_theme_controller.dart';
 import 'core/hotel_session.dart';
 import 'core/hotel_visual_identity.dart';
 import 'core/training_mode_controller.dart';
+import 'data/supabase/supabase_config.dart';
 import 'models/hotel.dart';
 import 'pages/login/security_setup_page.dart';
 import 'pages/login/pin_login_page.dart';
@@ -19,6 +20,17 @@ void main() async {
   final hasPin = await SecurityService.instance.hasPin();
   await AppThemeController.bootstrap();
   await TrainingModeController.bootstrap();
+
+  // مزامنة سحابية (Supabase) — تهيئة صامتة، بلا أي تأثير على الإقلاع الحالي
+  // إن لم تُمرَّر بيانات الاتصال عبر --dart-define (راجع SupabaseConfig).
+  // لا تُوقِف الإقلاع أبداً إن فشلت (مثلاً بلا اتصال إنترنت عند أول تشغيل).
+  if (SupabaseConfig.isConfigured) {
+    try {
+      await SupabaseConfig.initialize();
+    } catch (_) {
+      // يُعاد المحاولة عند أول استخدام فعلي للمزامنة من BackupPage.
+    }
+  }
 
   runApp(ManazelApp(hasPin: hasPin));
 

@@ -22,6 +22,8 @@ class FinancialCategory {
   final String? defaultFundingSource;
   final String? description;
   final int sortOrder;
+  final String? createdBy;
+  final String? lastUsedAt;
   final String createdAt;
   final String? updatedAt;
 
@@ -41,6 +43,8 @@ class FinancialCategory {
     this.defaultFundingSource,
     this.description,
     this.sortOrder = 0,
+    this.createdBy,
+    this.lastUsedAt,
     required this.createdAt,
     this.updatedAt,
   });
@@ -66,6 +70,8 @@ class FinancialCategory {
       'default_funding_source': defaultFundingSource,
       'description': description,
       'sort_order': sortOrder,
+      'created_by': createdBy,
+      'last_used_at': lastUsedAt,
       'created_at': createdAt,
       'updated_at': updatedAt,
     };
@@ -88,6 +94,8 @@ class FinancialCategory {
       defaultFundingSource: map['default_funding_source'] as String?,
       description: map['description'] as String?,
       sortOrder: map['sort_order'] as int? ?? 0,
+      createdBy: map['created_by'] as String?,
+      lastUsedAt: map['last_used_at'] as String?,
       createdAt: map['created_at'] as String,
       updatedAt: map['updated_at'] as String?,
     );
@@ -110,6 +118,7 @@ class FinancialCategory {
     String? defaultFundingSource,
     String? description,
     int? sortOrder,
+    String? createdBy,
     String? createdAt,
     String? updatedAt,
   }) {
@@ -129,6 +138,7 @@ class FinancialCategory {
       defaultFundingSource: defaultFundingSource ?? this.defaultFundingSource,
       description: description ?? this.description,
       sortOrder: sortOrder ?? this.sortOrder,
+      createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

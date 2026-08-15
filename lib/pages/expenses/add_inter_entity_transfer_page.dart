@@ -5,6 +5,7 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../models/hotel.dart';
+import '../../models/inter_entity_transfer.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/inter_entity_transfer_repository.dart';
 import '../../widgets/app_button.dart';
@@ -14,12 +15,22 @@ import '../../widgets/common/hotel_identity_title.dart';
 import '../common/transaction_review_page.dart';
 
 /// "التحويل بين المنشآت" — تحويل مباشر لمبلغ بين هذا الفندق وفندق آخر، بلا
-/// مصروف مرتبط. يُنشئ ذمة فورية بين الطرفين (راجع InterEntityTransferRepository)
-/// — بلا أي أثر على نقد/شبكة أي من الطرفين، بنفس آلية entity_/receivable_entity
-/// المستخدمة أصلاً لحالة "مصروف مموَّل من فندق آخر".
+/// مصروف مرتبط. سجل معلَّق بحت عند الحفظ — بلا أي قيد محاسبي فوري، بلا أي
+/// أثر على المركز المالي. يظهر في التقرير اليومي، ويُقفَل من التعديل عند
+/// اعتماد ذلك التقرير، والقيد المحاسبي الفعلي (ذمة بين الطرفين، أو خصم حقيقي
+/// من أصول المُرسِل + ذمة إن دُفع من مصدر تمويل حقيقي) لا يُنفَّذ إلا عند
+/// الترحيل الفعلي (راجع InterEntityTransferRepository ودورة الحياة
+/// المحاسبية: معلّق ← تقرير يومي ← ترحيل).
+///
+/// [editTransfer] يفتح الشاشة بوضع التعديل — مسموح فقط من الفندق المُرسِل
+/// الأصلي، وفقط إن لم يُعتمَد تقرير يوم هذا التحويل بعد (بلا أي قيد ليُعكَس،
+/// فالتعديل/الحذف هنا تحديث/حذف مباشر لا أكثر)؛ راجع
+/// InterEntityTransferRepository.updateTransfer/deleteTransfer للحماية
+/// الفعلية على مستوى طبقة الأعمال.
 class AddInterEntityTransferPage extends StatefulWidget {
   final Hotel hotel;
-  const AddInterEntityTransferPage({super.key, required this.hotel});
+  final InterEntityTransfer? editTransfer;
+  const AddInterEntityTransferPage({super.key, required this.hotel, this.editTransfer});
 
   @override
   State<AddInterEntityTransferPage> createState() => _AddInterEntityTransferPageState();
@@ -35,6 +46,8 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
   List<Hotel> _otherHotels = [];
   Hotel? _counterpartHotel;
   bool _isLoading = true;
+
+  bool get _isEditing => widget.editTransfer != null;
 
   /// true = هذا الفندق يُرسِل إلى [_counterpartHotel] (يصبح الآخر مديناً لهذا
   /// الفندق). false = هذا الفندق يستلم من [_counterpartHotel] (يصبح هذا
@@ -54,8 +67,22 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
   Future<void> _loadHotels() async {
     final hotels = await _hotelRepository.getAllHotels();
     if (!mounted) return;
+    final edit = widget.editTransfer;
     setState(() {
       _otherHotels = hotels.where((h) => h.id != widget.hotel.id).toList();
+      if (edit != null) {
+        // التعديل مسموح فقط من الفندق المُرسِل — فراجع pending_expenses_list_page.dart،
+        // فـ_isSending دائماً true عند التعديل.
+        _isSending = true;
+        _statementController.text = edit.statement;
+        _amountController.text = NumberFormat("#,##0.##").format(edit.amount);
+        for (final h in _otherHotels) {
+          if (h.id == edit.toHotelId) _counterpartHotel = h;
+        }
+        if (edit.fundingSourceCategory != null) {
+          _fundingSource = edit.fundingSourceCategory == 'bank' ? 'شبكة' : 'نقد';
+        }
+      }
       _isLoading = false;
     });
   }
@@ -91,23 +118,38 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
       if (_isSending) ReviewItem(label: "مصدر التمويل", value: _fundingSource, color: Colors.blue),
     ];
 
+    final edit = widget.editTransfer;
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => TransactionReviewPage(
-          title: "مراجعة التحويل",
+          title: _isEditing ? "مراجعة تعديل التحويل" : "مراجعة التحويل",
           items: reviewItems,
           onConfirm: () async {
-            await _repository.createTransfer(
-              fromHotelId: fromHotel.id!,
-              toHotelId: toHotel.id!,
-              amount: amount,
-              statement: statement,
-              fundingSourceCategory: _isSending ? (_fundingSource == 'شبكة' ? 'bank' : 'cash') : null,
-            );
+            final fundingSourceCategory = _isSending ? (_fundingSource == 'شبكة' ? 'bank' : 'cash') : null;
+            if (edit != null) {
+              final newTransfer = edit.copyWith(
+                fromHotelId: fromHotel.id!,
+                toHotelId: toHotel.id!,
+                amount: amount,
+                statement: statement,
+                fundingSourceCategory: fundingSourceCategory,
+                clearFundingSourceCategory: fundingSourceCategory == null,
+              );
+              await _repository.updateTransfer(newTransfer);
+            } else {
+              await _repository.createTransfer(
+                fromHotelId: fromHotel.id!,
+                toHotelId: toHotel.id!,
+                amount: amount,
+                statement: statement,
+                fundingSourceCategory: fundingSourceCategory,
+              );
+            }
             if (mounted) {
               Navigator.pop(context); // Close Review
-              Navigator.pop(context, true); // Close Add Page
+              Navigator.pop(context, true); // Close Add/Edit Page
             }
           },
         ),
@@ -115,13 +157,45 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
     );
   }
 
+  Future<void> _delete() async {
+    final edit = widget.editTransfer;
+    if (edit == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+        title: const Text("حذف التحويل"),
+        content: const Text("هل أنت متأكد من حذف هذا التحويل؟ سيُعكَس أثره المحاسبي بالكامل."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("حذف"),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _repository.deleteTransfer(edit);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: HotelIdentityTitle(title: "تحويل بين المنشآت", hotel: widget.hotel),
+        title: HotelIdentityTitle(title: _isEditing ? "تعديل تحويل" : "تحويل بين المنشآت", hotel: widget.hotel),
         centerTitle: true,
+        actions: _isEditing ? [IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), tooltip: "حذف", onPressed: _delete)] : null,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -205,13 +279,16 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
     );
   }
 
+  /// اتجاه التحويل مُقفَل عند التعديل (يبقى "إرسال" دائماً — راجع تعليق
+  /// pending_expenses_list_page.dart._editTransfer) حتى لا يتغيّر معنى
+  /// [_counterpartHotel] المُعبَّأ مسبقاً كـ"المستقبِل".
   Widget _directionChip(String label, IconData icon, bool value) {
     final selected = _isSending == value;
     return ChoiceChip(
       label: Text(label, textAlign: TextAlign.center),
       avatar: Icon(icon, size: 16),
       selected: selected,
-      onSelected: (_) => setState(() => _isSending = value),
+      onSelected: _isEditing ? null : (_) => setState(() => _isSending = value),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
     );
   }

@@ -16,6 +16,7 @@ import '../../repositories/shared_expense_distribution_repository.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_text_field.dart';
+import '../../widgets/financial/financial_category_picker.dart';
 import '../common/transaction_review_page.dart';
 
 /// إنشاء/تعديل مصروف مشترك: مبلغ إجمالي واحد يُوزَّع تلقائياً (بالتساوي، مع
@@ -310,26 +311,28 @@ class _AddEditSharedExpensePageState extends State<AddEditSharedExpensePage> {
     );
   }
 
+  Future<void> _pickCategory() async {
+    final picked = await showFinancialCategoryPicker(context, type: FinancialCategory.typeExpense, current: _selectedCategory);
+    if (picked != null && mounted) setState(() => _selectedCategory = picked);
+  }
+
   Widget _buildCategoryDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(AppRadius.md), border: Border.all(color: Colors.grey[300]!)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<FinancialCategory>(
-          value: _selectedCategory,
-          isExpanded: true,
-          hint: const Text("اختر نوع المصروف"),
-          items: _categories
-              .map((c) => DropdownMenuItem(
-                    value: c,
-                    child: Row(children: [
-                      Icon(IconData(c.iconCode, fontFamily: 'MaterialIcons'), color: Color(c.colorValue), size: 20),
-                      const SizedBox(width: 12),
-                      Text(c.name),
-                    ]),
-                  ))
-              .toList(),
-          onChanged: (v) => setState(() => _selectedCategory = v),
+    final selected = _selectedCategory;
+    return InkWell(
+      onTap: _pickCategory,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(AppRadius.md), border: Border.all(color: Colors.grey[300]!)),
+        child: Row(
+          children: [
+            if (selected != null) ...[
+              Icon(IconData(selected.iconCode, fontFamily: 'MaterialIcons'), color: Color(selected.colorValue), size: 20),
+              const SizedBox(width: 12),
+            ],
+            Expanded(child: Text(selected?.name ?? "اختر نوع المصروف", style: TextStyle(color: selected == null ? Colors.grey[600] : null))),
+            Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+          ],
         ),
       ),
     );

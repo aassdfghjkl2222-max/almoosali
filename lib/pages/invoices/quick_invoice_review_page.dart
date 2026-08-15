@@ -18,6 +18,7 @@ import '../../repositories/supplier_repository.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/financial/financial_category_picker.dart';
 import 'add_invoice_page.dart';
 
 /// شاشة مراجعة سريعة بعد نجاح القراءة (QR أو ذكاء اصطناعي أو OCR محلي) —
@@ -48,6 +49,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
   Supplier? _matchedSupplier;
   List<FinancialCategory> _categories = [];
   String? _selectedCategory;
+  int? _selectedCategoryId;
 
   String? _fundingSource;
   String? _paymentMethod;
@@ -96,6 +98,9 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
       _matchedSupplier = await _supplierRepository.getSupplierByTaxNumber(widget.hotel.id!, vatNumber);
       if (_matchedSupplier?.defaultExpenseCategory != null) {
         _selectedCategory = _matchedSupplier!.defaultExpenseCategory;
+        for (final c in _categories) {
+          if (c.name == _selectedCategory) { _selectedCategoryId = c.id; break; }
+        }
       }
     }
 
@@ -188,6 +193,7 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
         totalAmount: total,
         facilityName: widget.hotel.arabicName,
         expenseCategory: selectedCategory,
+        categoryId: _selectedCategoryId,
         amountSource: _fundingSource!,
         paymentMethod: _paymentMethod,
         relatedHotelId: _relatedHotelId,
@@ -322,7 +328,19 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
     );
   }
 
+  Future<void> _pickCategory() async {
+    final matches = _categories.where((c) => c.id == _selectedCategoryId);
+    final current = matches.isEmpty ? null : matches.first;
+    final picked = await showFinancialCategoryPicker(context, type: FinancialCategory.typeExpense, current: current);
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selectedCategory = picked.name;
+      _selectedCategoryId = picked.id;
+    });
+  }
+
   Widget _buildCategorySection() {
+    final selectedName = _selectedCategory;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -333,20 +351,21 @@ class _QuickInvoiceReviewPageState extends State<QuickInvoiceReviewPage> {
             Text("اختير تلقائياً حسب هذا المورد — يمكنك تغييره", style: AppTextStyles.caption.copyWith(fontSize: 11)),
           ],
           const SizedBox(height: AppSizes.sm),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _categories.map((category) {
-              final isSelected = _selectedCategory == category.name;
-              return ChoiceChip(
-                label: Text(category.name, style: const TextStyle(fontSize: 12)),
-                avatar: Icon(IconData(category.iconCode, fontFamily: 'MaterialIcons'), size: 16, color: isSelected ? Colors.white : _identityColor),
-                selected: isSelected,
-                selectedColor: _identityColor,
-                labelStyle: TextStyle(color: isSelected ? Colors.white : null, fontWeight: isSelected ? FontWeight.bold : null),
-                onSelected: (_) => setState(() => _selectedCategory = category.name),
-              );
-            }).toList(),
+          InkWell(
+            onTap: _pickCategory,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(AppRadius.md)),
+              child: Row(
+                children: [
+                  Icon(Icons.category_outlined, color: selectedName == null ? Colors.grey[600] : _identityColor),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(selectedName ?? "اختر تصنيف المصروف", style: TextStyle(color: selectedName == null ? Colors.grey[600] : null, fontWeight: selectedName == null ? null : FontWeight.bold))),
+                  Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+                ],
+              ),
+            ),
           ),
         ],
       ),

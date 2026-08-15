@@ -18,6 +18,7 @@ import 'analysis_charts.dart';
 class ExpenseCategoryDetailPage extends StatefulWidget {
   final Hotel hotel;
   final List<int> hotelIds;
+  final int categoryId;
   final String categoryName;
   final Color color;
 
@@ -25,6 +26,7 @@ class ExpenseCategoryDetailPage extends StatefulWidget {
     super.key,
     required this.hotel,
     required this.hotelIds,
+    required this.categoryId,
     required this.categoryName,
     required this.color,
   });
@@ -45,7 +47,7 @@ class _ExpenseCategoryDetailPageState extends State<ExpenseCategoryDetailPage> {
   }
 
   Future<void> _load() async {
-    final data = await _repo.getExpenseTransactionsByCategory(hotelIds: widget.hotelIds, categoryName: widget.categoryName);
+    final data = await _repo.getExpenseTransactionsByCategory(hotelIds: widget.hotelIds, categoryId: widget.categoryId);
     if (!mounted) return;
     setState(() {
       _all = data;

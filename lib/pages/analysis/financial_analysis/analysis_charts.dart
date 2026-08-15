@@ -7,7 +7,12 @@ class ChartPoint {
   final String label;
   final double value;
   final Color color;
-  const ChartPoint(this.label, this.value, this.color);
+
+  /// معرّف الفئة المالية (financial_categories.id) عندما تمثّل هذه النقطة
+  /// فئة إيراد/مصروف حقيقية — يُستخدم للتنقل إلى شاشة تحليل البند بالمعرّف
+  /// لا بالاسم المعروض. null لنقاط غير مرتبطة بفئة (مثل التجميع حسب الفندق/الشهر).
+  final int? id;
+  const ChartPoint(this.label, this.value, this.color, {this.id});
 }
 
 /// عنصر رسم بياني موحّد يُستخدم في كل قسم "التحليل المالي" (الإيرادات،

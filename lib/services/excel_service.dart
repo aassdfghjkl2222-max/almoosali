@@ -211,17 +211,21 @@ class ExcelService {
       Map<String, double> otherPosMap = {};
       final others = expense['other'] as List? ?? [];
       double totalOtherCash = 0;
-      double totalOtherPos = 0;
-      
+
       for (var item in others) {
         double amt = _toDouble(item['amount']);
         String type = _expenseGroupLabel(item) ?? "أخرى";
-        if (item['method'] == "نقد") {
+        final method = item['method']?.toString() ?? "";
+        if (method == "نقد") {
           otherCashMap[type] = (otherCashMap[type] ?? 0) + amt;
           totalOtherCash += amt;
         } else {
+          // أي طريقة غير "نقد" (شبكة/بنك، الخزنة، شخصي، آجل (دين)، ...) لا
+          // تُخصَم من صافي الشبكة بعد الآن — لا فرق بين البنك والشبكة (راجع
+          // FinancialSummaryPage._calculateTotals وVaultRepository._postNetworkFundedExpenses)؛
+          // تبقى تظهر في عمود الفئة (otherPosMap) للعرض فقط، بلا أي أثر على
+          // netPos أدناه (totalOtherPos لم يعد يُستخدَم في حساب netPos إطلاقاً).
           otherPosMap[type] = (otherPosMap[type] ?? 0) + amt;
-          totalOtherPos += amt;
         }
       }
 
@@ -236,7 +240,9 @@ class ExcelService {
       double shoPos = shoEff == "شبكة" ? sho : 0;
 
       double netCash = (cash + pCash + incCash) - (subCash + refCash + c2p + totalOtherCash + shoCash);
-      double netPos = (pos + pPos + incPos + c2p) - (subPos + refPos + totalOtherPos + shoPos);
+      // صافي الشبكة لم يعد يُخصَم منه أي مصروف (إعاشة/استرداد/بند حر) بطريقة
+      // غير "نقد" — راجع تعليق الحلقة أعلاه.
+      double netPos = (pos + pPos + incPos + c2p) - shoPos;
       double finalBal = netCash + netPos + trans;
 
       List<dynamic> rowData = [

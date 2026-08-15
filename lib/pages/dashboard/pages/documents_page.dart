@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/app_permissions.dart';
 import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/document_status.dart';
@@ -10,6 +11,7 @@ import '../../../repositories/document_repository.dart';
 import '../../../repositories/employee_repository.dart';
 import '../../../widgets/common/app_loading.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
+import '../../../widgets/common/permission_gate.dart';
 import '../widgets/document_card.dart';
 import 'hotel_document_edit_page.dart';
 
@@ -90,7 +92,10 @@ class _DocumentsPageState extends State<DocumentsPage> {
   @override
   Widget build(BuildContext context) {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
-    return Scaffold(
+    return PermissionGate(
+      permission: AppPermissions.documentsView,
+      hotelId: widget.hotel.id,
+      child: Scaffold(
       appBar: AppBar(
         title: HotelIdentityTitle(
           title: widget.alertsOnly ? "المستندات المنتهية والتنبيهات" : "مستندات الفندق",
@@ -207,6 +212,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

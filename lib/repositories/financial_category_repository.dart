@@ -1,4 +1,5 @@
 import '../core/database/database_service.dart';
+import '../core/text_similarity.dart';
 import '../models/financial_category.dart';
 
 /// محرك الفئات المالية الموحَّد — المصدر الوحيد لتصنيفات المصروفات والإيرادات
@@ -11,6 +12,10 @@ class FinancialCategoryRepository {
   Future<List<FinancialCategory>> getCategories({required String type, bool includeArchived = false}) async {
     final data = await _dbService.getFinancialCategories(type: type, includeArchived: includeArchived);
     return data.map((m) => FinancialCategory.fromMap(m)).toList();
+  }
+
+  Future<void> recordUsage(int categoryId) async {
+    await _dbService.recordFinancialCategoryUsage(categoryId);
   }
 
   Future<FinancialCategory?> getCategoryById(int id) async {
@@ -32,6 +37,20 @@ class FinancialCategoryRepository {
     for (final c in all) {
       if (c.id == excludeId) continue;
       if (c.name.trim() == normalized) return c;
+    }
+    return null;
+  }
+
+  /// كشف تكرار "شبه واضح" (بخلاف [getCategoryByName] الذي يمنع فقط التطابق
+  /// الحرفي التام) — مثال من نطاق المهمة: "باركنج"/"إيراد الباركنج"/"موقف
+  /// سيارات" قد تُمثِّل نفس الغرض المالي رغم اختلاف الصياغة. يُستخدَم كتحذير
+  /// غير مانع (المستخدم يؤكد المتابعة صراحةً إن أراد فئة مختلفة فعلاً تتشابه
+  /// صياغتها) وليس حظراً صلباً، لتفادي رفض فئات مختلفة فعلاً تتشارك كلمة شائعة.
+  Future<FinancialCategory?> findLikelyDuplicate(String name, String type, {int? excludeId}) async {
+    final all = await getCategories(type: type, includeArchived: true);
+    for (final c in all) {
+      if (c.id == excludeId) continue;
+      if (isLikelyDuplicateCategoryName(c.name, name)) return c;
     }
     return null;
   }
@@ -80,5 +99,9 @@ class FinancialCategoryRepository {
   Future<void> reorderCategories(List<FinancialCategory> orderedCategories) async {
     final ids = orderedCategories.where((c) => c.id != null).map((c) => c.id!).toList();
     await _dbService.reorderFinancialCategories(ids);
+  }
+
+  Future<void> resetToDefaultOrder(String type) async {
+    await _dbService.resetFinancialCategoryOrder(type);
   }
 }

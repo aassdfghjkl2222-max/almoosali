@@ -87,6 +87,13 @@ class SupplierRepository {
     return results.map((e) => Supplier.fromMap(e)).toList();
   }
 
+  /// عبر كل الفنادق معاً — راجع تعليق DatabaseService.getAllSuppliersAcrossHotels
+  /// (البحث الشامل GlobalSearch فقط).
+  Future<List<Supplier>> getAllSuppliersAcrossHotels() async {
+    final results = await _dbService.getAllSuppliersAcrossHotels();
+    return results.map((e) => Supplier.fromMap(e)).toList();
+  }
+
   // ---------------- مديونية "شراء آجل" ----------------
 
   /// ينشئ مديونية جديدة مرتبطة بالفاتورة إن لم توجد مسبقاً، أو يحدّث مبلغ

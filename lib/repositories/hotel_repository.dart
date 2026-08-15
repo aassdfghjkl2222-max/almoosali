@@ -84,7 +84,12 @@ class HotelRepository {
     final hotelWithIdentity = hotel.identityColorValue == null
         ? hotel.copyWith(identityColorValue: HotelVisualIdentity.defaultColorValue)
         : hotel;
-    final id = await _dbService.insertHotel(hotelWithIdentity.toMap());
+    // مزامنة سحابية — فندق جديد دوماً بحاجة للرفع. راجع HotelSyncService.
+    final hotelToInsert = hotelWithIdentity.copyWith(
+      updatedAt: DateTime.now().toIso8601String(),
+      pendingSync: true,
+    );
+    final id = await _dbService.insertHotel(hotelToInsert.toMap());
     await _dbService.insertHotelAuditLog(HotelAuditLog(
       hotelId: id,
       hotelName: hotel.arabicName,
@@ -97,7 +102,9 @@ class HotelRepository {
 
   Future<int> updateHotel(Hotel hotel, {String performedBy = "مدير النظام", Hotel? previous}) async {
     if (hotel.id == null) return 0;
-    final result = await _dbService.updateHotel(hotel.toMap(), hotel.id!);
+    // مزامنة سحابية — أي تعديل محلي يُعلَّم بحاجة لرفع. راجع HotelSyncService.
+    final hotelToUpdate = hotel.copyWith(updatedAt: DateTime.now().toIso8601String(), pendingSync: true);
+    final result = await _dbService.updateHotel(hotelToUpdate.toMap(), hotel.id!);
     final changedColors = previous != null && previous.identityColorValue != hotel.identityColorValue;
     final changedStatus = previous != null && previous.status != hotel.status;
     await _dbService.insertHotelAuditLog(HotelAuditLog(
@@ -129,8 +136,15 @@ class HotelRepository {
       archivedAt: null,
       archivedBy: null,
       archiveReason: null,
+      updatedAt: DateTime.now().toIso8601String(),
+      pendingSync: true,
     );
-    final id = await _dbService.insertHotel(copy.toMap());
+    // مزامنة سحابية — النسخة فندق مستقل تماماً، يجب ألا يرث cloud_id المصدر
+    // (وإلا ستُستبدَل بيانات فندق المصدر السحابي عند أول رفع). copyWith لا
+    // يستطيع مسح حقل nullable بتمرير null صراحةً (نمط ?? المتَّبع في كل
+    // الحقول الأخرى بهذا الملف)، لذا يُمسَح مباشرةً من الخريطة هنا فقط.
+    final copyMap = copy.toMap()..['cloud_id'] = null;
+    final id = await _dbService.insertHotel(copyMap);
     await _dbService.insertHotelAuditLog(HotelAuditLog(
       hotelId: id,
       hotelName: copy.arabicName,
@@ -147,6 +161,12 @@ class HotelRepository {
   /// صريح متعدد المراحل (كلمة تأكيد + سبب + رمز PIN) على فندق مؤرشَف مسبقاً فقط.
   /// سجل التدقيق يُكتب *قبل* الحذف عمداً (بعده لن يبقى شيء يُشير إلى الفندق
   /// سوى هذا السجل نفسه — راجع تعليق جدول hotel_audit_log لماذا لا FOREIGN KEY).
+  ///
+  /// مزامنة سحابية: عمداً لا تُطلَق أي عملية سحابية من هنا (لا حذف ولا
+  /// أرشفة). بما أن هذه الدالة لا تُستدعى إلا على فندق مؤرشَف مسبقاً، فإن
+  /// صفه السحابي المقابل (إن وُجد) يكون قد وصلته حالة الأرشفة فعلاً من
+  /// مزامنة سابقة قبل وصول الحذف النهائي — فيبقى مؤرشَفاً في السحابة كما
+  /// هو، ولا يُحذَف نهائياً هناك أبداً من مجرد حذف محلي على جهاز واحد.
   Future<int> deleteHotel(int id, {required String hotelName, required String performedBy, String? reason}) async {
     await _dbService.insertHotelAuditLog(HotelAuditLog(
       hotelId: id,

@@ -6,10 +6,12 @@ import '../../../core/app_radius.dart';
 import '../../../core/app_sizes.dart';
 import '../../../core/app_text_styles.dart';
 import '../../../core/hotel_visual_identity.dart';
+import '../../../models/financial_category.dart';
 import '../../../models/financial_report.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/employee_repository.dart';
 import '../../../repositories/expense_repository.dart';
+import '../../../repositories/financial_category_repository.dart';
 import '../../../repositories/financial_repository.dart';
 import '../../../repositories/hotel_repository.dart';
 import '../../../services/financial_engine.dart';
@@ -32,12 +34,14 @@ class FinancialAnalysisPage extends StatefulWidget {
 
 class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
   static const _periods = ["يوم", "أسبوع", "نصف شهر", "شهر", "ربع سنة", "نصف سنة", "سنة", "فترة مخصصة"];
-  static const _revenueDimensions = ["الفندق", "الشهر", "اليوم", "النوع", "المصدر"];
+  static const _revenueDimensions = ["الفندق", "الشهر", "اليوم", "النوع", "المصدر", "الفئة"];
 
   final _financialRepo = FinancialRepository();
   final _expenseRepo = ExpenseRepository();
   final _employeeRepo = EmployeeRepository();
+  final _categoryRepo = FinancialCategoryRepository();
   final _engine = FinancialEngine();
+  List<FinancialCategory> _revenueCategories = [];
 
   List<Hotel> _allHotels = [];
   Set<int> _selectedHotelIds = {};
@@ -63,6 +67,10 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
 
   Future<void> _init() async {
     _allHotels = await HotelRepository().getAllHotels();
+    // includeArchived: true — تقارير قديمة قد تحمل category_id لفئة أُرشِفَت
+    // لاحقاً، ويجب أن يبقى اسمها/لونها ظاهرَين هنا رغم أرشفتها (لا تأثير
+    // للأرشفة على أي تحليل/إحصائية تاريخية).
+    _revenueCategories = await _categoryRepo.getCategories(type: FinancialCategory.typeRevenue, includeArchived: true);
     await _loadAll();
   }
 
@@ -214,6 +222,29 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
       } catch (_) {}
     }
     return {'cash': cash, 'parking_cash': parkingCash, 'pos': pos, 'parking_pos': parkingPos, 'transfer': transfer};
+  }
+
+  /// إجمالي بنود الإيراد الحرة (المضافة عبر "➕" في التقرير اليومي) مجمَّعة
+  /// حسب category_id الحقيقي — لا تشمل الحقول الثابتة (نقد/شبكة/تحويل/باركنج)
+  /// المُغطاة أصلاً ببعدَي "النوع"/"المصدر". بنود التقارير المحفوظة قبل توحيد
+  /// الفئات المالية (v48) بلا category_id تُستبعَد ضمناً (لا تُعَد ضمن أي فئة).
+  Map<int, double> _revenueByCategory() {
+    final totals = <int, double>{};
+    for (final r in _reports) {
+      if (r.detailsJson == null || r.detailsJson!.isEmpty) continue;
+      try {
+        final inc = (jsonDecode(r.detailsJson!)['income_details'] as Map<String, dynamic>?) ?? {};
+        final items = (inc['other_income'] as List?) ?? [];
+        for (final item in items) {
+          if (item is! Map) continue;
+          final categoryId = item['category_id'] as int?;
+          if (categoryId == null) continue;
+          final amount = double.tryParse(item['amount']?.toString() ?? '0') ?? 0;
+          totals[categoryId] = (totals[categoryId] ?? 0) + amount;
+        }
+      } catch (_) {}
+    }
+    return totals;
   }
 
   Future<void> _openHotelSelector() async {
@@ -566,6 +597,18 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
           ChartPoint("باركنج", d['parking_cash']! + d['parking_pos']!, const Color(0xFFC7972C)),
         ];
         return _buildChartWithLegend(points);
+      case "الفئة":
+        final totals = _revenueByCategory();
+        if (totals.isEmpty) {
+          return const Padding(padding: EdgeInsets.all(16), child: Center(child: Text("لا توجد بنود إيراد مصنَّفة بفئة لهذه الفترة", style: AppTextStyles.caption)));
+        }
+        final points = totals.entries.map((e) {
+          final matches = _revenueCategories.where((c) => c.id == e.key);
+          final cat = matches.isEmpty ? null : matches.first;
+          return ChartPoint(cat?.name ?? "فئة محذوفة", e.value, cat != null ? Color(cat.colorValue) : Colors.grey, id: e.key);
+        }).toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        return _buildChartWithLegend(points);
       default:
         return const SizedBox();
     }
@@ -663,7 +706,7 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
     ];
     final points = _expenseCategories.asMap().entries.map((e) {
       final total = (e.value['total'] as num?)?.toDouble() ?? 0;
-      return ChartPoint(e.value['category_name'] as String, total, palette[e.key % palette.length]);
+      return ChartPoint(e.value['category_name'] as String, total, palette[e.key % palette.length], id: e.value['category_id'] as int?);
     }).toList();
 
     return AppCard(
@@ -690,13 +733,14 @@ class _FinancialAnalysisPageState extends State<FinancialAnalysisPage> {
                       const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
                     ],
                   ),
-                  onTap: () {
+                  onTap: p.id == null ? null : () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => ExpenseCategoryDetailPage(
                           hotel: widget.hotel,
                           hotelIds: _selectedHotelIds.toList(),
+                          categoryId: p.id!,
                           categoryName: p.label,
                           color: p.color,
                         ),

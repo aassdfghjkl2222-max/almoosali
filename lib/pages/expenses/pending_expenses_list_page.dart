@@ -39,7 +39,7 @@ class _CategoryMeta {
 const _categoryMetas = <_CategoryMeta>[
   _CategoryMeta(_OpCategory.expenses, "المصروفات", "إضافة مصروف", Icons.receipt_long_outlined, Color(0xFF7B1E3A)),
   _CategoryMeta(_OpCategory.shared, "المصروفات المشتركة", "إضافة مصروف مشترك", Icons.call_split, Color(0xFF1E63C7)),
-  _CategoryMeta(_OpCategory.hotelAdvance, "عهدة الفندق", "إضافة عهدة الفندق", Icons.account_balance_wallet_outlined, Color(0xFF1B8A5A)),
+  _CategoryMeta(_OpCategory.hotelAdvance, "عهدة على الفندق", "إضافة عهدة على الفندق", Icons.account_balance_wallet_outlined, Color(0xFF1B8A5A)),
   _CategoryMeta(_OpCategory.ownerWithdrawal, "مسحوبات المالك", "إضافة مسحوب", Icons.person_outline, Color(0xFFB8860B)),
   _CategoryMeta(_OpCategory.transfer, "التحويل بين المنشآت", "إضافة تحويل", Icons.swap_horiz, Color(0xFF6A3EA1)),
 ];
@@ -56,6 +56,7 @@ class _OpCardData {
   final Color statusColor;
   final double amount;
   final VoidCallback? onTap;
+  final VoidCallback? onDelete;
   const _OpCardData({
     required this.statement,
     required this.hotelName,
@@ -66,6 +67,7 @@ class _OpCardData {
     required this.statusColor,
     required this.amount,
     this.onTap,
+    this.onDelete,
   });
 }
 
@@ -117,7 +119,7 @@ class _PendingExpensesListPageState extends State<PendingExpensesListPage> {
       _counts[_OpCategory.shared] = allExpenses.where((e) => e.sharedExpenseId != null).length;
       _counts[_OpCategory.hotelAdvance] = allExpenses.where((e) => e.isHotelAdvance).length;
       _counts[_OpCategory.ownerWithdrawal] = ownerWithdrawals.length + legacyOwnerDrawingCount;
-      _counts[_OpCategory.transfer] = transfers.length;
+      _counts[_OpCategory.transfer] = transfers.where((t) => !t.isTransferred).length;
       _ownerDebt = ownerDebt;
       _receivables = receivableAccounts.where((a) => a.balance > 0.01).toList();
       _isLoading = false;
@@ -328,6 +330,7 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
             statusColor: Colors.orange,
             amount: e.amount,
             onTap: () => _editExpense(e),
+            onDelete: () => _deletePendingExpense(e),
           );
         }).toList();
       case _OpCategory.shared:
@@ -362,6 +365,7 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
             statusColor: Colors.orange,
             amount: e.amount,
             onTap: () => _editExpense(e, lockToHotelAdvance: true),
+            onDelete: () => _deletePendingExpense(e),
           );
         }).toList();
       case _OpCategory.ownerWithdrawal:
@@ -375,41 +379,56 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
               status: "مُنفَّذ",
               statusColor: Colors.green,
               amount: w.amount,
-              onTap: () => _showDetail("مسحوبات المالك", w.statement, w.amount, w.date, w.time,
-                  "دُفع للمالك فوراً من (${w.method}) — أصبح المالك مديناً للفندق بهذا المبلغ."),
+              onTap: () => _editOwnerWithdrawal(w),
+              onDelete: () => _deleteOwnerWithdrawal(w),
             )));
         cards.addAll(_legacyOwnerDrawingRows.where((e) => _matches(e.statement)).map((e) => _OpCardData(
               statement: e.statement,
               hotelName: widget.hotel.arabicName,
               date: e.date,
               time: e.time,
-              fundingSource: "نقد (مسار قديم)",
+              fundingSource: "نقد",
               status: "بانتظار الترحيل",
               statusColor: Colors.orange,
               amount: e.amount,
               onTap: () => _editExpense(e, lockToOwnerDrawing: true),
+              onDelete: () => _deletePendingExpense(e),
             )));
         return cards;
       case _OpCategory.transfer:
         return _transferRows.where((t) => _matches(t.statement)).map((t) {
           final isOutgoing = t.fromHotelId == widget.hotel.id;
           final counterpart = _hotelNames[isOutgoing ? t.toHotelId : t.fromHotelId] ?? '—';
+          // معلَّق حتى يُعتمَد تقرير يوم التحويل (راجع دورة الحياة المحاسبية:
+          // معلّق ← تقرير يومي ← ترحيل) — لا قيد محاسبي حقيقي بعد، فالبيان
+          // للمستقبِل يبقى تحذيرياً بحتاً طالما لم يُعتمَد.
+          final pendingNote = "لم يُعتمَد تقرير يوم هذا التحويل بعد — لا أثر محاسبي حقيقي عليه الآن.";
           return _OpCardData(
             statement: t.statement,
             hotelName: isOutgoing ? "إلى: $counterpart" : "من: $counterpart",
             date: t.date,
             time: t.time,
-            status: "مُنفَّذ",
-            statusColor: Colors.green,
+            status: t.isTransferred ? "مُعتمَد" : "بانتظار الترحيل",
+            statusColor: t.isTransferred ? Colors.green : Colors.orange,
             amount: t.amount,
-            onTap: () => _showDetail(
-              "تحويل بين المنشآت",
-              t.statement,
-              t.amount,
-              t.date,
-              t.time,
-              isOutgoing ? "أُرسل من ${widget.hotel.arabicName} إلى $counterpart — أصبح $counterpart مديناً لهذا الفندق." : "استُلم من $counterpart — أصبح ${widget.hotel.arabicName} مديناً له.",
-            ),
+            // التعديل/الحذف مسموحان فقط من الفندق المُرسِل وقبل اعتماد التقرير
+            // (نفس ما تتحقق منه InterEntityTransferRepository._ensureTransferEditable
+            // فعلياً على مستوى طبقة الأعمال — هذا مجرد انعكاس في الواجهة).
+            onTap: (isOutgoing && !t.isTransferred)
+                ? () => _editTransfer(t)
+                : () => _showDetail(
+                      "تحويل بين المنشآت",
+                      t.statement,
+                      t.amount,
+                      t.date,
+                      t.time,
+                      !t.isTransferred
+                          ? pendingNote
+                          : (isOutgoing
+                              ? "أُرسل إلى $counterpart — أصبح $counterpart مديناً لهذا الفندق."
+                              : "استُلم من $counterpart — أصبح ${widget.hotel.arabicName} مديناً له."),
+                    ),
+            onDelete: (isOutgoing && !t.isTransferred) ? () => _deleteTransfer(t) : null,
           );
         }).toList();
     }
@@ -423,6 +442,46 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
       cards.sort((a, b) => "${b.date} ${b.time}".compareTo("${a.date} ${a.time}"));
     }
     return cards;
+  }
+
+  Future<void> _editOwnerWithdrawal(AdvanceWithdrawal withdrawal) async {
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOwnerWithdrawalPage(hotel: widget.hotel, editWithdrawal: withdrawal)));
+    if (result == true) {
+      _changed = true;
+      _loadData();
+    }
+  }
+
+  Future<void> _deleteOwnerWithdrawal(AdvanceWithdrawal withdrawal) async {
+    if (!await _confirmDelete("هل أنت متأكد من حذف مسحوب \"${withdrawal.statement}\"؟ سيُعكَس أثره المحاسبي بالكامل.")) return;
+    try {
+      await _vaultRepo.deleteOwnerWithdrawal(withdrawal);
+      _changed = true;
+      _loadData();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _editTransfer(InterEntityTransfer transfer) async {
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInterEntityTransferPage(hotel: widget.hotel, editTransfer: transfer)));
+    if (result == true) {
+      _changed = true;
+      _loadData();
+    }
+  }
+
+  Future<void> _deleteTransfer(InterEntityTransfer transfer) async {
+    if (!await _confirmDelete("هل أنت متأكد من حذف تحويل \"${transfer.statement}\"؟ سيُعكَس أثره المحاسبي بالكامل.")) return;
+    try {
+      await _transferRepo.deleteTransfer(transfer);
+      _changed = true;
+      _loadData();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
+    }
   }
 
   Future<void> _editExpense(PendingExpense expense, {bool lockToOwnerDrawing = false, bool lockToHotelAdvance = false}) async {
@@ -489,7 +548,13 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToHotelAdvance: true)));
         break;
       case _OpCategory.ownerWithdrawal:
-        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOwnerWithdrawalPage(hotel: widget.hotel)));
+        // مسحوبات المالك أصبحت مصروفاً معلَّقاً عادياً (مصدر تمويل
+        // paymentMethodOwnerDrawing) يمر بدورة حياة "معلّق ← تقرير يومي ←
+        // ترحيل" الكاملة — لم تعد تُنفَّذ فوراً عبر AddOwnerWithdrawalPage
+        // (راجع البند "مسحوبات المالك" من متطلبات إعادة بناء دورة الحياة
+        // المحاسبية؛ AddOwnerWithdrawalPage يبقى فقط لعرض/تعديل/حذف سحوبات
+        // قديمة نُفِّذت فوراً بالمسار السابق).
+        result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddPendingExpensePage(hotel: widget.hotel, lockToOwnerDrawing: true)));
         break;
       case _OpCategory.transfer:
         result = await Navigator.push(context, MaterialPageRoute(builder: (_) => AddInterEntityTransferPage(hotel: widget.hotel)));
@@ -684,13 +749,62 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              format.format(d.amount),
-              style: AppTextStyles.bodyBold.copyWith(fontSize: 13, color: accent),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  format.format(d.amount),
+                  style: AppTextStyles.bodyBold.copyWith(fontSize: 13, color: accent),
+                ),
+                if (d.onDelete != null) ...[
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: d.onDelete,
+                    borderRadius: BorderRadius.circular(4),
+                    child: const Padding(
+                      padding: EdgeInsets.all(2),
+                      child: Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// حوار تأكيد موحَّد قبل أي حذف — يُستخدم لكل أنواع العمليات في هذه الشاشة.
+  Future<bool> _confirmDelete(String message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+        title: const Text("تأكيد الحذف"),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("حذف"),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _deletePendingExpense(PendingExpense expense) async {
+    if (!await _confirmDelete("هل أنت متأكد من حذف \"${expense.statement}\"؟")) return;
+    try {
+      await _expenseRepo.deletePendingExpense(expense.id!);
+      _changed = true;
+      _loadData();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
+    }
   }
 }

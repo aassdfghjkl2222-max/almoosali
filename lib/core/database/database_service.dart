@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../app_preferences.dart';
+import '../password_hasher.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -25,7 +26,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 48, // Upgrade to v48: محرك الفئات المالية الموحَّد (مصروفات + إيرادات، مصدر حقيقة واحد)
+      version: 54, // Upgrade to v54: مسحوبات المالك/التحويل بين المنشآت تمران الآن بدورة "معلّق ← تقرير يومي ← ترحيل" الكاملة (inter_entity_transfers.is_transferred) — راجع VaultRepository/InterEntityTransferRepository
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -306,6 +307,88 @@ class DatabaseService {
         if (oldVersion < 48) {
           try { await _migrateToFinancialCategories(db); } catch (_) {}
         }
+        if (oldVersion < 49) {
+          try { await db.execute('ALTER TABLE financial_categories ADD COLUMN created_by TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE invoices ADD COLUMN category_id INTEGER REFERENCES financial_categories(id)'); } catch (_) {}
+        }
+        if (oldVersion < 50) {
+          try { await db.execute('ALTER TABLE financial_categories ADD COLUMN last_used_at TEXT'); } catch (_) {}
+        }
+        if (oldVersion < 51) {
+          // مزامنة سحابية (Supabase) — راجع HotelSyncService. updated_at يُهيَّأ لوقت
+          // الترقية لكل الصفوف الحالية (لا يمكن معرفة تاريخها الفعلي)، وpending_sync
+          // يبدأ 1 (بحاجة لرفع) حتى تُرفَع كل الفنادق الموجودة مسبقاً في أول مزامنة.
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN updated_at TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN cloud_id TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE hotels ADD COLUMN pending_sync INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+          try {
+            await db.execute(
+              "UPDATE hotels SET updated_at = ? WHERE updated_at IS NULL",
+              [DateTime.now().toIso8601String()],
+            );
+          } catch (_) {}
+        }
+        if (oldVersion < 52) {
+          // نظام مستخدمين وصلاحيات حقيقي — راجع PermissionService/UserRepository.
+          // password يبقى كما هو (لا DROP COLUMN)، فقط لم يعد يُستخدَم لتسجيل الدخول
+          // بعد الآن؛ password_hash/password_salt هما مصدر الحقيقة الجديد.
+          try { await db.execute('ALTER TABLE users ADD COLUMN password_hash TEXT'); } catch (_) {}
+          try { await db.execute('ALTER TABLE users ADD COLUMN password_salt TEXT'); } catch (_) {}
+          try { await db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'employee'"); } catch (_) {}
+          try { await db.execute("UPDATE users SET role = 'manager' WHERE username IN ('admin', 'manager')"); } catch (_) {}
+          try { await db.execute('ALTER TABLE users ADD COLUMN phone TEXT'); } catch (_) {}
+          try { await _hashLegacyPlaintextPasswords(db); } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS user_hotel_access (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, UNIQUE(user_id, hotel_id))',
+            );
+          } catch (_) {}
+          try {
+            // hotel_id قابل للـ NULL عمداً: NULL يعني "كل الفنادق المصرَّح بها لهذا
+            // المستخدم عبر user_hotel_access"، وليس "كل فنادق التطبيق".
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS user_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_code TEXT NOT NULL, hotel_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try {
+            await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permissions_unique ON user_permissions(user_id, permission_code, IFNULL(hotel_id, 0))');
+          } catch (_) {}
+          try {
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS invitations (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT, used_at TEXT, revoked_at TEXT, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE)',
+            );
+          } catch (_) {}
+          try {
+            // بلا FOREIGN KEY على actor/target عمداً (نفس نمط hotel_audit_log) —
+            // يبقى السجل موجوداً حتى بعد حذف المستخدم صاحب الفعل أو المستهدَف به.
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS user_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_name TEXT NOT NULL, action TEXT NOT NULL, target_user_id INTEGER, target_name TEXT, details TEXT, hotel_id INTEGER, created_at TEXT NOT NULL)',
+            );
+          } catch (_) {}
+        }
+        if (oldVersion < 53) {
+          // ترحيل التقرير مستقل الآن عن ترحيل صافي النقد (راجع VaultRepository.
+          // postReportComponents/transferCashToVault) — عمود جديد لتتبّع حالة
+          // "ترحيل التقرير" بمعزل عن cash_status/network_status القديمين.
+          try { await db.execute('ALTER TABLE deposited_funds ADD COLUMN report_status TEXT NOT NULL DEFAULT "pending"'); } catch (_) {}
+          // مطلوب لعكس القيد المحاسبي الصحيح عند تعديل/حذف تحويل بين منشآت
+          // لم يُرحَّل بعد — راجع InterEntityTransfer.fundingSourceCategory.
+          try { await db.execute('ALTER TABLE inter_entity_transfers ADD COLUMN funding_source_category TEXT'); } catch (_) {}
+        }
+        if (oldVersion < 54) {
+          // التحويل بين المنشآت أصبح "معلَّقاً" حتى يُرحَّل تقرير يومه فعلياً —
+          // بلا قيد محاسبي فوري عند الإنشاء بعد الآن (راجع
+          // InterEntityTransferRepository.createTransfer ودورة الحياة
+          // المحاسبية الجديدة: معلّق ← تقرير يومي ← ترحيل).
+          try {
+            await db.execute('ALTER TABLE inter_entity_transfers ADD COLUMN is_transferred INTEGER NOT NULL DEFAULT 0');
+            // كل التحويلات الموجودة سابقاً نُفِّذت فوراً بالمسار القديم (قيدها
+            // المحاسبي موجود بالفعل) — يجب وسمها "مُرحَّلة" حتى لا يُعاد ترحيلها
+            // (وتكرار قيدها) عبر آلية الترحيل الجديدة، بخلاف is_transferred=0
+            // الافتراضي للعمود نفسه (المخصَّص للتحويلات الجديدة فقط من الآن).
+            await db.execute('UPDATE inter_entity_transfers SET is_transferred = 1');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -343,6 +426,22 @@ class DatabaseService {
         if (!await hasColumn('hotels', col)) {
           await db.execute('ALTER TABLE hotels ADD COLUMN $col INTEGER');
         }
+      }
+      // مزامنة سحابية (Supabase) — راجع HotelSyncService.
+      if (!await hasColumn('hotels', 'updated_at')) {
+        await db.execute('ALTER TABLE hotels ADD COLUMN updated_at TEXT');
+        try {
+          await db.execute(
+            "UPDATE hotels SET updated_at = ? WHERE updated_at IS NULL",
+            [DateTime.now().toIso8601String()],
+          );
+        } catch (_) {}
+      }
+      if (!await hasColumn('hotels', 'cloud_id')) {
+        await db.execute('ALTER TABLE hotels ADD COLUMN cloud_id TEXT');
+      }
+      if (!await hasColumn('hotels', 'pending_sync')) {
+        await db.execute('ALTER TABLE hotels ADD COLUMN pending_sync INTEGER NOT NULL DEFAULT 1');
       }
       await db.execute(
         'CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)',
@@ -427,6 +526,35 @@ class DatabaseService {
       await db.execute('CREATE TABLE IF NOT EXISTS permission_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, permissions_json TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL)');
       await _seedDefaultUsers(db);
 
+      // نظام مستخدمين وصلاحيات حقيقي — راجع تعليق ترحيل v52.
+      if (!await hasColumn('users', 'password_hash')) {
+        await db.execute('ALTER TABLE users ADD COLUMN password_hash TEXT');
+      }
+      if (!await hasColumn('users', 'password_salt')) {
+        await db.execute('ALTER TABLE users ADD COLUMN password_salt TEXT');
+      }
+      if (!await hasColumn('users', 'role')) {
+        await db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'employee'");
+        try { await db.execute("UPDATE users SET role = 'manager' WHERE username = 'admin'"); } catch (_) {}
+      }
+      if (!await hasColumn('users', 'phone')) {
+        await db.execute('ALTER TABLE users ADD COLUMN phone TEXT');
+      }
+      await _hashLegacyPlaintextPasswords(db);
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS user_hotel_access (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, UNIQUE(user_id, hotel_id))',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS user_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_code TEXT NOT NULL, hotel_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
+      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permissions_unique ON user_permissions(user_id, permission_code, IFNULL(hotel_id, 0))');
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS invitations (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT, used_at TEXT, revoked_at TEXT, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE)',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS user_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_name TEXT NOT NULL, action TEXT NOT NULL, target_user_id INTEGER, target_name TEXT, details TEXT, hotel_id INTEGER, created_at TEXT NOT NULL)',
+      );
+
       if (!await hasColumn('invoices', 'expense_category')) {
         await db.execute('ALTER TABLE invoices ADD COLUMN expense_category TEXT');
       }
@@ -442,12 +570,21 @@ class DatabaseService {
       if (!await hasColumn('invoices', 'related_hotel_id')) {
         await db.execute('ALTER TABLE invoices ADD COLUMN related_hotel_id INTEGER');
       }
+      if (!await hasColumn('invoices', 'category_id')) {
+        await db.execute('ALTER TABLE invoices ADD COLUMN category_id INTEGER REFERENCES financial_categories(id)');
+      }
       await db.execute('CREATE TABLE IF NOT EXISTS supplier_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)');
       await db.execute('CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT, date TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE)');
       await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
       await db.execute('CREATE TABLE IF NOT EXISTS invoice_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, username TEXT NOT NULL, operation_type TEXT NOT NULL, changed_fields TEXT, occurred_at TEXT NOT NULL)');
 
       await _migrateToFinancialCategories(db);
+      if (!await hasColumn('financial_categories', 'created_by')) {
+        await db.execute('ALTER TABLE financial_categories ADD COLUMN created_by TEXT');
+      }
+      if (!await hasColumn('financial_categories', 'last_used_at')) {
+        await db.execute('ALTER TABLE financial_categories ADD COLUMN last_used_at TEXT');
+      }
 
       await db.execute('CREATE TABLE IF NOT EXISTS document_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color_value INTEGER NOT NULL, created_at TEXT NOT NULL)');
       await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_document_categories_name ON document_categories(name)');
@@ -520,6 +657,18 @@ class DatabaseService {
       if (!await hasColumn('deposited_funds', 'posted_by')) {
         await db.execute('ALTER TABLE deposited_funds ADD COLUMN posted_by TEXT');
       }
+      if (!await hasColumn('deposited_funds', 'report_status')) {
+        await db.execute('ALTER TABLE deposited_funds ADD COLUMN report_status TEXT NOT NULL DEFAULT "pending"');
+      }
+      if (!await hasColumn('inter_entity_transfers', 'funding_source_category')) {
+        await db.execute('ALTER TABLE inter_entity_transfers ADD COLUMN funding_source_category TEXT');
+      }
+      if (!await hasColumn('inter_entity_transfers', 'is_transferred')) {
+        await db.execute('ALTER TABLE inter_entity_transfers ADD COLUMN is_transferred INTEGER NOT NULL DEFAULT 0');
+        // راجع تعليق نفس السطر في onUpgrade v54 — التحويلات القديمة نُفِّذت
+        // فوراً بالفعل، فيجب وسمها مُرحَّلة لمنع إعادة ترحيلها.
+        await db.execute('UPDATE inter_entity_transfers SET is_transferred = 1');
+      }
 
       await db.execute(
         'CREATE TABLE IF NOT EXISTS shared_expense_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, category_id INTEGER NOT NULL, total_amount REAL NOT NULL, payment_method TEXT NOT NULL, funding_hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES financial_categories (id), FOREIGN KEY (funding_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
@@ -541,7 +690,7 @@ class DatabaseService {
   }
 
   Future<void> _createTables(Database db) async {
-    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER, archived_at TEXT, archived_by TEXT, status TEXT NOT NULL DEFAULT \'active\', archive_reason TEXT, hotel_code TEXT, description TEXT, country TEXT, district TEXT, address TEXT, maps_link TEXT, phone TEXT, mobile TEXT, whatsapp TEXT, email TEXT, website TEXT, star_rating INTEGER, rooms_count INTEGER, opening_date TEXT, notes TEXT, secondary_color_value INTEGER, logo_path TEXT, cover_image_path TEXT, currency TEXT, language TEXT, time_zone TEXT, date_format TEXT, time_format TEXT)');
+    await db.execute('CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, arabic_name TEXT NOT NULL, english_name TEXT NOT NULL, city TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, has_parking INTEGER NOT NULL DEFAULT 0, identity_color_value INTEGER, archived_at TEXT, archived_by TEXT, status TEXT NOT NULL DEFAULT \'active\', archive_reason TEXT, hotel_code TEXT, description TEXT, country TEXT, district TEXT, address TEXT, maps_link TEXT, phone TEXT, mobile TEXT, whatsapp TEXT, email TEXT, website TEXT, star_rating INTEGER, rooms_count INTEGER, opening_date TEXT, notes TEXT, secondary_color_value INTEGER, logo_path TEXT, cover_image_path TEXT, currency TEXT, language TEXT, time_zone TEXT, date_format TEXT, time_format TEXT, updated_at TEXT, cloud_id TEXT, pending_sync INTEGER NOT NULL DEFAULT 1)');
     // سجل تدقيق الفنادق — بلا FOREIGN KEY عمداً (يبقى موجوداً حتى بعد حذف الفندق نهائياً).
     await db.execute('CREATE TABLE IF NOT EXISTS hotel_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, hotel_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)');
     // محرك المستندات الموحّد: كل مستند صف واحد فقط، بمرجع مالك متعدد الأشكال
@@ -565,7 +714,7 @@ class DatabaseService {
     // القديمين معاً (راجع تعليق الترحيل v48). hotel_id يبقى دوماً NULL (تصنيف
     // عام على مستوى التطبيق بالكامل)، parent_id ذاتي الإشارة (تسلسل هرمي جاهز
     // للمستقبل، غير مفعَّل الاستخدام بعد).
-    await db.execute('CREATE TABLE IF NOT EXISTS financial_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, code TEXT, type TEXT NOT NULL DEFAULT "expense", parent_id INTEGER, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, default_funding_source TEXT, description TEXT, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (parent_id) REFERENCES financial_categories (id) ON DELETE SET NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS financial_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, code TEXT, type TEXT NOT NULL DEFAULT "expense", parent_id INTEGER, usage_count INTEGER NOT NULL DEFAULT 0, is_pinned INTEGER NOT NULL DEFAULT 0, is_basic INTEGER NOT NULL DEFAULT 0, is_visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, icon_code INTEGER NOT NULL, color_value INTEGER NOT NULL, default_funding_source TEXT, description TEXT, sort_order INTEGER NOT NULL DEFAULT 0, created_by TEXT, last_used_at TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (parent_id) REFERENCES financial_categories (id) ON DELETE SET NULL)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_financial_categories_type ON financial_categories(type)');
     // محرك توزيع المصروف المشترك — راجع تعليق الترحيل v47 لسبب استقلاله عن
     // shared_expense_groups/shared_expense_shares القديم (يبقى الأخير كما هو
@@ -591,18 +740,18 @@ class DatabaseService {
     // "التحويل بين المنشآت": تحويل مباشر لمبلغ بين فندقين بلا مصروف مرتبط —
     // جدول تتبّع/عرض فقط، القيد المحاسبي الفعلي عبر FinancialEngine.recordTransaction
     // (آلية entity_/receivable_entity نفسها المستخدمة أصلاً للمصروف المموَّل من فندق آخر).
-    await db.execute('CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, funding_source_category TEXT, is_transferred INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     // كتالوج بنود التقرير المالي اليومي الدائمة (إيراد/مصروف) — راجع
     // FinancialReportItemRepository. لا تظهر تلقائياً في الشاشة، فقط عبر
     // منتقي "إضافة بند" — التقارير المحفوظة سابقاً تحتفظ بنسخة كاملة داخل
     // details_json فلا ترتبط بهذا الجدول عبر FK إطلاقاً.
     await db.execute('CREATE TABLE IF NOT EXISTS financial_report_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, default_funding_source TEXT, is_visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)');
     await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_report_items_name_type ON financial_report_items(name, type)');
-    await db.execute('CREATE TABLE IF NOT EXISTS deposited_funds (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, report_id INTEGER, date TEXT NOT NULL, cash_amount REAL NOT NULL, network_amount REAL NOT NULL, cash_status TEXT NOT NULL DEFAULT "pending", network_status TEXT NOT NULL DEFAULT "pending", is_archived INTEGER NOT NULL DEFAULT 0, posted_at TEXT, posted_by TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (report_id) REFERENCES financial_reports (id) ON DELETE SET NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS deposited_funds (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, report_id INTEGER, date TEXT NOT NULL, cash_amount REAL NOT NULL, network_amount REAL NOT NULL, cash_status TEXT NOT NULL DEFAULT "pending", network_status TEXT NOT NULL DEFAULT "pending", report_status TEXT NOT NULL DEFAULT "pending", is_archived INTEGER NOT NULL DEFAULT 0, posted_at TEXT, posted_by TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (report_id) REFERENCES financial_reports (id) ON DELETE SET NULL)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, account_id INTEGER, creditor_hotel_id INTEGER, debtor_hotel_id INTEGER, amount REAL NOT NULL, date TEXT NOT NULL, description TEXT NOT NULL, attachments_json TEXT, status TEXT NOT NULL DEFAULT "open", total_paid REAL NOT NULL DEFAULT 0, direction TEXT, created_at TEXT NOT NULL, FOREIGN KEY (account_id) REFERENCES settlement_accounts (id) ON DELETE CASCADE, FOREIGN KEY (creditor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (debtor_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS settlement_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, settlement_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, notes TEXT, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (settlement_id) REFERENCES settlements (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, invoice_number TEXT NOT NULL, date TEXT NOT NULL, company_name TEXT NOT NULL, tax_number TEXT NOT NULL, amount_before_tax REAL NOT NULL, vat REAL NOT NULL, total_amount REAL NOT NULL, facility_name TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", expense_category TEXT, payment_method TEXT, related_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, invoice_number TEXT NOT NULL, date TEXT NOT NULL, company_name TEXT NOT NULL, tax_number TEXT NOT NULL, amount_before_tax REAL NOT NULL, vat REAL NOT NULL, total_amount REAL NOT NULL, facility_name TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", expense_category TEXT, category_id INTEGER, payment_method TEXT, related_hotel_id INTEGER, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES financial_categories (id))');
     await db.execute('CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, official_name TEXT NOT NULL, short_name TEXT NOT NULL, tax_number TEXT NOT NULL, notes TEXT, default_expense_category TEXT, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contracts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER, name TEXT NOT NULL, contractor_name TEXT NOT NULL, start_date TEXT NOT NULL, duration TEXT NOT NULL, end_date TEXT NOT NULL, total_value REAL NOT NULL, payment_method TEXT NOT NULL, status TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS contract_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, contract_id INTEGER NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, amount_source TEXT NOT NULL DEFAULT "خارج النظام", FOREIGN KEY (contract_id) REFERENCES contracts (id) ON DELETE CASCADE)');
@@ -610,8 +759,17 @@ class DatabaseService {
     await db.execute('CREATE TABLE IF NOT EXISTS vault_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL, balance_before REAL NOT NULL, balance_after REAL NOT NULL, reference TEXT, notes TEXT, source TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS personal_withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, method TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS entity_loans (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, source TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
-    await db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, password TEXT NOT NULL, role_id TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, password TEXT NOT NULL, password_hash TEXT, password_salt TEXT, role TEXT NOT NULL DEFAULT \'employee\', phone TEXT, role_id TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)');
     await db.execute('CREATE TABLE IF NOT EXISTS permission_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, permissions_json TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL)');
+    // نظام مستخدمين وصلاحيات حقيقي — راجع تعليق ترحيل v52 لسبب hotel_id القابل
+    // للـ NULL في user_permissions (NULL = كل الفنادق المصرَّح بها للمستخدم).
+    await db.execute('CREATE TABLE IF NOT EXISTS user_hotel_access (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, UNIQUE(user_id, hotel_id))');
+    await db.execute('CREATE TABLE IF NOT EXISTS user_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_code TEXT NOT NULL, hotel_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permissions_unique ON user_permissions(user_id, permission_code, IFNULL(hotel_id, 0))');
+    await db.execute('CREATE TABLE IF NOT EXISTS invitations (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT, used_at TEXT, revoked_at TEXT, FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE)');
+    // بلا FOREIGN KEY على actor/target عمداً (نفس نمط hotel_audit_log) — يبقى
+    // السجل موجوداً حتى بعد حذف المستخدم صاحب الفعل أو المستهدَف به.
+    await db.execute('CREATE TABLE IF NOT EXISTS user_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_name TEXT NOT NULL, action TEXT NOT NULL, target_user_id INTEGER, target_name TEXT, details TEXT, hotel_id INTEGER, created_at TEXT NOT NULL)');
     await db.execute('CREATE TABLE IF NOT EXISTS supplier_debts (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL UNIQUE, amount REAL NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, hotel_id INTEGER NOT NULL, supplier_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT, date TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE)');
     await db.execute('CREATE TABLE IF NOT EXISTS invoice_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, hotel_id INTEGER NOT NULL, file_path TEXT NOT NULL, file_type TEXT NOT NULL, file_name TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE, FOREIGN KEY (hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)');
@@ -650,13 +808,39 @@ class DatabaseService {
     final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM users')) ?? 0;
     if (count > 0) return;
     final now = DateTime.now().toIso8601String();
+    // role هنا هو عمود الصلاحيات الحقيقي الجديد ('manager' يتجاوز كل فحوصات
+    // الصلاحيات الدقيقة تلقائياً — راجع PermissionService) — لا علاقة له بـ
+    // role_id (تسمية تعرض قديمة تشير لـ permission_groups، تبقى كما هي).
     final defaults = [
-      {'username': 'admin', 'full_name': 'مدير النظام', 'password': '123456', 'role_id': 'admin'},
-      {'username': 'manager', 'full_name': 'مدير الفندق', 'password': '123456', 'role_id': 'manager'},
-      {'username': 'employee', 'full_name': 'موظف', 'password': '123456', 'role_id': 'employee'},
+      {'username': 'admin', 'full_name': 'مدير النظام', 'password': '123456', 'role_id': 'admin', 'role': 'manager'},
+      {'username': 'manager', 'full_name': 'مدير الفندق', 'password': '123456', 'role_id': 'manager', 'role': 'manager'},
+      {'username': 'employee', 'full_name': 'موظف', 'password': '123456', 'role_id': 'employee', 'role': 'employee'},
     ];
     for (final u in defaults) {
-      await db.insert('users', {...u, 'is_active': 1, 'created_at': now}, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final hashed = PasswordHasher.hash(u['password']!);
+      await db.insert(
+        'users',
+        {...u, 'password_hash': hashed.hash, 'password_salt': hashed.salt, 'is_active': 1, 'created_at': now},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  /// يُهاجِر كلمات المرور القديمة (نص صريح في عمود password من قبل v52) إلى
+  /// hash/salt مُجزَّأين — يتحقق من password_hash IS NULL أولاً، فلا يُعيد
+  /// تجزئة كلمة مرور غُيِّرت بالفعل عبر النظام الجديد بعد الترقية.
+  Future<void> _hashLegacyPlaintextPasswords(Database db) async {
+    final rows = await db.query('users', where: 'password_hash IS NULL');
+    for (final row in rows) {
+      final plain = row['password'] as String?;
+      if (plain == null || plain.isEmpty) continue;
+      final hashed = PasswordHasher.hash(plain);
+      await db.update(
+        'users',
+        {'password_hash': hashed.hash, 'password_salt': hashed.salt},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
     }
   }
 
@@ -1020,9 +1204,19 @@ class DatabaseService {
   /// ويظهر في سلة المحذوفات.
   Future<int> archiveHotel(int id, {required String archivedBy, String? reason}) async {
     final db = await database;
+    final now = DateTime.now().toIso8601String();
     return await db.update(
       'hotels',
-      {'active': 0, 'status': 'archived', 'archived_at': DateTime.now().toIso8601String(), 'archived_by': archivedBy, 'archive_reason': reason},
+      {
+        'active': 0,
+        'status': 'archived',
+        'archived_at': now,
+        'archived_by': archivedBy,
+        'archive_reason': reason,
+        // مزامنة سحابية — راجع HotelSyncService.
+        'updated_at': now,
+        'pending_sync': 1,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -1032,7 +1226,16 @@ class DatabaseService {
     final db = await database;
     return await db.update(
       'hotels',
-      {'active': 1, 'status': 'active', 'archived_at': null, 'archived_by': null, 'archive_reason': null},
+      {
+        'active': 1,
+        'status': 'active',
+        'archived_at': null,
+        'archived_by': null,
+        'archive_reason': null,
+        // مزامنة سحابية — راجع HotelSyncService.
+        'updated_at': DateTime.now().toIso8601String(),
+        'pending_sync': 1,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -1183,6 +1386,13 @@ class DatabaseService {
     final results = await db.query('financial_reports', where: 'hotel_id = ? AND date = ? AND report_type = "main"', whereArgs: [hotelId, date], limit: 1);
     return results.isNotEmpty ? results.first : null;
   }
+  /// يُستخدم لقراءة details_json عند الترحيل (لحساب إجمالي المصروفات
+  /// بتمويل شبكة/بنك — راجع VaultRepository._postNetworkFundedExpenses).
+  Future<Map<String, dynamic>?> getFinancialReportById(int id) async {
+    final db = await database;
+    final results = await db.query('financial_reports', where: 'id = ?', whereArgs: [id], limit: 1);
+    return results.isNotEmpty ? results.first : null;
+  }
 
   // ---------------- محرك الفئات المالية الموحَّد (financial_categories) ----------------
   // مصدر الحقيقة الوحيد لتصنيفات المصروفات والإيرادات معاً — راجع تعليق
@@ -1197,6 +1407,17 @@ class DatabaseService {
     final args = <Object?>[type];
     if (!includeArchived) where.add('is_visible = 1');
     return await db.query('financial_categories', where: where.join(' AND '), whereArgs: args, orderBy: 'is_pinned DESC, sort_order ASC');
+  }
+
+  /// يُسجَّل عند اختيار المستخدم لفئة فعلياً من [showFinancialCategoryPicker] —
+  /// نقطة تسجيل مركزية واحدة (بدل تكرارها في كل شاشة إدخال) تغذّي ترتيب
+  /// "الأحدث/الأكثر استخداماً" أعلاه. usage_count هنا عداد UI تقريبي فقط
+  /// (لا علاقة له بقاعدة منع الحذف — تلك تفحص الجداول الفعلية دائماً، راجع
+  /// [isFinancialCategoryInUse])، فزيادته عند مجرد الاختيار (حتى لو أُلغيت
+  /// العملية لاحقاً بلا حفظ) مقبولة ولا تؤثر في أي قرار مالي حقيقي.
+  Future<void> recordFinancialCategoryUsage(int id) async {
+    final db = await database;
+    await db.execute('UPDATE financial_categories SET usage_count = usage_count + 1, last_used_at = ? WHERE id = ?', [DateTime.now().toIso8601String(), id]);
   }
 
   Future<Map<String, dynamic>?> getFinancialCategoryById(int id) async {
@@ -1223,16 +1444,31 @@ class DatabaseService {
     });
   }
 
-  /// هل هذه الفئة مستخدَمة في أي مصروف معلَّق/مصروف مشترك/فاتورة (بالاسم —
-  /// invoices.expense_category لا يزال نصاً حراً، خارج نطاق هذه المهمة) حتى
-  /// الآن؟ إن true يُمنَع الحذف النهائي (أرشفة فقط).
+  /// "استعادة الترتيب الافتراضي" من صفحة تفضيلات العرض — يُعيد ترقيم sort_order
+  /// تسلسلياً حسب id تصاعدياً (ترتيب الإنشاء الأصلي) لكل فئات [type] معاً
+  /// (نشِطة ومؤرشَفة)، فيُلغي أي ترتيب يدوي سابق من "وضع الترتيب". لا يمس أي
+  /// عمود آخر ولا أي عملية مالية تاريخية.
+  Future<void> resetFinancialCategoryOrder(String type) async {
+    final db = await database;
+    final rows = await db.query('financial_categories', columns: ['id'], where: 'type = ?', whereArgs: [type], orderBy: 'id ASC');
+    await db.transaction((txn) async {
+      for (var i = 0; i < rows.length; i++) {
+        await txn.update('financial_categories', {'sort_order': i}, where: 'id = ?', whereArgs: [rows[i]['id']]);
+      }
+    });
+  }
+
+  /// هل هذه الفئة مستخدَمة في أي مصروف معلَّق/مصروف مشترك/فاتورة حتى الآن؟
+  /// إن true يُمنَع الحذف النهائي (أرشفة فقط). الفواتير: تُفحَص عبر category_id
+  /// (المصدر الحقيقي للفواتير الجديدة منذ v49) وأيضاً عبر مطابقة الاسم النصي
+  /// القديم expense_category (فواتير محفوظة قبل v49 لا تحمل category_id إطلاقاً).
   Future<bool> isFinancialCategoryInUse(int id, String name) async {
     final db = await database;
     final pending = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM pending_expenses WHERE category_id = ?', [id])) ?? 0;
     if (pending > 0) return true;
     final shared = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM shared_expenses WHERE category_id = ?', [id])) ?? 0;
     if (shared > 0) return true;
-    final invoices = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM invoices WHERE expense_category = ?', [name])) ?? 0;
+    final invoices = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM invoices WHERE category_id = ? OR expense_category = ?', [id, name])) ?? 0;
     if (invoices > 0) return true;
     // بنود التقرير اليومي الجديدة (بعد هذا الترحيل) تُخزِّن category_id داخل
     // details_json — لا FK حقيقياً، لذا فحص تقريبي بمطابقة النص المُصدَّر من
@@ -1256,7 +1492,28 @@ class DatabaseService {
       args,
     );
   }
+  /// كل المصروفات المعلَّقة عبر كل الفنادق معاً — تُستخدَم حصراً من البحث
+  /// الشامل (GlobalSearch)؛ لا شاشة تشغيلية أخرى تحتاج قائمة غير مقيَّدة
+  /// بفندق. حدّ أقصى احترازي فقط، لا صفحات (Pagination) — راجع تعليق
+  /// GlobalSearch عن سبب هذا السقف.
+  Future<List<Map<String, dynamic>>> getAllPendingExpensesAcrossHotels({int limit = 500}) async {
+    final db = await database;
+    return await db.rawQuery(
+      'SELECT pe.*, ec.name as category_name FROM pending_expenses pe '
+      'JOIN financial_categories ec ON pe.category_id = ec.id '
+      'ORDER BY pe.date DESC, pe.time DESC LIMIT ?',
+      [limit],
+    );
+  }
   Future<int> insertPendingExpense(Map<String, dynamic> data) async { final db = await database; await db.execute('UPDATE financial_categories SET usage_count = usage_count + 1 WHERE id = ?', [data['category_id']]); return await db.insert('pending_expenses', data); }
+  /// فحص حالة الترحيل الفعلية من قاعدة البيانات مباشرة (مصدر الحقيقة الوحيد)
+  /// — يُستخدم من ExpenseRepository لمنع تعديل/حذف مصروف مُرحَّل على مستوى
+  /// طبقة الأعمال، لا الواجهة فقط (راجع تعليق ExpenseRepository.updatePendingExpense).
+  Future<bool> isPendingExpenseTransferred(int id) async {
+    final db = await database;
+    final rows = await db.query('pending_expenses', columns: ['is_transferred'], where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isNotEmpty && (rows.first['is_transferred'] as int? ?? 0) == 1;
+  }
   Future<void> transferPendingExpenses(List<int> ids) async { final db = await database; await db.transaction((txn) async { for (var id in ids) { await txn.update('pending_expenses', {'is_transferred': 1}, where: 'id = ?', whereArgs: [id]); } }); }
   /// إلغاء ترحيل مصروفات معلقة (عكس [transferPendingExpenses]) — تُستخدم عند
   /// "إلغاء ترحيل المصروف" من داخل التقرير اليومي، لإعادتها إلى المصروفات
@@ -1451,6 +1708,13 @@ class DatabaseService {
     final db = await database;
     return await db.query('inter_entity_transfers', where: 'from_hotel_id = ? OR to_hotel_id = ?', whereArgs: [hotelId, hotelId], orderBy: 'date DESC, time DESC');
   }
+  /// يُستخدم لإعادة قراءة حالة الاعتماد طازجة قبل تعديل/حذف تحويل — راجع
+  /// InterEntityTransferRepository._ensureTransferEditable.
+  Future<Map<String, dynamic>?> getInterEntityTransferById(int id) async {
+    final db = await database;
+    final res = await db.query('inter_entity_transfers', where: 'id = ?', whereArgs: [id], limit: 1);
+    return res.isNotEmpty ? res.first : null;
+  }
 
   // ---------------- كتالوج بنود التقرير المالي اليومي (financial_report_items) ----------------
 
@@ -1470,6 +1734,9 @@ class DatabaseService {
   Future<int> insertFinancialReportItem(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_report_items', data); }
 
   Future<List<Map<String, dynamic>>> getNotes(int hotelId) async { final db = await database; return await db.query('notes', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'created_at DESC'); }
+  /// كل الملاحظات عبر كل الفنادق — راجع تعليق getAllPendingExpensesAcrossHotels
+  /// لسبب وجود هذه النسخة غير المقيَّدة بفندق (البحث الشامل فقط).
+  Future<List<Map<String, dynamic>>> getAllNotesAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('notes', orderBy: 'created_at DESC', limit: limit); }
   Future<int> insertNote(Map<String, dynamic> data) async { final db = await database; return await db.insert('notes', data); }
 
   Future<int> insertDocument(Map<String, dynamic> data) async { final db = await database; return await db.insert('documents', data); }
@@ -2044,6 +2311,10 @@ class DatabaseService {
   Future<Map<String, dynamic>?> getSupplierByTaxNumber(int hotelId, String taxNumber) async { final db = await database; final res = await db.query('suppliers', where: 'hotel_id = ? AND tax_number = ?', whereArgs: [hotelId, taxNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<int> updateSupplierCategory(int id, String category) async { final db = await database; return await db.update('suppliers', {'default_expense_category': category}, where: 'id = ?', whereArgs: [id]); }
   Future<List<Map<String, dynamic>>> searchSuppliers(int hotelId, String query) async { final db = await database; return await db.query('suppliers', where: 'hotel_id = ? AND (official_name LIKE ? OR short_name LIKE ? OR tax_number LIKE ?)', whereArgs: [hotelId, "%$query%", "%$query%", "%$query%"], limit: 10); }
+  /// كل الموردين عبر كل الفنادق — راجع تعليق getAllPendingExpensesAcrossHotels
+  /// لسبب وجود هذه النسخة غير المقيَّدة بفندق/بلا حدّ الـ10 (البحث الشامل فقط،
+  /// لا علاقة له بـ searchSuppliers أعلاه المستخدَمة في شاشة الفاتورة).
+  Future<List<Map<String, dynamic>>> getAllSuppliersAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('suppliers', orderBy: 'official_name ASC', limit: limit); }
   Future<Map<String, dynamic>?> getSupplierById(int id) async { final db = await database; final res = await db.query('suppliers', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
 
   // --- مديونيات ومدفوعات الموردين (شراء آجل + كشف الحساب) ---
@@ -2067,6 +2338,9 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getInvoiceAuditLog(int invoiceId) async { final db = await database; return await db.query('invoice_audit_log', where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id DESC'); }
 
   Future<List<Map<String, dynamic>>> getContracts(int hotelId) async { final db = await database; return await db.query('contracts', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
+  /// كل العقود عبر كل الفنادق — راجع تعليق getAllPendingExpensesAcrossHotels
+  /// لسبب وجود هذه النسخة غير المقيَّدة بفندق (البحث الشامل فقط).
+  Future<List<Map<String, dynamic>>> getAllContractsAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('contracts', orderBy: 'id DESC', limit: limit); }
   Future<int> insertContract(Map<String, dynamic> data) async { final db = await database; return await db.insert('contracts', data); }
   Future<void> insertContractWithPayments(Map<String, dynamic> cd, List<Map<String, dynamic>> pd) async { final db = await database; await db.transaction((txn) async { final cId = await txn.insert('contracts', cd); for (var p in pd) { p['contract_id'] = cId; await txn.insert('contract_payments', p); } }); }
   Future<List<Map<String, dynamic>>> getContractPayments(int cId) async { final db = await database; return await db.query('contract_payments', where: 'contract_id = ?', whereArgs: [cId], orderBy: 'date ASC'); }
@@ -2080,6 +2354,12 @@ class DatabaseService {
   Future<int> insertDepositedFund(Map<String, dynamic> data) async { final db = await database; return await db.insert('deposited_funds', data); }
   Future<int> updateDepositedFund(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('deposited_funds', data, where: 'id = ?', whereArgs: [id]); }
   Future<Map<String, dynamic>?> getDepositedFundByReportId(int reportId) async { final db = await database; final res = await db.query('deposited_funds', where: 'report_id = ?', whereArgs: [reportId], limit: 1); return res.isNotEmpty ? res.first : null; }
+  /// يُستخدم لإعادة قراءة حالة الترحيل طازجة قبل تنفيذها — راجع
+  /// VaultRepository.transferCashToVault/postReportComponents.
+  Future<Map<String, dynamic>?> getDepositedFundById(int id) async { final db = await database; final res = await db.query('deposited_funds', where: 'id = ?', whereArgs: [id], limit: 1); return res.isNotEmpty ? res.first : null; }
+  /// يُستخدم لتحديد حالة ترحيل التقرير لتاريخ معيّن — راجع
+  /// VaultRepository.isReportComponentsPostedForDate.
+  Future<Map<String, dynamic>?> getDepositedFundByHotelAndDate(int hotelId, String date) async { final db = await database; final res = await db.query('deposited_funds', where: 'hotel_id = ? AND date = ?', whereArgs: [hotelId, date], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<int> updateDepositedFundByReportId(Map<String, dynamic> data, int reportId) async { final db = await database; return await db.update('deposited_funds', data, where: 'report_id = ?', whereArgs: [reportId]); }
 
   Future<List<Map<String, dynamic>>> getPersonalWithdrawals(int hotelId) async { final db = await database; return await db.query('personal_withdrawals', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'date DESC, time DESC'); }
@@ -2117,6 +2397,96 @@ class DatabaseService {
 
   Future<List<Map<String, dynamic>>> getPermissionGroups() async { final db = await database; return await db.query('permission_groups', orderBy: 'id ASC'); }
   Future<int> insertPermissionGroup(Map<String, dynamic> data) async { final db = await database; return await db.insert('permission_groups', data); }
+
+  // --- نظام المستخدمين والصلاحيات الحقيقي (v52) ---
+  Future<Map<String, dynamic>?> getUserByUsername(String username) async {
+    final db = await database;
+    final res = await db.query('users', where: 'username = ?', whereArgs: [username], limit: 1);
+    return res.isNotEmpty ? res.first : null;
+  }
+
+  Future<List<int>> getUserHotelIds(int userId) async {
+    final db = await database;
+    final rows = await db.query('user_hotel_access', columns: ['hotel_id'], where: 'user_id = ?', whereArgs: [userId]);
+    return rows.map((r) => r['hotel_id'] as int).toList();
+  }
+
+  /// يستبدل كل صفوف وصول الفنادق لهذا المستخدم بالقائمة الجديدة كاملةً (حذف
+  /// ثم إعادة إدراج داخل معاملة واحدة) — أبسط وأضمن من مقارنة الفروقات يدوياً.
+  Future<void> setUserHotelAccess(int userId, List<int> hotelIds) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      await txn.delete('user_hotel_access', where: 'user_id = ?', whereArgs: [userId]);
+      for (final hotelId in hotelIds) {
+        await txn.insert('user_hotel_access', {'user_id': userId, 'hotel_id': hotelId, 'created_at': now});
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getUserPermissions(int userId) async {
+    final db = await database;
+    return await db.query('user_permissions', where: 'user_id = ?', whereArgs: [userId]);
+  }
+
+  /// يستبدل كل صلاحيات هذا المستخدم بالقائمة الجديدة — نفس نمط
+  /// [setUserHotelAccess] (حذف ثم إعادة إدراج داخل معاملة واحدة).
+  /// كل عنصر: {'code': رمز الصلاحية, 'hotelId': int? (null = كل الفنادق المصرَّح بها)}.
+  Future<void> setUserPermissions(int userId, List<Map<String, dynamic>> permissions) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      await txn.delete('user_permissions', where: 'user_id = ?', whereArgs: [userId]);
+      for (final p in permissions) {
+        await txn.insert('user_permissions', {
+          'user_id': userId,
+          'permission_code': p['code'],
+          'hotel_id': p['hotelId'],
+          'created_at': now,
+        });
+      }
+    });
+  }
+
+  Future<int> insertInvitation(Map<String, dynamic> data) async { final db = await database; return await db.insert('invitations', data); }
+
+  Future<Map<String, dynamic>?> getPendingInvitationForUser(int userId) async {
+    final db = await database;
+    final res = await db.query(
+      'invitations',
+      where: 'user_id = ? AND used_at IS NULL AND revoked_at IS NULL',
+      whereArgs: [userId],
+      orderBy: 'id DESC',
+      limit: 1,
+    );
+    return res.isNotEmpty ? res.first : null;
+  }
+
+  Future<Map<String, dynamic>?> getInvitationByToken(String token) async {
+    final db = await database;
+    final res = await db.query('invitations', where: 'token = ?', whereArgs: [token], limit: 1);
+    return res.isNotEmpty ? res.first : null;
+  }
+
+  Future<void> markInvitationUsed(int id) async {
+    final db = await database;
+    await db.update('invitations', {'used_at': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> revokeInvitation(int id) async {
+    final db = await database;
+    await db.update('invitations', {'revoked_at': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> insertUserAuditLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('user_audit_log', data); }
+
+  Future<List<Map<String, dynamic>>> getUserAuditLog({int? targetUserId, int limit = 100}) async {
+    final db = await database;
+    if (targetUserId != null) {
+      return await db.query('user_audit_log', where: 'target_user_id = ?', whereArgs: [targetUserId], orderBy: 'id DESC', limit: limit);
+    }
+    return await db.query('user_audit_log', orderBy: 'id DESC', limit: limit);
+  }
 
   /// مسار ملف قاعدة البيانات الحالي على الجهاز (لأغراض النسخ الاحتياطي/الاستعادة).
   Future<String> getDatabaseFilePath() async => join(await getDatabasesPath(), await _activeDbFileName());

@@ -11,10 +11,17 @@ class Invoice {
   final String facilityName;
   final String amountSource;
 
-  /// تصنيف المصروف المرتبط بالفاتورة — نصّ حر بنفس اسم التصنيف (بلا ربط
-  /// مباشر بجدول expense_categories)، بنفس أسلوب amountSource. قد يكون
-  /// null للفواتير المضافة قبل توفر هذا الحقل أو التي لم تُصنَّف بعد.
+  /// اسم التصنيف وقت حفظ الفاتورة — نسخة عرض فقط (Display Only)، لا تتغيّر
+  /// أبداً لاحقاً حتى لو أُعيدت تسمية الفئة، حفاظاً على سلامة الفاتورة
+  /// التاريخية كما حُفظت. قد تكون null للفواتير المضافة قبل توفر هذا الحقل
+  /// أو التي لم تُصنَّف بعد.
   final String? expenseCategory;
+
+  /// معرّف الفئة المالية الحقيقي (financial_categories.id) — المصدر الوحيد
+  /// المعتمَد للفواتير المحفوظة منذ v49 (راجع تعليق جدول invoices في
+  /// database_service.dart). null للفواتير الأقدم التي حُفظت باسم نصّي فقط
+  /// قبل توحيد الفئات مع نظام الفواتير؛ تلك تبقى كما هي (لا تُعدَّل تاريخياً).
+  final int? categoryId;
 
   /// طريقة الدفع الفعلية ('نقد'/'شبكة'/'دفع جزئي') — لا تنطبق على "شراء آجل"
   /// (المبلغ لم يُدفع بعد)، فتبقى null في تلك الحالة.
@@ -38,6 +45,7 @@ class Invoice {
     required this.facilityName,
     this.amountSource = 'خارج النظام',
     this.expenseCategory,
+    this.categoryId,
     this.paymentMethod,
     this.relatedHotelId,
   });
@@ -56,6 +64,7 @@ class Invoice {
       'facility_name': facilityName,
       'amount_source': amountSource,
       'expense_category': expenseCategory,
+      'category_id': categoryId,
       'payment_method': paymentMethod,
       'related_hotel_id': relatedHotelId,
     };
@@ -75,6 +84,7 @@ class Invoice {
       facilityName: map['facility_name'] as String,
       amountSource: map['amount_source'] ?? 'خارج النظام',
       expenseCategory: map['expense_category'] as String?,
+      categoryId: map['category_id'] as int?,
       paymentMethod: map['payment_method'] as String?,
       relatedHotelId: map['related_hotel_id'] as int?,
     );

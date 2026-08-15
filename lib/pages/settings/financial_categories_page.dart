@@ -10,6 +10,7 @@ import '../../models/hotel.dart';
 import '../../repositories/financial_category_repository.dart';
 import '../../widgets/common/app_dialog.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import 'financial_category_display_preferences_page.dart';
 
 /// شاشة إدارة الفئات المالية الموحَّدة — المكان الوحيد لإنشاء/تعديل/أرشفة
 /// فئات المصروفات والإيرادات في التطبيق بالكامل (بتبويبين مستقلين). أي فئة
@@ -33,6 +34,13 @@ class FinancialCategoriesPage extends StatelessWidget {
           centerTitle: true,
           backgroundColor: identityColor,
           iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            IconButton(
+              tooltip: "تفضيلات العرض",
+              icon: const Icon(Icons.tune),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialCategoryDisplayPreferencesPage())),
+            ),
+          ],
           bottom: const TabBar(
             indicatorColor: Colors.white,
             labelColor: Colors.white,
@@ -69,6 +77,7 @@ class _CategoryTypeTabState extends State<_CategoryTypeTab> with AutomaticKeepAl
   List<FinancialCategory> _categories = [];
   bool _isLoading = true;
   String _query = '';
+  bool _isReorderMode = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -122,99 +131,222 @@ class _CategoryTypeTabState extends State<_CategoryTypeTab> with AutomaticKeepAl
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, 0),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (v) => setState(() => _query = v),
-                    decoration: InputDecoration(
-                      hintText: "بحث بالاسم أو الرمز",
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _query.isEmpty
-                          ? null
-                          : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() { _searchController.clear(); _query = ''; })),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-                      isDense: true,
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          enabled: !_isReorderMode,
+                          onChanged: (v) => setState(() => _query = v),
+                          decoration: InputDecoration(
+                            hintText: "بحث بالاسم أو الرمز",
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: _query.isEmpty
+                                ? null
+                                : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() { _searchController.clear(); _query = ''; })),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      if (!isSearching || _isReorderMode) ...[
+                        const SizedBox(width: 8),
+                        _buildReorderToggle(),
+                      ],
+                    ],
                   ),
                 ),
+                if (_isReorderMode)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.sm, AppSizes.md, 0),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text("اسحب مقبض الترتيب لإعادة ترتيب الفئات — يُحفَظ الترتيب تلقائياً", style: AppTextStyles.caption),
+                    ),
+                  ),
                 Expanded(
                   child: list.isEmpty
                       ? const Center(child: Text("لا توجد فئات مطابقة", style: AppTextStyles.caption))
-                      : isSearching
-                          ? ListView.builder(
-                              padding: const EdgeInsets.all(AppSizes.md),
-                              itemCount: list.length,
-                              itemBuilder: (context, index) => _buildTile(list[index], reorderable: false),
-                            )
-                          : ReorderableListView.builder(
+                      : _isReorderMode
+                          ? ReorderableListView.builder(
                               padding: const EdgeInsets.all(AppSizes.md),
                               itemCount: list.length,
                               onReorder: _onReorder,
-                              itemBuilder: (context, index) => _buildTile(list[index], reorderable: true, key: ValueKey(list[index].id)),
+                              itemBuilder: (context, index) => _buildTile(list[index], index: index, key: ValueKey(list[index].id)),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(AppSizes.md),
+                              itemCount: list.length,
+                              itemBuilder: (context, index) => _buildTile(list[index], index: index),
                             ),
                 ),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showFormDialog(),
-        label: const Text("إضافة فئة"),
-        icon: const Icon(Icons.add),
-        backgroundColor: widget.identityColor,
-        foregroundColor: Colors.white,
-      ),
+      floatingActionButton: _isReorderMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _showFormDialog(),
+              label: const Text("إضافة فئة"),
+              icon: const Icon(Icons.add),
+              backgroundColor: widget.identityColor,
+              foregroundColor: Colors.white,
+            ),
     );
   }
 
-  Widget _buildTile(FinancialCategory category, {required bool reorderable, Key? key}) {
+  /// يبدّل "وضع الترتيب" — عند تفعيله تظهر مقابض السحب على كل الفئات
+  /// (بلا بحث نشط، والحفظ فوري بعد كل سحبة عبر [_onReorder])، وعند إيقافه
+  /// تعود الشاشة لمظهرها النظيف المعتاد ببساطة زر "المزيد" لكل فئة.
+  Widget _buildReorderToggle() {
+    return IconButton(
+      tooltip: _isReorderMode ? "إنهاء الترتيب" : "ترتيب الفئات",
+      style: IconButton.styleFrom(
+        backgroundColor: _isReorderMode ? widget.identityColor : Colors.white,
+        side: BorderSide(color: widget.identityColor.withValues(alpha: 0.3)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+      ),
+      icon: Icon(_isReorderMode ? Icons.check : Icons.swap_vert, color: _isReorderMode ? Colors.white : widget.identityColor),
+      onPressed: () => setState(() => _isReorderMode = !_isReorderMode),
+    );
+  }
+
+  /// صف فئة نظيف بالحد الأدنى من العناصر (أيقونة/اسم/حالة/مؤشر مفضّلة
+  /// اختياري) — كل إجراءات الإدارة (تعديل/أرشفة/مفضّلة/افتراضي/حذف/إحصائيات)
+  /// انتقلت إلى قائمة "المزيد" الموحّدة ([_showActionsSheet]) بدل عرض خمسة
+  /// أزرار ملوّنة دائماً على كل صف. مقبض السحب لا يظهر إلا في وضع الترتيب.
+  Widget _buildTile(FinancialCategory category, {required int index, Key? key}) {
     final color = Color(category.colorValue);
     final parent = category.parentId == null ? null : _categories.where((c) => c.id == category.parentId).firstOrNullSafe;
     return Card(
       key: key ?? ValueKey(category.id),
       margin: const EdgeInsets.only(bottom: AppSizes.sm),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
-          child: Icon(IconData(category.iconCode, fontFamily: 'MaterialIcons'), color: color),
-        ),
-        title: Row(
-          children: [
-            Flexible(child: Text(category.name, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-            if (category.code != null && category.code!.trim().isNotEmpty) ...[
-              const SizedBox(width: 6),
-              Text('(${category.code})', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.secondary)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        onLongPress: _isReorderMode ? null : () => _showActionsSheet(category),
+        child: ListTile(
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
+            child: Icon(IconData(category.iconCode, fontFamily: 'MaterialIcons'), color: color),
+          ),
+          title: Row(
+            children: [
+              Flexible(child: Text(category.name, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              if (category.code != null && category.code!.trim().isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Text('(${category.code})', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.secondary)),
+              ],
+              if (category.isPinned) ...[const SizedBox(width: 6), const Icon(Icons.star, size: 15, color: Colors.amber)],
             ],
-            if (category.isDefault) ...[const SizedBox(width: 6), const Icon(Icons.star, size: 16, color: Colors.amber)],
-          ],
+          ),
+          subtitle: Text(
+            [
+              category.isArchived ? "مؤرشَف" : (category.isBasic ? "أساسي" : "مضاف"),
+              if (category.isDefault) "افتراضي",
+              if (parent != null) "ضمن: ${parent.name}",
+              if (category.createdBy != null && category.createdBy!.trim().isNotEmpty) "بواسطة: ${category.createdBy}",
+              if (category.description != null && category.description!.trim().isNotEmpty) category.description!,
+            ].join(' • '),
+            style: TextStyle(fontSize: 12, color: category.isArchived ? Colors.grey : Theme.of(context).colorScheme.secondary),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: _isReorderMode
+              ? ReorderableDragStartListener(index: index, child: const Icon(Icons.drag_handle, color: Colors.grey))
+              : IconButton(
+                  icon: const Icon(Icons.more_vert),
+                  tooltip: "المزيد",
+                  onPressed: () => _showActionsSheet(category),
+                ),
         ),
-        subtitle: Text(
-          [
-            category.isArchived ? "مؤرشَف" : (category.isBasic ? "أساسي" : "مضاف"),
-            if (parent != null) "ضمن: ${parent.name}",
-            if (category.description != null && category.description!.trim().isNotEmpty) category.description!,
-          ].join(' • '),
-          style: TextStyle(fontSize: 12, color: category.isArchived ? Colors.grey : Theme.of(context).colorScheme.secondary),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
+      ),
+    );
+  }
+
+  /// قائمة إجراءات موحّدة لفئة واحدة (Bottom Sheet) — تُفتح من زر "⋮ المزيد"
+  /// أو من الضغط المطوَّل على الصف. فحص الاستخدام يتم مرة واحدة هنا عند
+  /// الفتح (وليس لكل صف مرئي) لتعطيل خيار الحذف مباشرة مع رسالة توضيحية،
+  /// بدل تركه يفتح حواراً منفصلاً بعد الضغط.
+  Future<void> _showActionsSheet(FinancialCategory category) async {
+    final inUse = await _repository.isCategoryInUse(category);
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              icon: Icon(category.isDefault ? Icons.star : Icons.star_border, color: category.isDefault ? Colors.amber : Colors.grey),
-              tooltip: "تعيين كافتراضي",
-              onPressed: () => _setDefault(category),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSizes.md, AppSizes.md, AppSizes.md, AppSizes.sm),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Color(category.colorValue).withValues(alpha: 0.1), shape: BoxShape.circle),
+                    child: Icon(IconData(category.iconCode, fontFamily: 'MaterialIcons'), color: Color(category.colorValue)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(category.name, style: AppTextStyles.bodyBold.copyWith(fontSize: 15), overflow: TextOverflow.ellipsis)),
+                ],
+              ),
             ),
-            IconButton(
-              icon: Icon(category.isArchived ? Icons.unarchive_outlined : Icons.archive_outlined, color: category.isArchived ? Colors.green : Colors.blueGrey),
-              tooltip: category.isArchived ? "استعادة" : "أرشفة",
-              onPressed: () => _toggleArchive(category),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined, color: Colors.orange),
+              title: const Text("تعديل الفئة"),
+              onTap: () { Navigator.pop(sheetContext); _openEdit(category); },
             ),
-            IconButton(icon: const Icon(Icons.edit_outlined, color: Colors.orange), onPressed: () => _openEdit(category)),
-            IconButton(icon: const Icon(Icons.delete_outline, color: AppColors.danger), onPressed: () => _delete(category)),
-            if (reorderable) const Icon(Icons.drag_handle, color: Colors.grey),
+            ListTile(
+              leading: Icon(category.isArchived ? Icons.unarchive_outlined : Icons.archive_outlined, color: category.isArchived ? Colors.green : Colors.blueGrey),
+              title: Text(category.isArchived ? "استعادة الفئة" : "أرشفة الفئة"),
+              onTap: () { Navigator.pop(sheetContext); _toggleArchive(category); },
+            ),
+            ListTile(
+              leading: Icon(category.isPinned ? Icons.star : Icons.star_border, color: Colors.amber),
+              title: Text(category.isPinned ? "إزالة من المفضلة" : "إضافة للمفضلة"),
+              onTap: () { Navigator.pop(sheetContext); _togglePinned(category); },
+            ),
+            ListTile(
+              enabled: !category.isDefault,
+              leading: const Icon(Icons.push_pin_outlined, color: Colors.blueGrey),
+              title: Text(category.isDefault ? "الفئة الافتراضية الحالية" : "تعيين كافتراضي"),
+              subtitle: category.isDefault ? null : const Text("تُستخدم كاختيار مسبق عند إضافة فاتورة ضريبية", style: AppTextStyles.caption),
+              onTap: () { Navigator.pop(sheetContext); _setDefault(category); },
+            ),
+            ListTile(
+              enabled: !inUse,
+              leading: const Icon(Icons.delete_outline, color: AppColors.danger),
+              title: const Text("حذف الفئة", style: TextStyle(color: AppColors.danger)),
+              subtitle: inUse ? const Text("مستخدَمة في عمليات مالية سابقة — استخدم الأرشفة بدلاً من ذلك", style: AppTextStyles.caption) : null,
+              onTap: inUse ? null : () { Navigator.pop(sheetContext); _delete(category); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bar_chart_outlined, color: Colors.indigo),
+              title: const Text("عرض إحصائيات الاستخدام"),
+              onTap: () { Navigator.pop(sheetContext); _showUsageStats(category); },
+            ),
+            const SizedBox(height: AppSizes.sm),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _togglePinned(FinancialCategory category) async {
+    await _repository.updateCategory(category.copyWith(isPinned: !category.isPinned));
+    _loadData();
+  }
+
+  void _showUsageStats(FinancialCategory category) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+        title: Text("إحصائيات: ${category.name}"),
+        content: Text("عدد مرات الاستخدام في عمليات مالية حتى الآن: ${category.usageCount}"),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("إغلاق"))],
       ),
     );
   }
@@ -396,6 +528,21 @@ class _CategoryTypeTabState extends State<_CategoryTypeTab> with AutomaticKeepAl
                   return;
                 }
 
+                final likelyDuplicate = await _repository.findLikelyDuplicate(trimmedName, widget.type, excludeId: category?.id);
+                if (!mounted) return;
+                if (likelyDuplicate != null) {
+                  bool proceedAnyway = false;
+                  await AppDialog.confirmAction(
+                    context: context,
+                    title: "تشابه مع فئة موجودة",
+                    message: "\"$trimmedName\" يشبه إلى حد كبير الفئة الموجودة \"${likelyDuplicate.name}\" — قد يمثّلان نفس الغرض المالي. تأكد أنهما فئتان مختلفتان فعلاً قبل المتابعة.",
+                    confirmLabel: "متابعة كفئة مختلفة",
+                    cancelLabel: "إلغاء",
+                    onConfirm: () async => proceedAnyway = true,
+                  );
+                  if (!proceedAnyway) return;
+                }
+
                 Navigator.pop(context);
                 if (!mounted) return;
                 await AppDialog.confirmAction(
@@ -412,6 +559,7 @@ class _CategoryTypeTabState extends State<_CategoryTypeTab> with AutomaticKeepAl
                         parentId: selectedParentId,
                         iconCode: selectedIcon,
                         colorValue: selectedColor,
+                        createdBy: "مدير النظام",
                         createdAt: DateTime.now().toIso8601String(),
                         sortOrder: _categories.length,
                       );

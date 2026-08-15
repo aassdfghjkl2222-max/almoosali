@@ -87,7 +87,15 @@ class AppDialog {
     );
 
     if (confirmed == true) {
-      await onConfirm();
+      try {
+        await onConfirm();
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: AppColors.danger),
+          );
+        }
+      }
     }
   }
 }

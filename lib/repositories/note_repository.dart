@@ -10,6 +10,13 @@ class NoteRepository {
     return data.map((map) => Note.fromMap(map)).toList();
   }
 
+  /// عبر كل الفنادق معاً — راجع تعليق DatabaseService.getAllNotesAcrossHotels
+  /// (البحث الشامل GlobalSearch فقط).
+  Future<List<Note>> getAllNotesAcrossHotels() async {
+    final data = await _dbService.getAllNotesAcrossHotels();
+    return data.map((map) => Note.fromMap(map)).toList();
+  }
+
   Future<int> addNote(Note note) async {
     return await _dbService.insertNote(note.toMap());
   }

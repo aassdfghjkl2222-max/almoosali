@@ -8,6 +8,9 @@ import '../../models/financial_report.dart';
 import '../../models/hotel.dart';
 import '../../models/daily_report_template.dart';
 import '../../repositories/shared_expense_repository.dart';
+import '../../repositories/vault_repository.dart';
+import '../../repositories/inter_entity_transfer_repository.dart';
+import '../../repositories/hotel_repository.dart';
 import '../../services/daily_report_builder.dart';
 import '../../services/daily_report_text_renderer.dart';
 import '../../services/pdf_service.dart';
@@ -28,6 +31,7 @@ class SavedReportViewPage extends StatefulWidget {
 
 class _SavedReportViewPageState extends State<SavedReportViewPage> {
   final _sharedExpenseRepository = SharedExpenseRepository();
+  final _transferRepository = InterEntityTransferRepository();
   DailyReportTemplate? _template;
 
   @override
@@ -38,6 +42,10 @@ class _SavedReportViewPageState extends State<SavedReportViewPage> {
 
   Future<void> _load() async {
     final shares = await _sharedExpenseRepository.getSharesForHotelAndDate(widget.hotel.id!, widget.report.date);
+    final withdrawals = await VaultRepository().getAdvanceWithdrawals(widget.report.hotelId);
+    final allTransfers = await _transferRepository.getForHotel(widget.report.hotelId);
+    final hotels = await HotelRepository().getAllHotelsIncludingArchived();
+    final hotelNames = {for (final h in hotels) if (h.id != null) h.id!: h.arabicName};
     final template = buildTemplateFromSavedReport(
       report: widget.report,
       hotelName: widget.hotel.arabicName,
@@ -49,6 +57,17 @@ class _SavedReportViewPageState extends State<SavedReportViewPage> {
             amount: s.amount,
             isFundingHotel: s.isFundingHotel,
           ),
+      ],
+      vaultWithdrawalsForDate: withdrawals.where((w) => w.date == widget.report.date).toList(),
+      transferLines: [
+        for (final t in allTransfers)
+          if (t.fromHotelId == widget.report.hotelId && t.date == widget.report.date)
+            InterHotelTransferTemplateLine(
+              statement: t.statement,
+              counterpartHotelName: hotelNames[t.toHotelId] ?? "فندق آخر",
+              amount: t.amount,
+              isOutgoing: true,
+            ),
       ],
     );
     if (mounted) setState(() => _template = template);

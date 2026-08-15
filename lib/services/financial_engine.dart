@@ -252,6 +252,78 @@ class FinancialEngine {
     });
   }
 
+  /// يعكس ساقاً واحدة من قيد سابق — نفس [_updateAccount] بعكس نوع الحركة
+  /// (income↔expense). يُستخدم لبناء "عكس" كامل لأي عملية مركَّبة (سحب مالك/
+  /// تحويل بين منشآت) بعكس كل ساق من ساقيها بنفس الترتيب تماماً، بدل حذف/
+  /// تعديل القيد الأصلي مباشرة — يحافظ على السجل التاريخي الكامل في
+  /// financial_ledger (تعديل/حذف عملية غير مرحَّلة = عكس + إعادة تسجيل، وليس
+  /// طمس الأثر السابق).
+  Future<void> _reverseLeg(dynamic txn, int hotelId, String category, double amount, String originalActionType, String description, int? refId, String? refType) async {
+    await _updateAccount(txn, hotelId, category, amount, originalActionType == 'income' ? 'expense' : 'income', description, refId, refType);
+  }
+
+  /// عكس [recordOwnerDrawing] بالضبط — يُستخدم عند تعديل/حذف سحب مالك لم
+  /// يُرحَّل بعد (راجع VaultRepository.updateOwnerWithdrawal/deleteOwnerWithdrawal).
+  Future<void> reverseOwnerDrawing({
+    required int hotelId,
+    required double amount,
+    required String paymentMethodCategory,
+    required String description,
+    int? referenceId,
+    String? referenceType,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _reverseLeg(txn, hotelId, paymentMethodCategory, amount, 'expense', description, referenceId, referenceType);
+      await _reverseLeg(txn, hotelId, 'owner_debt', amount, 'income', description, referenceId, referenceType);
+    });
+  }
+
+  /// عكس [recordTransaction] بالضبط (بما فيها زوج entity_/receivable_entity
+  /// إن وُجد) — يُستخدم عند تعديل/حذف عملية لم تُرحَّل بعد اعتمدت على
+  /// recordTransaction (مثل تحويل بين منشآت بلا مصدر تمويل حقيقي).
+  Future<void> reverseTransaction({
+    required int hotelId,
+    required String sourceCategory,
+    required double amount,
+    required String type,
+    required String description,
+    int? referenceId,
+    String? referenceType,
+    int? otherHotelId,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _reverseLeg(txn, hotelId, sourceCategory, amount, type == 'income' ? 'income' : 'expense', description, referenceId, referenceType);
+      if (sourceCategory.startsWith('entity_')) {
+        final resolvedOtherId = otherHotelId ?? _parseEntityOtherId(sourceCategory);
+        if (resolvedOtherId != null) {
+          await _reverseLeg(txn, resolvedOtherId, 'receivable_entity_$hotelId', amount, 'income', 'عكس: $description', referenceId, 'inter_entity');
+        }
+      }
+    });
+  }
+
+  /// عكس [recordSharedExpense] بالضبط — يُستخدم عند تعديل/حذف تحويل بين
+  /// منشآت لم يُرحَّل بعد بمصدر تمويل حقيقي (المُرسِل دفع فعلياً).
+  Future<void> reverseSharedExpense({
+    required int fundingHotelId,
+    required double totalAmount,
+    required String paymentMethodCategory,
+    required Map<int, double> otherShares,
+    required String description,
+    int? referenceId,
+  }) async {
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      await _reverseLeg(txn, fundingHotelId, paymentMethodCategory, totalAmount, 'expense', description, referenceId, 'shared_expense');
+      for (final entry in otherShares.entries) {
+        await _reverseLeg(txn, entry.key, 'entity_$fundingHotelId', entry.value, 'expense', 'عكس: $description', referenceId, 'shared_expense');
+        await _reverseLeg(txn, fundingHotelId, 'receivable_entity_${entry.key}', entry.value, 'income', 'عكس: $description', referenceId, 'shared_expense');
+      }
+    });
+  }
+
   Future<FinancialAccount> _getAccount(dynamic txn, int hotelId, String category) async {
     final results = await txn.query('financial_accounts', where: 'hotel_id = ? AND category = ?', whereArgs: [hotelId, category], limit: 1);
     if (results.isEmpty) {

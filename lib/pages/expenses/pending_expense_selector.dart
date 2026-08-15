@@ -169,8 +169,12 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
       ),
     );
     if (confirmed == true) {
-      await _repository.deletePendingExpense(exp.id!);
-      _loadData();
+      try {
+        await _repository.deletePendingExpense(exp.id!);
+        _loadData();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', ''))));
+      }
     }
   }
 

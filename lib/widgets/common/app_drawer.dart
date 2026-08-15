@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_config.dart';
 import '../../core/app_page_route.dart';
+import '../../core/app_permissions.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/hotel_visual_identity.dart';
 import '../../models/hotel.dart';
 import '../../repositories/hotel_repository.dart';
+import '../../services/permission_service.dart';
 import '../../pages/notes/notes_page.dart';
 import '../../pages/settings/about_page.dart';
 import '../../pages/settings/backup_page.dart';
@@ -20,19 +22,14 @@ import '../../pages/documents/documents_hub_page.dart';
 import '../../pages/documents/contract_documents/contract_folder_browser_page.dart';
 import '../../pages/login/pin_login_page.dart';
 import '../../pages/master_data/master_data_hub_page.dart';
-import '../../pages/users/users_page.dart';
 
 /// القائمة الرئيسية — مخصصة للأنظمة العامة الخاصة بالتطبيق فقط. أي نظام
 /// تشغيلي خاص بفندق معيّن (التقرير اليومي، مركز التحليل، المركز المالي،
 /// الموظفون، المستندات، المصروفات...) يبقى داخل لوحة تحكم ذلك الفندق ولا
 /// يظهر هنا، تماماً كما هو مطبَّق فعلاً في dashboard_page.dart.
 ///
-/// "إدارة المستخدمين والصلاحيات" غير معروضة حالياً لأن التطبيق يعمل فعلياً
-/// بنظام دخول واحد مشترك (رمز PIN) بلا نظام مستخدمين متعددين حقيقي — العلم
-/// أدناه هو نقطة التبديل الوحيدة المطلوبة لإظهارها متى صار للتطبيق نظام
-/// مستخدمين متعدد فعلي.
-const bool kAppHasMultipleUsers = false;
-
+/// "المستخدمون والصلاحيات" انتقلت إلى الإعدادات ← الأمان (راجع
+/// SettingsPage/SecuritySettingsPage) — ليست في هذه القائمة الجانبية.
 class AppDrawer extends StatelessWidget {
   final Hotel? hotel;
   const AppDrawer({super.key, this.hotel});
@@ -82,21 +79,23 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => Navigator.pushAndRemoveUntil(context, premiumRoute(const HotelsPage()), (route) => false),
                 ),
-                _drawerItem(
-                  context: context,
-                  icon: Icons.folder_outlined,
-                  title: "المستندات",
-                  subtitle: "كل مستندات التطبيق في مكان واحد",
-                  color: color,
-                  onTap: () => Navigator.push(context, premiumRoute(const DocumentsHubPage())),
-                ),
-                _drawerItem(
-                  context: context,
-                  icon: Icons.assignment_outlined,
-                  title: "العقود",
-                  color: color,
-                  onTap: () => _openHotelScoped(context, "اختر الفندق لعرض عقوده", (h) => ContractsPage(hotel: h)),
-                ),
+                if (PermissionService.instance.hasPermission(AppPermissions.documentsView))
+                  _drawerItem(
+                    context: context,
+                    icon: Icons.folder_outlined,
+                    title: "المستندات",
+                    subtitle: "كل مستندات التطبيق في مكان واحد",
+                    color: color,
+                    onTap: () => Navigator.push(context, premiumRoute(const DocumentsHubPage())),
+                  ),
+                if (PermissionService.instance.hasPermission(AppPermissions.contractsView))
+                  _drawerItem(
+                    context: context,
+                    icon: Icons.assignment_outlined,
+                    title: "العقود",
+                    color: color,
+                    onTap: () => _openHotelScoped(context, "اختر الفندق لعرض عقوده", (h) => ContractsPage(hotel: h)),
+                  ),
                 _drawerItem(
                   context: context,
                   icon: Icons.snippet_folder_outlined,
@@ -105,13 +104,14 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => Navigator.push(context, premiumRoute(const ContractFolderBrowserPage())),
                 ),
-                _drawerItem(
-                  context: context,
-                  icon: Icons.local_shipping_outlined,
-                  title: "الموردون",
-                  color: color,
-                  onTap: () => _openHotelScoped(context, "اختر الفندق لعرض مورديه", (h) => SupplierDebtsPage(hotel: h)),
-                ),
+                if (PermissionService.instance.hasPermission(AppPermissions.suppliersView))
+                  _drawerItem(
+                    context: context,
+                    icon: Icons.local_shipping_outlined,
+                    title: "الموردون",
+                    color: color,
+                    onTap: () => _openHotelScoped(context, "اختر الفندق لعرض مورديه", (h) => SupplierDebtsPage(hotel: h)),
+                  ),
                 _drawerItem(
                   context: context,
                   icon: Icons.note_alt_outlined,
@@ -127,14 +127,6 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => Navigator.push(context, premiumRoute(const MasterDataHubPage())),
                 ),
-                if (kAppHasMultipleUsers)
-                  _drawerItem(
-                    context: context,
-                    icon: Icons.manage_accounts_outlined,
-                    title: "إدارة المستخدمين والصلاحيات",
-                    color: color,
-                    onTap: () => Navigator.push(context, premiumRoute(const UsersPage())),
-                  ),
                 const _DrawerDivider(),
                 _drawerItem(
                   context: context,
@@ -143,13 +135,14 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => Navigator.push(context, premiumRoute(const BackupPage())),
                 ),
-                _drawerItem(
-                  context: context,
-                  icon: Icons.settings_outlined,
-                  title: "الإعدادات",
-                  color: color,
-                  onTap: () => Navigator.push(context, premiumRoute(const SettingsPage())),
-                ),
+                if (PermissionService.instance.hasPermission(AppPermissions.settingsAccess))
+                  _drawerItem(
+                    context: context,
+                    icon: Icons.settings_outlined,
+                    title: "الإعدادات",
+                    color: color,
+                    onTap: () => Navigator.push(context, premiumRoute(const SettingsPage())),
+                  ),
                 _drawerItem(
                   context: context,
                   icon: Icons.help_outline_rounded,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_colors.dart';
 import '../../core/app_page_route.dart';
+import '../../core/app_permissions.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_theme.dart';
 import '../../core/document_status.dart';
@@ -10,6 +11,7 @@ import '../../core/hotel_identity.dart';
 import '../../models/hotel.dart';
 import '../../repositories/document_repository.dart';
 import '../../repositories/expense_repository.dart';
+import '../../services/permission_service.dart';
 import '../../widgets/common/app_drawer.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../expenses/pending_expenses_list_page.dart';
@@ -32,12 +34,18 @@ class _DashboardSection {
   final int Function(_DashboardPageState state)? badgeCount;
   final Widget Function(BuildContext context, Hotel hotel) builder;
 
+  /// رمز صلاحية العرض المطلوب لإظهار هذا القسم — null تعني ظاهر دوماً (أقسام
+  /// خارج الوحدات الـ9 المذكورة صراحة في نظام الصلاحيات، مثل مركز التحليل).
+  /// راجع PermissionService.hasPermission.
+  final String? viewPermission;
+
   const _DashboardSection({
     required this.title,
     required this.icon,
     required this.color,
     required this.builder,
     this.badgeCount,
+    this.viewPermission,
   });
 }
 
@@ -48,24 +56,28 @@ final List<_DashboardSection> _sections = [
     color: (_) => AppColors.warning,
     badgeCount: (state) => state._pendingCount,
     builder: (context, hotel) => PendingExpensesListPage(hotel: hotel),
+    viewPermission: AppPermissions.financialDataView,
   ),
   _DashboardSection(
     title: "التقرير المالي",
     icon: Icons.account_balance_rounded,
     color: (_) => AppColors.success,
     builder: (context, hotel) => FinancialSummaryPage(hotel: hotel),
+    viewPermission: AppPermissions.financialReportsView,
   ),
   _DashboardSection(
     title: "المركز المالي",
     icon: Icons.account_balance_wallet_rounded,
     color: (identity) => identity.primary,
     builder: (context, hotel) => VaultDashboardPage(hotel: hotel),
+    viewPermission: AppPermissions.vaultView,
   ),
   _DashboardSection(
     title: "مستندات الفندق",
     icon: Icons.description_rounded,
     color: (_) => AppColors.info,
     builder: (context, hotel) => DocumentsPage(hotel: hotel),
+    viewPermission: AppPermissions.documentsView,
   ),
   _DashboardSection(
     title: "مركز التحليل",
@@ -84,6 +96,7 @@ final List<_DashboardSection> _sections = [
     icon: Icons.people_alt_rounded,
     color: (_) => const Color(0xFF00897B),
     builder: (context, hotel) => EmployeesPage(hotel: hotel),
+    viewPermission: AppPermissions.employeesView,
   ),
   _DashboardSection(
     title: "المزيد",
@@ -164,9 +177,20 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     return Navigator.push<T>(context, premiumRoute<T>(page));
   }
 
+  /// أقسام هذه اللوحة التي يملك المستخدم الحالي صلاحية عرضها لهذا الفندق —
+  /// المدير أو وضع PIN بلا تفعيل تعدد مستخدمين يريان كل الأقسام كما كان
+  /// السلوك دوماً (راجع PermissionService._noUserLoaded/isManager).
+  List<_DashboardSection> get _visibleSections {
+    return _sections.where((s) {
+      if (s.viewPermission == null) return true;
+      return PermissionService.instance.hasPermission(s.viewPermission!, hotelId: widget.hotel.id);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final identity = HotelVisualIdentity.identityForHotel(widget.hotel);
+    final sections = _visibleSections;
 
     return Theme(
       data: AppTheme.createTheme(identity),
@@ -215,16 +239,16 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                     ),
                   ),
                   const SizedBox(height: AppSizes.lg),
-                  for (var i = 0; i < _sections.length; i++) ...[
+                  for (var i = 0; i < sections.length; i++) ...[
                     _staggered(
                       i + 1,
                       DashboardSectionCard(
-                        icon: _sections[i].icon,
-                        title: _sections[i].title,
-                        color: _sections[i].color(identity),
-                        badgeCount: _sections[i].badgeCount?.call(this) ?? 0,
+                        icon: sections[i].icon,
+                        title: sections[i].title,
+                        color: sections[i].color(identity),
+                        badgeCount: sections[i].badgeCount?.call(this) ?? 0,
                         onTap: () async {
-                          final result = await _openSection(_sections[i].builder(context, widget.hotel));
+                          final result = await _openSection(sections[i].builder(context, widget.hotel));
                           if (result == true) {
                             _loadPendingCount();
                             _loadDocumentStats();
@@ -232,7 +256,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                         },
                       ),
                     ),
-                    if (i != _sections.length - 1) const SizedBox(height: AppSizes.sm),
+                    if (i != sections.length - 1) const SizedBox(height: AppSizes.sm),
                   ],
                 ],
               ),

@@ -47,6 +47,34 @@ class AppPreferences {
 
   static const keyContractDocsViewMode = 'pref_contract_docs_view_mode'; // 'grid' | 'list'
 
+  // نظام المستخدمين والصلاحيات — معطَّل افتراضياً عمداً حتى لا يتأثر أي تنصيب
+  // حالي يعتمد رمز PIN وحده: بعد نجاح PIN، شاشة دخول المستخدم (اسم مستخدم/
+  // كلمة مرور) لا تظهر إلا إذا فعَّل المدير هذا العلم يدوياً من شاشة
+  // "المستخدمون والصلاحيات" بعد إعداد حسابات حقيقية. راجع PinLoginPage/UserLoginPage.
+  static const keyMultiUserLoginEnabled = 'pref_multi_user_login_enabled';
+
+  // تفضيلات عرض مُنتقي الفئة المالية — راجع core/category_display_preferences.dart
+  // (المصدر المركزي الوحيد الذي يقرأ/يكتب هذه المفاتيح؛ لا تُقرأ مباشرة من
+  // أي شاشة أخرى). تخصيص بصري بحت، بلا أي أثر على البيانات المالية أو
+  // التقارير أو ترتيب sort_order الفعلي في قاعدة البيانات.
+  static const keyCategoryPickerLayout = 'pref_category_picker_layout'; // 'list' | 'grid'
+  static const keyCategoryPickerGridColumns = 'pref_category_picker_grid_columns'; // 2..5
+  static const keyCategoryPickerSortMode = 'pref_category_picker_sort_mode'; // 'manual' | 'alphabetical' | 'favorites' | 'recent'
+  static const keyCategoryPickerButtonSize = 'pref_category_picker_button_size'; // 'small' | 'medium' | 'large'
+  static const keyCategoryPickerAppearance = 'pref_category_picker_appearance'; // 'icon_name' | 'name_only' | 'icon_only'
+  static const keyCategoryPickerShowFavoritesFirst = 'pref_category_picker_show_favorites_first';
+  static const keyCategoryPickerRememberRecent = 'pref_category_picker_remember_recent';
+
+  static Future<int> getInt(String key, {int defaultValue = 0}) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(key) ?? defaultValue;
+  }
+
+  static Future<void> setInt(String key, int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(key, value);
+  }
+
   static Future<bool> getBool(String key, {bool defaultValue = false}) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(key) ?? defaultValue;

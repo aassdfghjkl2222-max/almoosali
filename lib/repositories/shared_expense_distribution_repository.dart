@@ -70,6 +70,9 @@ class SharedExpenseDistributionRepository {
     String performedBy = "مدير النظام",
   }) async {
     if (header.id == null) return;
+    if (!await canModify(header.id!)) {
+      throw StateError('لا يمكن تعديل مصروف مشترك رُحِّل جزء منه بالفعل إلى تقرير مالي مُعتمد.');
+    }
     final existing = await getPendingExpensesFor(header.id!);
     final existingByHotel = {for (final e in existing) e.hotelId: e};
 
@@ -115,6 +118,9 @@ class SharedExpenseDistributionRepository {
   /// حذف نهائي: يحذف رأس المصروف المشترك، وCASCADE يحذف تلقائياً كل مصروفاته
   /// المعلَّقة المولَّدة. يُمنَع إن كان أيٌّ منها مرحَّلاً بالفعل — راجع [canModify].
   Future<void> deleteSharedExpense(int id) async {
+    if (!await canModify(id)) {
+      throw StateError('لا يمكن حذف مصروف مشترك رُحِّل جزء منه بالفعل إلى تقرير مالي مُعتمد.');
+    }
     await _dbService.deleteSharedExpense(id);
   }
 

@@ -10,6 +10,13 @@ class ContractRepository {
     return data.map((map) => Contract.fromMap(map)).toList();
   }
 
+  /// عبر كل الفنادق معاً — راجع تعليق DatabaseService.getAllContractsAcrossHotels
+  /// (البحث الشامل GlobalSearch فقط).
+  Future<List<Contract>> getAllContractsAcrossHotels() async {
+    final data = await _dbService.getAllContractsAcrossHotels();
+    return data.map((map) => Contract.fromMap(map)).toList();
+  }
+
   Future<Contract?> getContractById(int id) async {
     final db = await _dbService.database;
     final results = await db.query('contracts', where: 'id = ?', whereArgs: [id]);

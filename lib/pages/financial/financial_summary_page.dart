@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import '../../core/app_colors.dart';
+import '../../core/app_permissions.dart';
 import '../../core/app_preferences.dart';
 import '../../core/formatters/thousands_separator_formatter.dart';
 import '../../core/hotel_visual_identity.dart';
@@ -12,6 +13,7 @@ import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../core/app_radius.dart';
 import '../../models/hotel.dart';
+import '../../models/advance_withdrawal.dart';
 import '../../models/financial_report.dart';
 import '../../models/financial_category.dart';
 import '../../models/pending_expense.dart';
@@ -20,16 +22,20 @@ import '../../repositories/financial_repository.dart';
 import '../../repositories/expense_repository.dart';
 import '../../repositories/vault_repository.dart';
 import '../../repositories/shared_expense_repository.dart';
+import '../../repositories/inter_entity_transfer_repository.dart';
 import '../../models/deposited_fund.dart';
+import '../../models/inter_entity_transfer.dart';
 import '../../models/shared_expense_share.dart';
 import '../../models/daily_report_template.dart';
 import '../../services/daily_report_builder.dart';
 import '../../services/daily_report_text_renderer.dart';
 import '../../services/pdf_service.dart';
+import '../../services/permission_service.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
 import '../../widgets/common/app_text_field.dart';
+import '../../widgets/common/permission_gate.dart';
 import '../../widgets/financial/add_report_item_sheet.dart';
 import '../../widgets/financial/funding_source_picker.dart';
 import '../settings/financial_categories_page.dart';
@@ -154,6 +160,9 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   final _sharedExpenseRepository = SharedExpenseRepository();
   List<SharedExpenseShare> _sharedExpenseShares = [];
 
+  final _transferRepository = InterEntityTransferRepository();
+  List<InterEntityTransfer> _pendingTransfers = [];
+
   double _totalIncome = 0;
   double _totalExpenses = 0;
   double _totalDebtExpenses = 0;
@@ -220,7 +229,8 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final reports = await repository.getFinancialReportsInRange(hotelId: widget.hotel.id, startDate: dateStr, endDate: dateStr);
     final sharedShares = await _sharedExpenseRepository.getSharesForHotelAndDate(widget.hotel.id!, dateStr);
-    if (mounted) setState(() => _sharedExpenseShares = sharedShares);
+    final pendingTransfers = await _transferRepository.getPendingForHotelAndDate(widget.hotel.id!, dateStr);
+    if (mounted) setState(() { _sharedExpenseShares = sharedShares; _pendingTransfers = pendingTransfers; });
 
     if (reports.isNotEmpty) {
       final report = reports.first;
@@ -319,14 +329,18 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     double ref = ThousandsSeparatorInputFormatter.parse(_refundController.text) ?? 0;
     double c2p = ThousandsSeparatorInputFormatter.parse(_cashToPosController.text) ?? 0;
 
-    double oTotal = 0, oCash = 0, oBank = 0, oDebt = 0;
+    double oTotal = 0, oCash = 0, oDebt = 0;
     void process(double a, String m, {bool isFundedByOtherHotel = false}) {
       oTotal += a;
       // مموَّل من فندق آخر: يُحتسَب ضمن إجمالي المصروفات المعروض فقط، ولا
       // يخصم من النقد/الشبكة ولا يؤثر على صافي الخزنة إطلاقاً (البند خامساً).
       if (isFundedByOtherHotel) return;
+      // "شبكة" و"بنك" حساب واحد لا فرق بينهما (راجع البند "البنك والشبكة
+      // شيء واحد" من متطلبات إعادة بناء دورة الحياة المحاسبية) — مصروف
+      // بتمويل شبكة/بنك لا يخصم من إيراد اليوم إطلاقاً بعد الآن، بل من رصيد
+      // البنك المتراكم في المركز المالي عند الترحيل فقط (نفس معاملة "الخزنة"
+      // تماماً، راجع VaultRepository._postNetworkFundedExpenses).
       if (m == "نقد" || m == PendingExpense.paymentMethodOwnerDrawing) oCash += a;
-      else if (m == "شبكة") oBank += a;
       else oDebt += a;
     }
 
@@ -352,8 +366,13 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       _totalDebtExpenses = oDebt;
       _netCash = (cash + pCash + incCash + (_increaseSource == "نقد" ? _increaseAmount : 0)) -
                  ((_subsistenceMethod == "نقد" ? sub : 0) + (_refundMethod == "نقد" ? ref : 0) + c2p + oCash + (_shortageSource == "نقد" ? _shortageAmount : 0));
+      // صافي الشبكة لم يعد يُخصَم منه أي مصروف بتمويل شبكة/بنك (لا مصروفات
+      // حرة/معلَّقة، ولا إعاشة/استرداد بطريقة "شبكة") — يبقى إيراد اليوم كما
+      // هو (راجع تعليق process أعلاه)؛ الخصم الفعلي من رصيد البنك في المركز
+      // المالي يحدث فقط عند الترحيل عبر VaultRepository._postNetworkFundedExpenses.
+      // "العجز" (شبكة) يبقى استثناءً — تعديل تسوية يدوي فعلي على صافي اليوم، لا مصروف.
       _netPos = (pos + pPos + incBank + (_increaseSource == "شبكة" ? _increaseAmount : 0) + c2p) -
-                ((_subsistenceMethod == "شبكة" ? sub : 0) + (_refundMethod == "شبكة" ? ref : 0) + oBank + (_shortageSource == "شبكة" ? _shortageAmount : 0));
+                (_shortageSource == "شبكة" ? _shortageAmount : 0);
       _finalBalance = _netCash + _netPos + transfer + incTransfer;
     });
   }
@@ -363,7 +382,10 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     final identityColor = HotelVisualIdentity.colorForHotel(widget.hotel);
     final pTotal = _availablePendingExpenses.fold(0.0, (sum, e) => sum + e.amount);
 
-    return Scaffold(
+    return PermissionGate(
+      permission: AppPermissions.financialReportsView,
+      hotelId: widget.hotel.id,
+      child: Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -429,7 +451,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildRow2(double pTotal) {
@@ -571,11 +593,15 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
           ),
         Row(
           children: [
-            if (!_isLocked && _loadedReportId != null) ...[
+            if (!_isLocked && _loadedReportId != null && PermissionService.instance.hasPermission(AppPermissions.financialReportsDelete, hotelId: widget.hotel.id)) ...[
               IconButton(onPressed: _deleteReport, icon: const Icon(Icons.delete_outline, color: Colors.red), tooltip: "حذف التقرير"),
               const SizedBox(width: 8),
             ],
-            if (!_isLocked)
+            if (!_isLocked &&
+                PermissionService.instance.hasPermission(
+                  _loadedReportId != null ? AppPermissions.financialReportsEdit : AppPermissions.financialReportsCreate,
+                  hotelId: widget.hotel.id,
+                ))
               Expanded(child: AppButton(text: "تعيين", onPressed: _reviewReport, icon: Icons.assignment_turned_in_outlined, backgroundColor: color)),
           ],
         ),
@@ -1073,6 +1099,15 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   }
 
   Future<void> _reviewReport() async {
+    final requiredPermission = _loadedReportId != null ? AppPermissions.financialReportsEdit : AppPermissions.financialReportsCreate;
+    if (!PermissionService.instance.hasPermission(requiredPermission, hotelId: widget.hotel.id)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("ليس لديك صلاحية تنفيذ هذا الإجراء"), backgroundColor: AppColors.danger),
+        );
+      }
+      return;
+    }
     // منع تكرار التقرير في الوضع الرسمي فقط — وضع التجربة يُبقي السلوك القديم
     // (تقرير "إضافي" تلقائي) كما هو تماماً بلا أي تعديل لهذا المسار.
     final trialMode = await AppPreferences.getBool(AppPreferences.keyTrialMode);
@@ -1088,11 +1123,12 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     }
 
     final report = await _buildReportFromCurrentState();
-    final template = _buildDailyReportTemplate(isAdditional: report.reportType == 'additional');
+    final template = _buildDailyReportTemplate(isAdditional: report.reportType == 'additional', vaultWithdrawalsForDate: await _getVaultWithdrawalsForDate());
 
     if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ReportPreviewPage(template: template, onConfirm: () async {
       await _persistReport(report);
       if (_selectedPendingIds.isNotEmpty) await _expenseRepository.transferExpenses(_selectedPendingIds.toList());
+      await _transferRepository.markTransferredForDate(widget.hotel.id!, DateFormat('yyyy-MM-dd').format(_selectedDate));
       if (mounted) {
         Navigator.pop(context);
         Navigator.pop(context, true);
@@ -1109,6 +1145,12 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
   /// المرتبط معاً، حتى لا يبقى صندوق يتيم في "الأموال غير المرحلة".
   Future<void> _deleteReport() async {
     if (_loadedReportId == null || _isLocked) return;
+    if (!PermissionService.instance.hasPermission(AppPermissions.financialReportsDelete, hotelId: widget.hotel.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("ليس لديك صلاحية تنفيذ هذا الإجراء"), backgroundColor: AppColors.danger),
+      );
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1205,27 +1247,33 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     if (p != null) { _selectedDate = p; _loadReportForDate(p); }
   }
 
-  /// عناصر "مصروفات لم تخصم من خزنة الفندق" — كل بند لم يُسحب من النقد
-  /// الفعلي اليوم (نفس تصنيف oDebt في _calculateTotals، ماعدا "شبكة" التي
-  /// تُستبعَد من oDebt حسابياً لكنها تُعرَض هنا لأنها ليست نقداً من الخزنة —
-  /// تصنيف عرض بحت، بلا أي تغيير على _calculateTotals نفسها). التصنيف نفسه
-  /// (classifyUnwithdrawnSource) مشترك مع buildTemplateFromSavedReport حتى
-  /// تتطابق "التقارير السابقة" مع هذه الشاشة تماماً.
-  List<UnwithdrawnTemplateLine> _collectUnwithdrawnLines() {
+  /// عناصر "مصروفات خارج إيراد اليوم" — كل بند لم يُدفع من نقد إيراد اليوم
+  /// الفعلي (راجع classifyExpenseFunding، المصدر الوحيد لهذا التصنيف، مشترك
+  /// مع buildTemplateFromSavedReport حتى تتطابق "التقارير السابقة" مع هذه
+  /// الشاشة تماماً) — بلا أي تغيير على _calculateTotals نفسها. بنود "مسحوبات
+  /// المالك" (المسار القديم) تُستبعَد من هنا وتُجمَّع في
+  /// [legacyOwnerWithdrawalAmounts] بدلاً من ذلك (راجع البند 9 من متطلبات
+  /// إعادة تصميم التقرير).
+  ({List<UnwithdrawnTemplateLine> outsideRevenueLines, List<double> legacyOwnerWithdrawalAmounts}) _collectOutsideRevenueLines() {
     final items = <UnwithdrawnTemplateLine>[];
-    void addIfNotCash(String name, double amount, String method, String? supplierName, {String? fundedByHotelName}) {
-      if (fundedByHotelName == null && (method == "نقد" || method == PendingExpense.paymentMethodOwnerDrawing)) return;
-      final c = classifyUnwithdrawnSource(method, supplierName, fundedByHotelName: fundedByHotelName);
-      items.add(UnwithdrawnTemplateLine(icon: c.icon, itemName: name, label: c.label, amount: amount));
+    final legacyOwnerWithdrawalAmounts = <double>[];
+    void classify(String name, double amount, String method, String? supplierName, {String? fundedByHotelName}) {
+      final c = classifyExpenseFunding(method, supplierName, fundedByHotelName: fundedByHotelName);
+      if (c.isPaidFromTodayCash) return;
+      if (c.isOwnerWithdrawal) {
+        legacyOwnerWithdrawalAmounts.add(amount);
+        return;
+      }
+      items.add(UnwithdrawnTemplateLine(icon: iconForItemName(name), itemName: name, label: c.fundingLabel ?? method, methodLabel: c.methodLabel, amount: amount));
     }
 
     for (final e in _otherExpenses) {
       final amount = ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0;
-      addIfNotCash(e.nameController.text, amount, e.paymentMethod, e.supplierName);
+      classify(e.nameController.text, amount, e.paymentMethod, e.supplierName);
     }
     for (final e in _availablePendingExpenses) {
       if (_selectedPendingIds.contains(e.id)) {
-        addIfNotCash(
+        classify(
           "${e.categoryName}: ${e.statement}",
           e.amount,
           e.paymentMethod,
@@ -1234,15 +1282,22 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
         );
       }
     }
-    return items;
+    return (outsideRevenueLines: items, legacyOwnerWithdrawalAmounts: legacyOwnerWithdrawalAmounts);
   }
 
-  /// يبني القالب الرسمي الموحّد من الحالة الحالية — بلا أي حساب جديد، فقط
-  /// تجميع القيم المحسوبة أصلاً (_totalIncome، _netCash، ...) في بنية عرض
-  /// واحدة يستهلكها عرض المعاينة داخل التطبيق ونص المشاركة/النسخ وPDF معاً.
-  DailyReportTemplate _buildDailyReportTemplate({bool isAdditional = false}) {
+  /// يبني القالب الرسمي الموحّد من الحالة الحالية — بلا أي حساب جديد على
+  /// _calculateTotals، فقط تجميع القيم المحسوبة أصلاً (_netCash، ...) في بنية
+  /// عرض واحدة يستهلكها عرض المعاينة داخل التطبيق ونص المشاركة/النسخ وPDF
+  /// معاً. [إجمالي "المصروفات اليومية"] يُعاد حسابه هنا من بنود النقد فقط
+  /// (لا من _totalExpenses الذي يبقى يشمل كل المصروفات لأغراض التحليل/الحفظ
+  /// كما هو دون أي تغيير) حتى يطابق مجموع البنود المعروضة فعلياً في القسم.
+  /// [vaultWithdrawalsForDate] سحوبات المالك الفعلية (نظام الخزنة المستقل)
+  /// لهذا الفندق بهذا التاريخ تحديداً — يجلبها المستدعي (async) قبل الاستدعاء.
+  DailyReportTemplate _buildDailyReportTemplate({bool isAdditional = false, List<AdvanceWithdrawal> vaultWithdrawalsForDate = const []}) {
     final sub = ThousandsSeparatorInputFormatter.parse(_subsistenceController.text) ?? 0;
+    final subClass = classifyExpenseFunding(_subsistenceMethod, null);
     final ref = ThousandsSeparatorInputFormatter.parse(_refundController.text) ?? 0;
+    final refClass = classifyExpenseFunding(_refundMethod, null);
     final transfer = ThousandsSeparatorInputFormatter.parse(_transferController.text) ?? 0;
     double incTransfer = 0;
     for (final i in _otherIncomes) {
@@ -1264,19 +1319,32 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     ];
 
     final expenseLines = <ReportTemplateLine>[
-      ReportTemplateLine(label: "🍽️ الإعاشة", amount: sub),
-      ReportTemplateLine(label: "↩️ الاسترداد", amount: ref),
+      if (subClass.isPaidFromTodayCash) ReportTemplateLine(label: "🍽️ الإعاشة", amount: sub),
+      if (refClass.isPaidFromTodayCash) ReportTemplateLine(label: "↩️ الاسترداد", amount: ref),
       for (final e in _otherExpenses)
-        ReportTemplateLine(label: withItemIcon(e.nameController.text), amount: ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0),
+        if (classifyExpenseFunding(e.paymentMethod, e.supplierName).isPaidFromTodayCash)
+          ReportTemplateLine(label: withItemIcon(e.nameController.text), amount: ThousandsSeparatorInputFormatter.parse(e.amountController.text) ?? 0),
       for (final e in _availablePendingExpenses)
-        if (_selectedPendingIds.contains(e.id)) ReportTemplateLine(label: withItemIcon("${e.categoryName}: ${e.statement}"), amount: e.amount),
+        if (_selectedPendingIds.contains(e.id) &&
+            classifyExpenseFunding(e.paymentMethod, e.isDeferredDebt ? e.supplierName : null, fundedByHotelName: e.isFundedByOtherHotel ? _hotelNameForId(e.fundingSourceHotelId) : null).isPaidFromTodayCash)
+          ReportTemplateLine(label: withItemIcon("${e.categoryName}: ${e.statement}"), amount: e.amount),
     ];
+    final totalDailyExpenses = expenseLines.fold(0.0, (sum, l) => sum + l.amount);
 
     final netLines = <ReportTemplateLine>[
       ReportTemplateLine(label: "💼 صافي النقد", amount: _netCash),
       ReportTemplateLine(label: "📊 صافي الشبكة", amount: _netPos),
       ReportTemplateLine(label: "🏦 صافي التحويل البنكي", amount: transfer + incTransfer),
     ];
+
+    final outsideRevenue = _collectOutsideRevenueLines();
+    final outsideRevenueLines = [...outsideRevenue.outsideRevenueLines];
+    if (!subClass.isPaidFromTodayCash && sub.abs() >= 0.01) {
+      outsideRevenueLines.add(UnwithdrawnTemplateLine(icon: "🍽️", itemName: "الإعاشة", label: subClass.fundingLabel ?? _subsistenceMethod, methodLabel: subClass.methodLabel, amount: sub));
+    }
+    if (!refClass.isPaidFromTodayCash && ref.abs() >= 0.01) {
+      outsideRevenueLines.add(UnwithdrawnTemplateLine(icon: "↩️", itemName: "الاسترداد", label: refClass.fundingLabel ?? _refundMethod, methodLabel: refClass.methodLabel, amount: ref));
+    }
 
     return buildDailyReportTemplate(
       hotelName: widget.hotel.arabicName,
@@ -1286,10 +1354,20 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
       rawIncomeLines: incomeLines,
       totalIncome: _totalIncome,
       rawExpenseLines: expenseLines,
-      totalExpenses: _totalExpenses,
+      totalExpenses: totalDailyExpenses,
       rawNetLines: netLines,
       netTotal: _finalBalance,
-      unwithdrawnLines: _collectUnwithdrawnLines(),
+      unwithdrawnLines: outsideRevenueLines,
+      ownerWithdrawalLines: buildOwnerWithdrawalLines(legacyReportAmounts: outsideRevenue.legacyOwnerWithdrawalAmounts, vaultWithdrawalsForDate: vaultWithdrawalsForDate),
+      transferLines: [
+        for (final t in _pendingTransfers)
+          InterHotelTransferTemplateLine(
+            statement: t.statement,
+            counterpartHotelName: _hotelNameForId(t.toHotelId),
+            amount: t.amount,
+            isOutgoing: true,
+          ),
+      ],
       sharedExpenseLines: [
         for (final s in _sharedExpenseShares)
           SharedExpenseTemplateLine(
@@ -1302,18 +1380,30 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     );
   }
 
-  void _copyReport() async {
-    await Clipboard.setData(ClipboardData(text: renderDailyReportAsText(_buildDailyReportTemplate())));
+  /// سحوبات المالك الفعلية (نظام الخزنة المستقل) لهذا الفندق بتاريخ التقرير
+  /// الحالي تحديداً — تُجلَب طازجة عند كل مشاركة/نسخ/تصدير بدل تخزينها كحالة،
+  /// تجنباً لأي عدم تزامن مع شاشة "مسحوبات المالك" المستقلة.
+  Future<List<AdvanceWithdrawal>> _getVaultWithdrawalsForDate() async {
+    final all = await VaultRepository().getAdvanceWithdrawals(widget.hotel.id);
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    return all.where((w) => w.date == dateStr).toList();
+  }
+
+  Future<void> _copyReport() async {
+    final template = _buildDailyReportTemplate(vaultWithdrawalsForDate: await _getVaultWithdrawalsForDate());
+    await Clipboard.setData(ClipboardData(text: renderDailyReportAsText(template)));
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم نسخ التقرير")));
   }
 
-  void _shareText() {
-    Share.share(renderDailyReportAsText(_buildDailyReportTemplate()));
+  void _shareText() async {
+    final template = _buildDailyReportTemplate(vaultWithdrawalsForDate: await _getVaultWithdrawalsForDate());
+    Share.share(renderDailyReportAsText(template));
   }
 
   Future<void> _sharePdf() async {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("جاري إنشاء ملف PDF...")));
-    await PdfService.shareDailyReportPdf(_buildDailyReportTemplate());
+    final template = _buildDailyReportTemplate(vaultWithdrawalsForDate: await _getVaultWithdrawalsForDate());
+    await PdfService.shareDailyReportPdf(template);
   }
 
   void _showMonthlyReport() => Navigator.push(context, MaterialPageRoute(builder: (_) => MonthlyReportPage(hotel: widget.hotel, initialDate: _selectedDate)));

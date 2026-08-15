@@ -8,9 +8,11 @@ import '../../../core/app_text_styles.dart';
 import '../../../models/hotel.dart';
 import '../../../repositories/financial_repository.dart';
 import '../../../repositories/vault_repository.dart';
+import '../../../core/app_permissions.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/app_drawer.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
+import '../../../widgets/common/permission_gate.dart';
 import '../../../services/financial_engine.dart';
 import 'unposted_funds_page.dart';
 import 'financial_relationships_page.dart';
@@ -71,31 +73,35 @@ class _VaultDashboardPageState extends State<VaultDashboardPage> {
     final netAssets = _cash + _bank;
     final trueNet = (_cash + _bank + _receivable) - _payable;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: HotelIdentityTitle(title: "المركز المالي", hotel: widget.hotel),
-        centerTitle: true,
-        backgroundColor: identityColor,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      drawer: AppDrawer(hotel: widget.hotel),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        child: _isLoading 
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(AppSizes.md),
-              children: [
-                _buildRealNetCards(netAssets, trueNet),
-                const SizedBox(height: AppSizes.md),
-                _buildFinancialSummaryGrid(identityColor),
-                const SizedBox(height: AppSizes.lg),
-                _buildMainSections(identityColor),
-                const SizedBox(height: AppSizes.xl),
-              ],
-            ),
+    return PermissionGate(
+      permission: AppPermissions.vaultView,
+      hotelId: widget.hotel.id,
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: HotelIdentityTitle(title: "المركز المالي", hotel: widget.hotel),
+          centerTitle: true,
+          backgroundColor: identityColor,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        drawer: AppDrawer(hotel: widget.hotel),
+        body: RefreshIndicator(
+          onRefresh: _loadData,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(AppSizes.md),
+                  children: [
+                    _buildRealNetCards(netAssets, trueNet),
+                    const SizedBox(height: AppSizes.md),
+                    _buildFinancialSummaryGrid(identityColor),
+                    const SizedBox(height: AppSizes.lg),
+                    _buildMainSections(identityColor),
+                    const SizedBox(height: AppSizes.xl),
+                  ],
+                ),
+        ),
       ),
     );
   }

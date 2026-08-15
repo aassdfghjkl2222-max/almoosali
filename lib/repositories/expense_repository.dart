@@ -14,16 +14,35 @@ class ExpenseRepository {
     return data.map((map) => PendingExpense.fromMap(map)).toList();
   }
 
+  /// عبر كل الفنادق معاً — راجع تعليق
+  /// DatabaseService.getAllPendingExpensesAcrossHotels (البحث الشامل
+  /// GlobalSearch فقط).
+  Future<List<PendingExpense>> getAllPendingExpensesAcrossHotels() async {
+    final data = await _dbService.getAllPendingExpensesAcrossHotels();
+    return data.map((map) => PendingExpense.fromMap(map)).toList();
+  }
+
   Future<int> addPendingExpense(PendingExpense expense) async {
     return await _dbService.insertPendingExpense(expense.toMap());
   }
 
+  /// يمنع تعديل مصروف مُرحَّل بالفحص من قاعدة البيانات مباشرة (لا من الحالة
+  /// الممرَّرة في [expense]، التي قد تكون قديمة) — طبقة حماية على مستوى
+  /// الأعمال بالإضافة إلى القفل الموجود أصلاً في واجهة AddPendingExpensePage،
+  /// حتى لا تعتمد الحماية على واجهة مستخدم واحدة فقط.
   Future<int> updatePendingExpense(PendingExpense expense) async {
     if (expense.id == null) return 0;
+    if (await _dbService.isPendingExpenseTransferred(expense.id!)) {
+      throw StateError('لا يمكن تعديل مصروف تم ترحيله بالفعل إلى تقرير مالي مُعتمد.');
+    }
     return await _dbService.updateById('pending_expenses', expense.toMap(), expense.id!);
   }
 
+  /// نفس حماية [updatePendingExpense] — راجع تعليقها.
   Future<int> deletePendingExpense(int id) async {
+    if (await _dbService.isPendingExpenseTransferred(id)) {
+      throw StateError('لا يمكن حذف مصروف تم ترحيله بالفعل إلى تقرير مالي مُعتمد.');
+    }
     return await _dbService.deleteById('pending_expenses', id);
   }
 
@@ -54,10 +73,13 @@ class ExpenseRepository {
 
   String _fmtDate(DateTime d) => "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
 
-  /// إجمالي كل بند مصروف (حسب اسم التصنيف) عبر الفنادق المختارة خلال فترة —
-  /// يُستخدم في قسم "التحليل المالي" داخل مركز التحليل. مصدر الحقيقة هنا هو
-  /// pending_expenses مباشرة (وليس تحليل details_json داخل financial_reports)
-  /// لأن التصنيف الحقيقي (category_id) يبقى محفوظاً حتى بعد الترحيل.
+  /// إجمالي كل بند مصروف (حسب category_id — المصدر الوحيد المعتمَد، راجع Core
+  /// Principle في financial_category.dart: التقارير تُجمَّع بالمعرّف لا بالاسم
+  /// المعروض حتى لا تنقسم بيانات نفس الفئة تاريخياً إن أُعيدت تسميتها لاحقاً)
+  /// عبر الفنادق المختارة خلال فترة — يُستخدم في قسم "التحليل المالي" داخل
+  /// مركز التحليل. مصدر الحقيقة هنا هو pending_expenses مباشرة (وليس تحليل
+  /// details_json داخل financial_reports) لأن التصنيف الحقيقي (category_id)
+  /// يبقى محفوظاً حتى بعد الترحيل.
   Future<List<Map<String, dynamic>>> getExpenseTotalsByCategory({
     required List<int> hotelIds,
     DateTime? fromDate,
@@ -77,28 +99,28 @@ class ExpenseRepository {
     }
     return db.rawQuery(
       '''
-      SELECT ec.name as category_name, SUM(pe.amount) as total, COUNT(*) as cnt
+      SELECT ec.id as category_id, ec.name as category_name, SUM(pe.amount) as total, COUNT(*) as cnt
       FROM pending_expenses pe JOIN financial_categories ec ON ec.id = pe.category_id
       WHERE ${where.join(' AND ')}
-      GROUP BY ec.name
+      GROUP BY ec.id
       ORDER BY total DESC
       ''',
       args,
     );
   }
 
-  /// كل عمليات بند مصروف واحد (بالاسم) — القائمة التي تُبنى منها شاشة تحليل
-  /// البند (السنة/الشهر/المتوسط/أعلى/أقل/الرسم البياني/العمليات).
+  /// كل عمليات بند مصروف واحد (بمعرّف الفئة الحقيقي) — القائمة التي تُبنى منها
+  /// شاشة تحليل البند (السنة/الشهر/المتوسط/أعلى/أقل/الرسم البياني/العمليات).
   Future<List<PendingExpense>> getExpenseTransactionsByCategory({
     required List<int> hotelIds,
-    required String categoryName,
+    required int categoryId,
     DateTime? fromDate,
     DateTime? toDate,
   }) async {
     if (hotelIds.isEmpty) return [];
     final db = await _dbService.database;
-    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})', 'ec.name = ?'];
-    final args = <dynamic>[...hotelIds, categoryName];
+    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})', 'pe.category_id = ?'];
+    final args = <dynamic>[...hotelIds, categoryId];
     if (fromDate != null) {
       where.add('pe.date >= ?');
       args.add(_fmtDate(fromDate));
@@ -109,7 +131,7 @@ class ExpenseRepository {
     }
     final rows = await db.rawQuery(
       '''
-      SELECT pe.* FROM pending_expenses pe JOIN financial_categories ec ON ec.id = pe.category_id
+      SELECT pe.* FROM pending_expenses pe
       WHERE ${where.join(' AND ')}
       ORDER BY pe.date DESC, pe.time DESC
       ''',

@@ -8,7 +8,9 @@ import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
 import '../../services/backup_service.dart';
+import '../../services/supabase_auth_service.dart';
 import '../../services/sync_service.dart';
+import '../../widgets/common/app_text_field.dart';
 import 'backup_list_page.dart';
 import 'backup_log_page.dart';
 import 'sync_log_page.dart';
@@ -36,6 +38,8 @@ class _BackupPageState extends State<BackupPage> {
   bool _autoBackupEnabled = false;
   String _autoBackupFrequency = 'weekly';
   String _lastSyncLabel = 'لم تتم أي مزامنة بعد';
+  int _pendingSyncCount = 0;
+  bool _isSyncing = false;
 
   @override
   void initState() {
@@ -59,6 +63,7 @@ class _BackupPageState extends State<BackupPage> {
     final autoEnabled = await AppPreferences.getBool(AppPreferences.keyAutoBackupEnabled);
     final frequency = await AppPreferences.getString(AppPreferences.keyAutoBackupFrequency, defaultValue: 'weekly');
     final syncLabel = await SyncService.getLastSyncLabel();
+    final pendingCount = await SyncService.getPendingCount();
 
     if (!mounted) return;
     setState(() {
@@ -67,6 +72,7 @@ class _BackupPageState extends State<BackupPage> {
       _autoBackupEnabled = autoEnabled;
       _autoBackupFrequency = frequency;
       _lastSyncLabel = syncLabel;
+      _pendingSyncCount = pendingCount;
       _isLoading = false;
     });
   }
@@ -156,9 +162,84 @@ class _BackupPageState extends State<BackupPage> {
   }
 
   Future<void> _syncNow() async {
+    if (_isSyncing) return;
+
+    if (!await SupabaseAuthService.instance.hasStoredCredentials()) {
+      final signedIn = await _showSignInDialog();
+      if (!signedIn || !mounted) return;
+    }
+
+    setState(() => _isSyncing = true);
     final message = await SyncService.syncNow();
     if (!mounted) return;
+    setState(() => _isSyncing = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    await _loadState();
+  }
+
+  /// حوار تسجيل الدخول للخدمة السحابية — يظهر مرة واحدة فقط (أول محاولة
+  /// مزامنة)، منفصل تماماً عن رمز PIN المحلي. راجع SupabaseAuthService.
+  Future<bool> _showSignInDialog() async {
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+    String? errorText;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+            title: const Text("تسجيل الدخول للمزامنة السحابية", style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "أدخل بيانات حساب الخدمة السحابية (Supabase) المُنشَأ مسبقاً لهذا الفندق — تُحفَظ هذه البيانات بأمان على هذا الجهاز فقط ولن تُطلَب مجدداً.",
+                  style: AppTextStyles.caption,
+                ),
+                const SizedBox(height: AppSizes.md),
+                AppTextField(controller: emailController, hint: "البريد الإلكتروني", icon: Icons.email_outlined),
+                const SizedBox(height: AppSizes.sm),
+                AppTextField(
+                  controller: passwordController,
+                  hint: "كلمة المرور",
+                  icon: Icons.lock_outline,
+                  isPassword: true,
+                  errorText: errorText,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text("إلغاء")),
+              TextButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final password = passwordController.text;
+                  if (email.isEmpty || password.isEmpty) {
+                    setDialogState(() => errorText = "يرجى تعبئة الحقلين");
+                    return;
+                  }
+                  final error = await SupabaseAuthService.instance.saveCredentialsAndSignIn(
+                    email: email,
+                    password: password,
+                  );
+                  if (error != null) {
+                    setDialogState(() => errorText = error);
+                    return;
+                  }
+                  if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                },
+                child: const Text("دخول", style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    return result ?? false;
   }
 
   @override
@@ -273,7 +354,7 @@ class _BackupPageState extends State<BackupPage> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "يتم تجهيز واجهة وبنية المزامنة السحابية فقط في هذه المرحلة، ولا تتم أي مزامنة فعلية حالياً. القسم جاهز للربط بخدمة سحابية مستقبلاً دون إعادة تصميم.",
+                          "المزامنة السحابية مفعَّلة حالياً لبيانات الفنادق فقط (مرحلة تجريبية أولى) — بقية البيانات (موظفون، فواتير، تقارير...) ستُضاف لاحقاً بنفس الآلية.",
                           style: TextStyle(fontSize: 11, color: AppColors.info),
                         ),
                       ),
@@ -284,11 +365,15 @@ class _BackupPageState extends State<BackupPage> {
                   icon: Icons.sync_outlined,
                   title: "مزامنة الآن",
                   description: "بدء عملية مزامنة يدوية مع الخدمة السحابية",
-                  status: "غير مفعَّلة",
-                  statusColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                  status: _isSyncing ? "جارِ المزامنة..." : "$_pendingSyncCount فندق بانتظار الرفع",
+                  statusColor: _isSyncing
+                      ? AppColors.info
+                      : (_pendingSyncCount > 0 ? AppColors.warning : Theme.of(context).colorScheme.onSurfaceVariant),
                   action: OutlinedButton.icon(
-                    onPressed: _syncNow,
-                    icon: const Icon(Icons.sync, size: 18),
+                    onPressed: _isSyncing ? null : _syncNow,
+                    icon: _isSyncing
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.sync, size: 18),
                     label: const Text("مزامنة"),
                   ),
                 ),
@@ -313,7 +398,7 @@ class _BackupPageState extends State<BackupPage> {
                   icon: Icons.receipt_long_outlined,
                   title: "سجل عمليات المزامنة",
                   description: "سجل تفصيلي بعمليات المزامنة السابقة",
-                  status: "فارغ حالياً",
+                  status: "عرض السجل الكامل",
                   statusColor: Theme.of(context).colorScheme.onSurfaceVariant,
                   action: OutlinedButton.icon(
                     onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncLogPage())),
