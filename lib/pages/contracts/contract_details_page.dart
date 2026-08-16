@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../core/app_colors.dart';
 import '../../core/app_radius.dart';
 import '../../core/app_sizes.dart';
 import '../../core/app_text_styles.dart';
@@ -9,6 +8,7 @@ import '../../models/contract_payment.dart';
 import '../../repositories/contract_repository.dart';
 import '../../services/vault_service.dart';
 import '../../widgets/common/app_card.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import '../../widgets/vault/amount_source_selector.dart';
 import 'add_contract_page.dart';
 import '../../services/contract_report_service.dart';
@@ -397,24 +397,10 @@ class _ContractDetailsPageState extends State<ContractDetailsPage> {
   }
 
   void _confirmDelete() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("حذف العقد"),
-        content: const Text("هل أنت متأكد من حذف هذا العقد وجميع دفعاته نهائياً؟"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء")),
-          TextButton(
-            onPressed: () async {
-              await _repository.deleteContract(_contract.id!);
-              if (!context.mounted) return;
-              Navigator.pop(context); // Close dialog
-              Navigator.pop(context, true); // Go back to list
-            },
-            child: const Text("حذف", style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
-    );
+    TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteContract(_contract);
+      if (!context.mounted) return;
+      Navigator.pop(context, true); // Go back to list
+    });
   }
 }

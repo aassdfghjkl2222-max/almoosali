@@ -1,6 +1,7 @@
 import '../core/database/database_service.dart';
 import '../models/pending_expense.dart';
 import '../models/shared_expense.dart';
+import 'trash_repository.dart';
 
 /// إنشاء/تعديل/حذف "المصروف المشترك" بنموذجه الجديد: توزيع تلقائي لمصروف
 /// واحد كمصروفات معلَّقة مستقلة على عدة منشآت (بلا مفهوم "منشأة مموِّلة تُسدَّد
@@ -9,6 +10,7 @@ import '../models/shared_expense.dart';
 /// القديم الذي يبقى بلا تغيير لعرض بياناته التاريخية فقط).
 class SharedExpenseDistributionRepository {
   final _dbService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   Future<List<SharedExpense>> getSharedExpensesForHotel(int hotelId) async {
     final data = await _dbService.getSharedExpensesForHotel(hotelId);
@@ -115,13 +117,18 @@ class SharedExpenseDistributionRepository {
     );
   }
 
-  /// حذف نهائي: يحذف رأس المصروف المشترك، وCASCADE يحذف تلقائياً كل مصروفاته
-  /// المعلَّقة المولَّدة. يُمنَع إن كان أيٌّ منها مرحَّلاً بالفعل — راجع [canModify].
+  /// نقل ناعم إلى سلة المهملات: الرأس **وكل مصروفاته المعلَّقة المولَّدة معاً**
+  /// (لا يكفي نقل الرأس وحده — CASCADE الحقيقي لا يفيد لأن هذا UPDATE وليس
+  /// DELETE، فتُنقَل التوابع يدوياً هنا؛ الاستعادة تعكس نفس الأمرين معاً عبر
+  /// TrashRepository.restore، راجع تعليقها). يُمنَع إن كان أيٌّ منها مرحَّلاً
+  /// بالفعل — راجع [canModify].
   Future<void> deleteSharedExpense(int id) async {
     if (!await canModify(id)) {
       throw StateError('لا يمكن حذف مصروف مشترك رُحِّل جزء منه بالفعل إلى تقرير مالي مُعتمد.');
     }
-    await _dbService.deleteSharedExpense(id);
+    final header = await getSharedExpenseById(id);
+    await _trashRepository.trash('shared_expense', id, header?.description ?? 'مصروف مشترك');
+    await _dbService.setPendingExpensesDeletedForSharedExpense(id, true);
   }
 
   /// هل يمكن تعديل/حذف هذا المصروف المشترك؟ يُمنَع إن رُحِّل أيٌّ من مصروفاته

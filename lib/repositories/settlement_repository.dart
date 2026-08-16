@@ -2,9 +2,11 @@ import '../core/database/database_service.dart';
 import '../models/settlement.dart';
 import '../models/settlement_account.dart';
 import '../models/settlement_transaction.dart';
+import 'trash_repository.dart';
 
 class SettlementRepository {
   final DatabaseService _dbService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   // Accounts
   Future<int> addAccount(SettlementAccount account) async {
@@ -51,8 +53,9 @@ class SettlementRepository {
     return await _dbService.updateById('settlements', settlement.toMap(), settlement.id!);
   }
 
-  Future<int> deleteSettlement(int id) async {
-    return await _dbService.deleteById('settlements', id);
+  /// نقل ناعم إلى سلة المهملات — راجع TrashRepository.
+  Future<void> deleteSettlement(Settlement settlement) async {
+    await _trashRepository.trash('settlement', settlement.id!, settlement.description);
   }
 
   // Transactions (Payments)

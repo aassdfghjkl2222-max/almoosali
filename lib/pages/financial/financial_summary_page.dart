@@ -229,7 +229,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final reports = await repository.getFinancialReportsInRange(hotelId: widget.hotel.id, startDate: dateStr, endDate: dateStr);
     final sharedShares = await _sharedExpenseRepository.getSharesForHotelAndDate(widget.hotel.id!, dateStr);
-    final pendingTransfers = await _transferRepository.getPendingForHotelAndDate(widget.hotel.id!, dateStr);
+    final pendingTransfers = await _transferRepository.getAllPendingForHotel(widget.hotel.id!);
     if (mounted) setState(() { _sharedExpenseShares = sharedShares; _pendingTransfers = pendingTransfers; });
 
     if (reports.isNotEmpty) {
@@ -442,6 +442,9 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
             const SizedBox(height: AppSizes.md),
             _buildSectionTitle("💸 المصروفات", color: AppColors.danger),
             _buildExpenseSection(),
+            const SizedBox(height: AppSizes.md),
+            _buildSectionTitle("🔁 التحويلات بين المنشآت", color: Colors.purple),
+            _buildTransfersSection(),
             const SizedBox(height: AppSizes.md),
             _buildAdjustRow(),
             const SizedBox(height: AppSizes.md),
@@ -750,6 +753,53 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
         ],
       ),
   ]));
+
+  /// قسم "التحويلات بين المنشآت" — يعرض كل تحويل معلَّق (لم يُرحَّل بعد) أُنشئ
+  /// من هذا الفندق كمُرسِل، **بأي تاريخ** (_pendingTransfers، مُحمَّلة في
+  /// _loadReportForDate عبر getAllPendingForHotel — بلا قيد تاريخ، تماماً
+  /// كالمصروفات المعلَّقة العادية؛ راجع تعليق الدالة في InterEntityTransferRepository
+  /// لسبب إزالة القيد). عرض فقط — بلا أي إمكانية استبعاد بند هنا، فكل
+  /// التحويلات المعلَّقة الحالية تُعتمَد معاً دائماً عند "تعيين" وتُختم بتاريخ
+  /// هذا التقرير (راجع InterEntityTransferRepository.markTransferredForReport/bookTransfersForDate).
+  Widget _buildTransfersSection() {
+    return AppCard(
+      padding: const EdgeInsets.all(AppSizes.md),
+      identityAccent: Theme.of(context).colorScheme.primary,
+      child: _pendingTransfers.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text("لا توجد تحويلات بين المنشآت معلّقة اليوم", style: AppTextStyles.caption),
+            )
+          : Column(
+              children: _pendingTransfers
+                  .map((t) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _buildTransferRow(t)))
+                  .toList(),
+            ),
+    );
+  }
+
+  Widget _buildTransferRow(InterEntityTransfer t) {
+    final toName = _otherHotels.firstWhere((h) => h.id == t.toHotelId, orElse: () => widget.hotel).arabicName;
+    return Row(
+      children: [
+        const Icon(Icons.call_made, color: Colors.purple, size: 18),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t.statement, style: AppTextStyles.bodyBold, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text("إلى $toName  •  ${t.date}", style: AppTextStyles.caption),
+            ],
+          ),
+        ),
+        Text(
+          "${NumberFormat("#,##0.##").format(t.amount)} ريال",
+          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.purple),
+        ),
+      ],
+    );
+  }
 
   Widget _buildAdjustRow() {
     bool hasData = _increaseAmount > 0 || _shortageAmount > 0;
@@ -1128,7 +1178,7 @@ class _FinancialSummaryPageState extends State<FinancialSummaryPage> {
     if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ReportPreviewPage(template: template, onConfirm: () async {
       await _persistReport(report);
       if (_selectedPendingIds.isNotEmpty) await _expenseRepository.transferExpenses(_selectedPendingIds.toList());
-      await _transferRepository.markTransferredForDate(widget.hotel.id!, DateFormat('yyyy-MM-dd').format(_selectedDate));
+      await _transferRepository.markTransferredForReport(widget.hotel.id!, DateFormat('yyyy-MM-dd').format(_selectedDate));
       if (mounted) {
         Navigator.pop(context);
         Navigator.pop(context, true);

@@ -3,9 +3,11 @@ import '../core/document_status.dart';
 import '../models/document.dart';
 import '../models/document_attachment.dart';
 import '../services/document_notification_service.dart';
+import 'trash_repository.dart';
 
 class DocumentRepository {
   final DatabaseService _databaseService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   List<Document> _sortedByStatusPriority(List<Map<String, dynamic>> maps) {
     final documents = maps.map((map) => Document.fromMap(map)).toList();
@@ -130,9 +132,19 @@ class DocumentRepository {
     }
   }
 
-  Future<void> deleteDocument(int id) async {
-    await _databaseService.deleteById('documents', id);
-    await DocumentNotificationService.cancelForDocument(id);
+  /// نقل ناعم إلى سلة المهملات — راجع TrashRepository. لا حذف لملفات المرفقات
+  /// هنا إطلاقاً (يبقى المرفق سليماً لو استُعيد المستند لاحقاً) — يحدث فقط
+  /// عند الحذف النهائي عبر TrashRepository._deleteAttachmentFiles. تنبيهات
+  /// الانتهاء تُلغى فوراً رغم ذلك (لا معنى لتذكير بمستند غير ظاهر حالياً؛
+  /// rescheduleForDocument تُعيد جدولتها تلقائياً عند الاستعادة عبر restoreDocument).
+  /// تنبيه الانتهاء يُلغى فوراً (لا معنى لتذكير بمستند غير ظاهر حالياً)؛ لو
+  /// استُعيد المستند لاحقاً من سلة المهملات، تُعاد جدولته تلقائياً ضمن
+  /// المزامنة الشاملة التي تعمل عند كل إقلاع للتطبيق أصلاً (راجع
+  /// main.dart: DocumentRepository().getAllDocuments().then(rescheduleAll)) —
+  /// بلا حاجة لمسار استعادة مخصَّص هنا.
+  Future<void> deleteDocument(Document document) async {
+    await _trashRepository.trash('document', document.id!, document.name);
+    await DocumentNotificationService.cancelForDocument(document.id!);
   }
 
   /// يُعيد تزويد كل الفنادق فوراً بنسخة فارغة من أي نوع مرجعي ناقص — يُستدعى

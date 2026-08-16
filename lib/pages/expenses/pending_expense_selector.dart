@@ -7,6 +7,7 @@ import '../../models/hotel.dart';
 import '../../repositories/expense_repository.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../widgets/app_button.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import 'add_pending_expense_page.dart';
 
 class PendingExpenseSelector extends StatefulWidget {
@@ -157,25 +158,10 @@ class _PendingExpenseSelectorState extends State<PendingExpenseSelector> {
   }
 
   Future<void> _deleteExpense(PendingExpense exp) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("حذف مصروف"),
-        content: const Text("هل أنت متأكد من حذف هذا المصروف المعلق؟"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("حذف", style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      try {
-        await _repository.deletePendingExpense(exp.id!);
-        _loadData();
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', ''))));
-      }
-    }
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deletePendingExpense(exp);
+      _loadData();
+    });
   }
 
   Widget _buildFooter() {

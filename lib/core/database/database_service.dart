@@ -26,7 +26,7 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), await _activeDbFileName());
     return await openDatabase(
       path,
-      version: 54, // Upgrade to v54: مسحوبات المالك/التحويل بين المنشآت تمران الآن بدورة "معلّق ← تقرير يومي ← ترحيل" الكاملة (inter_entity_transfers.is_transferred) — راجع VaultRepository/InterEntityTransferRepository
+      version: 55, // Upgrade to v55: سلة المهملات الموحّدة (is_deleted/deleted_at/deleted_by/delete_reason) للكيانات غير المالية-الحرجة + جدول trash_log — راجع TrashRepository
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createTables(db);
@@ -389,9 +389,34 @@ class DatabaseService {
             await db.execute('UPDATE inter_entity_transfers SET is_transferred = 1');
           } catch (_) {}
         }
+        if (oldVersion < 55) {
+          // سلة المهملات الموحّدة — راجع تعليق TrashRepository لسبب اختيار هذه
+          // الكيانات تحديداً في المرحلة الأولى (بلا أثر محاسبي، أو بحارس فقط
+          // بلا عكس قيد).
+          for (final t in _trashableTables) {
+            try { await db.execute('ALTER TABLE $t ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            try { await db.execute('ALTER TABLE $t ADD COLUMN deleted_at TEXT'); } catch (_) {}
+            try { await db.execute('ALTER TABLE $t ADD COLUMN deleted_by TEXT'); } catch (_) {}
+            try { await db.execute('ALTER TABLE $t ADD COLUMN delete_reason TEXT'); } catch (_) {}
+          }
+          try {
+            await db.execute('CREATE TABLE IF NOT EXISTS trash_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT, reason TEXT, created_at TEXT NOT NULL)');
+          } catch (_) {}
+        }
       },
     );
   }
+
+  /// الجداول المشمولة بسلة المهملات الموحّدة (المرحلة الأولى) — راجع
+  /// lib/core/trash/trashable_entity.dart للسجل الكامل بما فيه الفنادق/الموظفين
+  /// (يستخدمان عمود is_archived الخاص بهما، لا هذه الأعمدة). العمليات المالية
+  /// المُدرَجة هنا (pending_expenses, shared_expenses, inter_entity_transfers)
+  /// محمية بحارس is_transferred/isPendingExpenseTransferred الموجود مسبقاً في
+  /// مستودعاتها — لا تصل هذه الأعمدة إلا لعنصر لم يُرحَّل بعد أصلاً.
+  static const _trashableTables = [
+    'documents', 'notes', 'suppliers', 'contracts', 'contract_payments',
+    'invoices', 'settlements', 'pending_expenses', 'shared_expenses', 'inter_entity_transfers',
+  ];
 
   /// يتحقق من وجود الأعمدة/الجداول الحرجة التي تُضاف عادة عبر ALTER TABLE في onUpgrade،
   /// ويضيف الناقص منها بصمت. يعمل عند كل فتح لقاعدة البيانات — وليس فقط أثناء ترقية
@@ -682,6 +707,25 @@ class DatabaseService {
       );
       await db.execute(
         'CREATE TABLE IF NOT EXISTS inter_entity_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_hotel_id INTEGER NOT NULL, to_hotel_id INTEGER NOT NULL, amount REAL NOT NULL, statement TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (from_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE, FOREIGN KEY (to_hotel_id) REFERENCES hotels (id) ON DELETE CASCADE)',
+      );
+
+      // سلة المهملات الموحّدة — راجع تعليق _trashableTables/onUpgrade v55.
+      for (final t in _trashableTables) {
+        if (!await hasColumn(t, 'is_deleted')) {
+          await db.execute('ALTER TABLE $t ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!await hasColumn(t, 'deleted_at')) {
+          await db.execute('ALTER TABLE $t ADD COLUMN deleted_at TEXT');
+        }
+        if (!await hasColumn(t, 'deleted_by')) {
+          await db.execute('ALTER TABLE $t ADD COLUMN deleted_by TEXT');
+        }
+        if (!await hasColumn(t, 'delete_reason')) {
+          await db.execute('ALTER TABLE $t ADD COLUMN delete_reason TEXT');
+        }
+      }
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS trash_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, entity_name TEXT NOT NULL, action TEXT NOT NULL, performed_by TEXT, reason TEXT, created_at TEXT NOT NULL)',
       );
     } catch (_) {
       // لا نمنع فتح قاعدة البيانات إن تعذّر أحد فحوصات الصيانة — التطبيق يبقى قابلاً للعمل
@@ -1483,7 +1527,7 @@ class DatabaseService {
 
   Future<List<Map<String, dynamic>>> getPendingExpenses({required int hotelId, bool? isTransferred}) async {
     final db = await database;
-    String where = 'pe.hotel_id = ?'; List<dynamic> args = [hotelId];
+    String where = 'pe.hotel_id = ? AND pe.is_deleted = 0'; List<dynamic> args = [hotelId];
     if (isTransferred != null) { where += ' AND pe.is_transferred = ?'; args.add(isTransferred ? 1 : 0); }
     return await db.rawQuery(
       'SELECT pe.*, ec.name as category_name, ec.icon_code, ec.color_value, s.official_name as supplier_name '
@@ -1501,6 +1545,7 @@ class DatabaseService {
     return await db.rawQuery(
       'SELECT pe.*, ec.name as category_name FROM pending_expenses pe '
       'JOIN financial_categories ec ON pe.category_id = ec.id '
+      'WHERE pe.is_deleted = 0 '
       'ORDER BY pe.date DESC, pe.time DESC LIMIT ?',
       [limit],
     );
@@ -1593,7 +1638,7 @@ class DatabaseService {
     final db = await database;
     return await db.rawQuery(
       'SELECT DISTINCT se.* FROM shared_expenses se JOIN pending_expenses pe ON pe.shared_expense_id = se.id '
-      'WHERE pe.hotel_id = ? ORDER BY se.date DESC, se.id DESC',
+      'WHERE pe.hotel_id = ? AND se.is_deleted = 0 ORDER BY se.date DESC, se.id DESC',
       [hotelId],
     );
   }
@@ -1602,7 +1647,7 @@ class DatabaseService {
   /// لا تحتاج تقييداً بمنشأة واحدة.
   Future<List<Map<String, dynamic>>> getAllSharedExpenses() async {
     final db = await database;
-    return await db.query('shared_expenses', orderBy: 'date DESC, id DESC');
+    return await db.query('shared_expenses', where: 'is_deleted = 0', orderBy: 'date DESC, id DESC');
   }
 
   /// كل المصروفات المعلَّقة المولَّدة من مصروف مشترك واحد، بترتيب اسم المنشأة —
@@ -1706,7 +1751,7 @@ class DatabaseService {
   Future<int> insertInterEntityTransfer(Map<String, dynamic> data) async { final db = await database; return await db.insert('inter_entity_transfers', data); }
   Future<List<Map<String, dynamic>>> getInterEntityTransfers(int hotelId) async {
     final db = await database;
-    return await db.query('inter_entity_transfers', where: 'from_hotel_id = ? OR to_hotel_id = ?', whereArgs: [hotelId, hotelId], orderBy: 'date DESC, time DESC');
+    return await db.query('inter_entity_transfers', where: '(from_hotel_id = ? OR to_hotel_id = ?) AND is_deleted = 0', whereArgs: [hotelId, hotelId], orderBy: 'date DESC, time DESC');
   }
   /// يُستخدم لإعادة قراءة حالة الاعتماد طازجة قبل تعديل/حذف تحويل — راجع
   /// InterEntityTransferRepository._ensureTransferEditable.
@@ -1733,10 +1778,10 @@ class DatabaseService {
   }
   Future<int> insertFinancialReportItem(Map<String, dynamic> data) async { final db = await database; return await db.insert('financial_report_items', data); }
 
-  Future<List<Map<String, dynamic>>> getNotes(int hotelId) async { final db = await database; return await db.query('notes', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'created_at DESC'); }
+  Future<List<Map<String, dynamic>>> getNotes(int hotelId) async { final db = await database; return await db.query('notes', where: 'hotel_id = ? AND is_deleted = 0', whereArgs: [hotelId], orderBy: 'created_at DESC'); }
   /// كل الملاحظات عبر كل الفنادق — راجع تعليق getAllPendingExpensesAcrossHotels
   /// لسبب وجود هذه النسخة غير المقيَّدة بفندق (البحث الشامل فقط).
-  Future<List<Map<String, dynamic>>> getAllNotesAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('notes', orderBy: 'created_at DESC', limit: limit); }
+  Future<List<Map<String, dynamic>>> getAllNotesAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('notes', where: 'is_deleted = 0', orderBy: 'created_at DESC', limit: limit); }
   Future<int> insertNote(Map<String, dynamic> data) async { final db = await database; return await db.insert('notes', data); }
 
   Future<int> insertDocument(Map<String, dynamic> data) async { final db = await database; return await db.insert('documents', data); }
@@ -1801,7 +1846,7 @@ class DatabaseService {
       FROM documents d
       LEFT JOIN document_types dt ON dt.id = d.document_type_id
       LEFT JOIN document_categories dc ON dc.id = dt.category_id
-      WHERE d.hotel_id = ?
+      WHERE d.hotel_id = ? AND d.is_deleted = 0
       ''',
       [hotelId],
     );
@@ -1820,7 +1865,7 @@ class DatabaseService {
       FROM documents d
       LEFT JOIN document_types dt ON dt.id = d.document_type_id
       LEFT JOIN document_categories dc ON dc.id = dt.category_id
-      WHERE d.owner_type = ? AND d.owner_id = ?
+      WHERE d.owner_type = ? AND d.owner_id = ? AND d.is_deleted = 0
       ''',
       [ownerType, ownerId],
     );
@@ -1848,7 +1893,7 @@ class DatabaseService {
   /// (hotel_scope: single/all/specific).
   Future<List<Map<String, dynamic>>> getDocumentsInFolder(int documentTypeId, {List<int>? hotelIds, String? ownerType, int? ownerId}) async {
     final db = await database;
-    final where = <String>['dfl.document_type_id = ?'];
+    final where = <String>['dfl.document_type_id = ?', 'd.is_deleted = 0'];
     final args = <dynamic>[documentTypeId];
     if (hotelIds != null && hotelIds.isNotEmpty) {
       where.add(_hotelScopeWhereClause(hotelIds, args));
@@ -1881,7 +1926,7 @@ class DatabaseService {
   /// إنشاء مستند مكرر عند التعبئة التلقائية لمستند فندق مُزوَّد سلفاً.
   Future<Map<String, dynamic>?> getDocumentForHotelAndType(int hotelId, int documentTypeId) async {
     final db = await database;
-    final rows = await db.query('documents', where: 'hotel_id = ? AND document_type_id = ?', whereArgs: [hotelId, documentTypeId], limit: 1);
+    final rows = await db.query('documents', where: 'hotel_id = ? AND document_type_id = ? AND is_deleted = 0', whereArgs: [hotelId, documentTypeId], limit: 1);
     return rows.isNotEmpty ? rows.first : null;
   }
 
@@ -1894,7 +1939,7 @@ class DatabaseService {
   /// الجلب، وأي قصّ للنتائج هنا قبل الترتيب قد يُسقط مستندات منتهية فعلية.
   Future<List<Map<String, dynamic>>> searchDocumentsByName(String query, {String? ownerType, List<int>? hotelIds}) async {
     final db = await database;
-    final where = <String>['(d.name LIKE ? OR dt.name LIKE ?)'];
+    final where = <String>['(d.name LIKE ? OR dt.name LIKE ?)', 'd.is_deleted = 0'];
     final args = <dynamic>['%$query%', '%$query%'];
     if (ownerType != null) {
       where.add('d.owner_type = ?');
@@ -1928,6 +1973,7 @@ class DatabaseService {
       FROM documents d
       LEFT JOIN document_types dt ON dt.id = d.document_type_id
       LEFT JOIN document_categories dc ON dc.id = dt.category_id
+      WHERE d.is_deleted = 0
       ''');
   }
 
@@ -1942,7 +1988,7 @@ class DatabaseService {
       FROM documents d
       LEFT JOIN document_types dt ON dt.id = d.document_type_id
       LEFT JOIN document_categories dc ON dc.id = dt.category_id
-      WHERE d.hotel_id IS NULL AND d.owner_type = 'hotel'
+      WHERE d.hotel_id IS NULL AND d.owner_type = 'hotel' AND d.is_deleted = 0
       ORDER BY d.created_at DESC
       ''');
   }
@@ -1961,7 +2007,7 @@ class DatabaseService {
       FROM documents d
       LEFT JOIN document_types dt ON dt.id = d.document_type_id
       LEFT JOIN document_categories dc ON dc.id = dt.category_id
-      WHERE d.hotel_id = ? AND d.owner_type = 'hotel'
+      WHERE d.hotel_id = ? AND d.owner_type = 'hotel' AND d.is_deleted = 0
       ORDER BY d.created_at DESC
       ''',
       [hotelId],
@@ -1974,7 +2020,7 @@ class DatabaseService {
   /// ومجتمعة بـAND. فلتر الحالة يبقى في طبقة العرض (يعتمد على تاريخ اليوم).
   Future<List<Map<String, dynamic>>> searchDocumentsAdvanced({String? query, List<int>? hotelIds, int? documentTypeId}) async {
     final db = await database;
-    final where = <String>[];
+    final where = <String>['d.is_deleted = 0'];
     final args = <dynamic>[];
     if (query != null && query.trim().isNotEmpty) {
       where.add('(d.name LIKE ? OR dt.name LIKE ? OR d.document_number LIKE ?)');
@@ -2172,11 +2218,11 @@ class DatabaseService {
   }
 
 
-  Future<List<Map<String, dynamic>>> getInvoices(int hotelId) async { final db = await database; return await db.query('invoices', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
+  Future<List<Map<String, dynamic>>> getInvoices(int hotelId) async { final db = await database; return await db.query('invoices', where: 'hotel_id = ? AND is_deleted = 0', whereArgs: [hotelId], orderBy: 'id DESC'); }
   Future<int> insertInvoice(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoices', data); }
   Future<Map<String, dynamic>?> findDuplicateInvoice(int hotelId, String taxNumber, String invoiceNumber) async { final db = await database; final res = await db.query('invoices', where: 'hotel_id = ? AND tax_number = ? AND invoice_number = ?', whereArgs: [hotelId, taxNumber, invoiceNumber], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<Map<String, dynamic>?> findDuplicateInvoiceByContent(int hotelId, String taxNumber, String date, double totalAmount) async { final db = await database; final res = await db.query('invoices', where: 'hotel_id = ? AND tax_number = ? AND date = ? AND total_amount = ?', whereArgs: [hotelId, taxNumber, date, totalAmount], limit: 1); return res.isNotEmpty ? res.first : null; }
-  Future<List<Map<String, dynamic>>> getInvoicesBySupplier({required int hotelId, required String companyName, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ? AND company_name = ?'; List<dynamic> args = [hotelId, companyName]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
+  Future<List<Map<String, dynamic>>> getInvoicesBySupplier({required int hotelId, required String companyName, String? startDate, String? endDate}) async { final db = await database; String where = 'hotel_id = ? AND company_name = ? AND is_deleted = 0'; List<dynamic> args = [hotelId, companyName]; if (startDate != null) { where += ' AND date >= ?'; args.add(startDate); } if (endDate != null) { where += ' AND date <= ?'; args.add(endDate); } return await db.query('invoices', where: where, whereArgs: args, orderBy: 'date DESC'); }
 
   /// يبني شرط WHERE مشتركاً لمركز الفواتير الضريبية (يدعم فندقاً واحداً/عدة
   /// فنادق/كل الفنادق معاً) — يُستخدم من استعلامي الملخص والقائمة المُرقّمة معاً
@@ -2198,7 +2244,7 @@ class DatabaseService {
     bool? isPosted,
     String? searchQuery,
   }) {
-    final where = <String>[];
+    final where = <String>['is_deleted = 0'];
     final args = <Object?>[];
     if (hotelIds != null && hotelIds.isNotEmpty) {
       where.add('hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})');
@@ -2337,13 +2383,13 @@ class DatabaseService {
   Future<int> insertInvoiceAuditLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('invoice_audit_log', data); }
   Future<List<Map<String, dynamic>>> getInvoiceAuditLog(int invoiceId) async { final db = await database; return await db.query('invoice_audit_log', where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id DESC'); }
 
-  Future<List<Map<String, dynamic>>> getContracts(int hotelId) async { final db = await database; return await db.query('contracts', where: 'hotel_id = ?', whereArgs: [hotelId], orderBy: 'id DESC'); }
+  Future<List<Map<String, dynamic>>> getContracts(int hotelId) async { final db = await database; return await db.query('contracts', where: 'hotel_id = ? AND is_deleted = 0', whereArgs: [hotelId], orderBy: 'id DESC'); }
   /// كل العقود عبر كل الفنادق — راجع تعليق getAllPendingExpensesAcrossHotels
   /// لسبب وجود هذه النسخة غير المقيَّدة بفندق (البحث الشامل فقط).
-  Future<List<Map<String, dynamic>>> getAllContractsAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('contracts', orderBy: 'id DESC', limit: limit); }
+  Future<List<Map<String, dynamic>>> getAllContractsAcrossHotels({int limit = 500}) async { final db = await database; return await db.query('contracts', where: 'is_deleted = 0', orderBy: 'id DESC', limit: limit); }
   Future<int> insertContract(Map<String, dynamic> data) async { final db = await database; return await db.insert('contracts', data); }
   Future<void> insertContractWithPayments(Map<String, dynamic> cd, List<Map<String, dynamic>> pd) async { final db = await database; await db.transaction((txn) async { final cId = await txn.insert('contracts', cd); for (var p in pd) { p['contract_id'] = cId; await txn.insert('contract_payments', p); } }); }
-  Future<List<Map<String, dynamic>>> getContractPayments(int cId) async { final db = await database; return await db.query('contract_payments', where: 'contract_id = ?', whereArgs: [cId], orderBy: 'date ASC'); }
+  Future<List<Map<String, dynamic>>> getContractPayments(int cId) async { final db = await database; return await db.query('contract_payments', where: 'contract_id = ? AND is_deleted = 0', whereArgs: [cId], orderBy: 'date ASC'); }
   Future<int> insertContractPayment(Map<String, dynamic> data) async { final db = await database; return await db.insert('contract_payments', data); }
 
   Future<Map<String, double>> getVaultBalances(int hotelId) async { final db = await database; final res = await db.query('vault_balances', where: 'hotel_id = ?', whereArgs: [hotelId]); Map<String, double> b = {'cash': 0.0, 'bank': 0.0}; if (res.isEmpty) { await db.insert('vault_balances', {'hotel_id': hotelId, 'type': 'cash', 'balance': 0.0}); await db.insert('vault_balances', {'hotel_id': hotelId, 'type': 'bank', 'balance': 0.0}); return b; } for (var r in res) { b[r['type'] as String] = (r['balance'] as num).toDouble(); } return b; }
@@ -2372,7 +2418,7 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getSettlementAccounts({required int hotelId, String? type}) async { final db = await database; String w = 'hotel_id = ?'; List<dynamic> args = [hotelId]; if (type != null) { w += ' AND type = ?'; args.add(type); } return await db.query('settlement_accounts', where: w, whereArgs: args); }
   Future<Map<String, dynamic>?> getSettlementAccountByName(int hotelId, String name, String type) async { final db = await database; final res = await db.query('settlement_accounts', where: 'hotel_id = ? AND name = ? AND type = ?', whereArgs: [hotelId, name, type], limit: 1); return res.isNotEmpty ? res.first : null; }
   Future<int> insertSettlement(Map<String, dynamic> data) async { final db = await database; return await db.insert('settlements', data); }
-  Future<List<Map<String, dynamic>>> getSettlements({String? type, int? accountId, int? creditorHotelId, int? debtorHotelId, int? hotelId}) async { final db = await database; String w = '1=1'; List<dynamic> args = []; if (type != null) { w += ' AND type = ?'; args.add(type); } if (accountId != null) { w += ' AND account_id = ?'; args.add(accountId); } if (creditorHotelId != null) { w += ' AND creditor_hotel_id = ?'; args.add(creditorHotelId); } if (debtorHotelId != null) { w += ' AND debtor_hotel_id = ?'; args.add(debtorHotelId); } if (hotelId != null) { w += ' AND (creditor_hotel_id = ? OR debtor_hotel_id = ?)'; args.addAll([hotelId, hotelId]); } return await db.query('settlements', where: w, whereArgs: args, orderBy: 'date DESC'); }
+  Future<List<Map<String, dynamic>>> getSettlements({String? type, int? accountId, int? creditorHotelId, int? debtorHotelId, int? hotelId}) async { final db = await database; String w = 'is_deleted = 0'; List<dynamic> args = []; if (type != null) { w += ' AND type = ?'; args.add(type); } if (accountId != null) { w += ' AND account_id = ?'; args.add(accountId); } if (creditorHotelId != null) { w += ' AND creditor_hotel_id = ?'; args.add(creditorHotelId); } if (debtorHotelId != null) { w += ' AND debtor_hotel_id = ?'; args.add(debtorHotelId); } if (hotelId != null) { w += ' AND (creditor_hotel_id = ? OR debtor_hotel_id = ?)'; args.addAll([hotelId, hotelId]); } return await db.query('settlements', where: w, whereArgs: args, orderBy: 'date DESC'); }
   Future<int> updateSettlement(Map<String, dynamic> data, int id) async { final db = await database; return await db.update('settlements', data, where: 'id = ?', whereArgs: [id]); }
   Future<int> deleteSettlement(int id) async { final db = await database; return await db.delete('settlements', where: 'id = ?', whereArgs: [id]); }
   Future<int> insertSettlementTransaction(Map<String, dynamic> data) async { final db = await database; return await db.transaction((txn) async { final id = await txn.insert('settlement_transactions', data); final sId = data['settlement_id']; final trans = await txn.query('settlement_transactions', where: 'settlement_id = ?', whereArgs: [sId]); double tp = 0; for (var t in trans) { tp += (t['amount'] as num).toDouble(); } final s = await txn.query('settlements', where: 'id = ?', whereArgs: [sId]); if (s.isNotEmpty) { final amt = (s.first['amount'] as num).toDouble(); final status = tp >= amt ? 'paid' : 'open'; await txn.update('settlements', {'total_paid': tp, 'status': status}, where: 'id = ?', whereArgs: [sId]); } return id; }); }
@@ -2381,6 +2427,57 @@ class DatabaseService {
 
   Future<int> deleteById(String table, int id) async { final db = await database; return await db.delete(table, where: 'id = ?', whereArgs: [id]); }
   Future<int> updateById(String table, Map<String, dynamic> data, int id) async { final db = await database; return await db.update(table, data, where: 'id = ?', whereArgs: [id]); }
+
+  /// حذف ناعم عام — يُستخدم من TrashRepository لكل الجداول المُدرَجة في
+  /// _trashableTables بدل استدعاء deleteById مباشرة. لا يحذف الصف، فقط يعلّمه
+  /// ويُخفيه من استعلامات "القائمة الافتراضية" في كل مستودع (WHERE is_deleted = 0).
+  Future<int> softDeleteById(String table, int id, {String? deletedBy, String? reason}) async {
+    final db = await database;
+    return await db.update(table, {
+      'is_deleted': 1,
+      'deleted_at': DateTime.now().toIso8601String(),
+      'deleted_by': deletedBy,
+      'delete_reason': reason,
+    }, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// استعادة عنصر من سلة المهملات — يعيد الصف تماماً كما كان (فقط يعكس أعمدة
+  /// الحذف الناعم، بلا أي أثر آخر — راجع متطلب "الاستعادة يجب أن تُعيد العنصر
+  /// تماماً كما كان قبل الحذف").
+  Future<int> restoreById(String table, int id) async {
+    final db = await database;
+    return await db.update(table, {
+      'is_deleted': 0,
+      'deleted_at': null,
+      'deleted_by': null,
+      'delete_reason': null,
+    }, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> insertTrashLog(Map<String, dynamic> data) async { final db = await database; return await db.insert('trash_log', data); }
+
+  /// نقل ناعم/استعادة جماعية لكل المصروفات المعلَّقة المولَّدة من مصروف مشترك
+  /// واحد — يُستدعى دائماً مع سلة المهملات للرأس نفسه (SharedExpenseDistributionRepository)
+  /// حتى تتحرك التوابع مع رأسها معاً (CASCADE الحقيقي لا يفيد هنا لأن الحذف
+  /// الناعم UPDATE وليس DELETE).
+  Future<void> setPendingExpensesDeletedForSharedExpense(int sharedExpenseId, bool deleted) async {
+    final db = await database;
+    await db.update(
+      'pending_expenses',
+      deleted
+          ? {'is_deleted': 1, 'deleted_at': DateTime.now().toIso8601String()}
+          : {'is_deleted': 0, 'deleted_at': null, 'deleted_by': null, 'delete_reason': null},
+      where: 'shared_expense_id = ?',
+      whereArgs: [sharedExpenseId],
+    );
+  }
+
+  /// كل الصفوف المحذوفة ناعماً حالياً من جدول مُدرَج — تُستخدم من TrashRepository
+  /// لبناء قائمة سلة المهملات وتنفيذ التنظيف التلقائي بعد 30 يوماً.
+  Future<List<Map<String, dynamic>>> getTrashedRows(String table) async {
+    final db = await database;
+    return await db.query(table, where: 'is_deleted = 1');
+  }
 
   Future<List<Map<String, dynamic>>> getFinancialAccounts(int hotelId) async { final db = await database; return await db.query('financial_accounts', where: 'hotel_id = ?', whereArgs: [hotelId]); }
   Future<List<Map<String, dynamic>>> getPeopleAccounts(int hotelId) async { final db = await database; return await db.query('financial_accounts', where: 'hotel_id = ? AND category LIKE ?', whereArgs: [hotelId, 'person_%']); }

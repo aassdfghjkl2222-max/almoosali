@@ -1,12 +1,13 @@
 import '../core/database/database_service.dart';
 import '../models/inter_entity_transfer.dart';
 import '../services/financial_engine.dart';
+import 'trash_repository.dart';
 
 /// إنشاء واستعلام "التحويل بين المنشآت" — مبلغ يرسله فندق مباشرة إلى فندق
 /// آخر بلا مصروف مرتبط. سجل معلَّق بحت عند الإنشاء — بلا أي قيد محاسبي، بلا
 /// أي أثر على المركز المالي (راجع تعليق [InterEntityTransfer]). يمر بنفس
 /// دورة الحياة المحاسبية المعتمَدة الآن: معلّق ← تقرير يومي ← ترحيل —
-/// [markTransferredForDate] تُستدعى عند اعتماد التقرير اليومي (نفس لحظة
+/// [markTransferredForReport] تُستدعى عند اعتماد التقرير اليومي (نفس لحظة
 /// ExpenseRepository.transferExpenses)، و[bookTransfersForDate] تُستدعى عند
 /// الترحيل الفعلي فقط (راجع VaultRepository.postReportComponents).
 ///
@@ -21,6 +22,7 @@ import '../services/financial_engine.dart';
 class InterEntityTransferRepository {
   final _dbService = DatabaseService();
   final _financialEngine = FinancialEngine();
+  final _trashRepository = TrashRepository();
 
   Future<int> createTransfer({
     required int fromHotelId,
@@ -88,10 +90,11 @@ class InterEntityTransferRepository {
     await _dbService.updateById('inter_entity_transfers', newTransfer.toMap(), newTransfer.id!);
   }
 
-  /// حذف تحويل معلَّق لم يُعتمَد تقريره بعد — حذف مباشر، بلا عكس محاسبي.
+  /// نقل ناعم إلى سلة المهملات لتحويل معلَّق لم يُعتمَد تقريره بعد — بلا عكس
+  /// محاسبي (لا قيد سُجِّل أصلاً طالما لم يُعتمَد).
   Future<void> deleteTransfer(InterEntityTransfer transfer) async {
     await _ensureTransferEditable(transfer.id!);
-    await _dbService.deleteById('inter_entity_transfers', transfer.id!);
+    await _trashRepository.trash('inter_entity_transfer', transfer.id!, transfer.statement);
   }
 
   Future<List<InterEntityTransfer>> getForHotel(int hotelId) async {
@@ -99,21 +102,37 @@ class InterEntityTransferRepository {
     return data.map((e) => InterEntityTransfer.fromMap(e)).toList();
   }
 
-  /// كل التحويلات المعلَّقة (غير المعتمَدة) لهذا الفندق بهذا التاريخ تحديداً —
-  /// كمُرسِل فقط (fromHotelId)، لعرضها ضمن التقرير اليومي واعتمادها معه.
-  Future<List<InterEntityTransfer>> getPendingForHotelAndDate(int hotelId, String date) async {
+  /// كل التحويلات (بأي حالة، بأي اتجاه) بين هذا الفندق وفندق آخر تحديداً —
+  /// "كشف الحساب" الكامل بينهما لعرضه عند التصفّح من InterEntityDebtsPage
+  /// (Financial Center ← ديون المنشآت ← فندق ← سجل التحويلات).
+  Future<List<InterEntityTransfer>> getHistoryBetween(int hotelId, int otherHotelId) async {
+    final all = await getForHotel(hotelId);
+    return all.where((t) => t.fromHotelId == otherHotelId || t.toHotelId == otherHotelId).toList();
+  }
+
+  /// كل التحويلات المعلَّقة (غير المعتمَدة) لهذا الفندق — كمُرسِل فقط
+  /// (fromHotelId)، بأي تاريخ — لعرضها ضمن التقرير اليومي بغض النظر عن تاريخ
+  /// التقرير المعروض حالياً، تماماً كمصروفات معلَّقة عادية (راجع
+  /// ExpenseRepository.getPendingExpenses بلا أي قيد تاريخ). عدم تقييدها
+  /// بتاريخ التقرير يمنع مشكلة "تحويل أُنشئ اليوم لا يظهر" حين يفتح التقرير
+  /// افتراضياً على تاريخ الأمس (راجع FinancialSummaryPage._selectedDate).
+  Future<List<InterEntityTransfer>> getAllPendingForHotel(int hotelId) async {
     final data = await _dbService.getInterEntityTransfers(hotelId);
-    return data.map((e) => InterEntityTransfer.fromMap(e)).where((t) => t.fromHotelId == hotelId && t.date == date && !t.isTransferred).toList();
+    return data.map((e) => InterEntityTransfer.fromMap(e)).where((t) => t.fromHotelId == hotelId && !t.isTransferred).toList();
   }
 
   /// يُستدعى عند اعتماد التقرير اليومي (نفس لحظة
-  /// ExpenseRepository.transferExpenses) — يقفل كل تحويلات هذا اليوم من
-  /// التعديل/الحذف، بلا أي قيد محاسبي بعد (ذاك يبقى مؤجَّلاً إلى الترحيل
-  /// الفعلي عبر [bookTransfersForDate]).
-  Future<void> markTransferredForDate(int hotelId, String date) async {
-    final pending = await getPendingForHotelAndDate(hotelId, date);
+  /// ExpenseRepository.transferExpenses) — يقفل كل التحويلات المعلَّقة الحالية
+  /// لهذا الفندق من التعديل/الحذف **ويُحدِّث تاريخها إلى تاريخ هذا التقرير**
+  /// (بلا أي قيد محاسبي بعد، ذاك يبقى مؤجَّلاً إلى الترحيل الفعلي عبر
+  /// [bookTransfersForDate]) — ضروري لأن [bookTransfersForDate] عند الترحيل
+  /// الفعلي لاحقاً ما زالت تُطابق حسب `date == fund.date` بلا تغيير (لتفادي أي
+  /// ترحيل مزدوج بلا إضافة عمود حالة جديد)؛ تاريخ الإنشاء الحقيقي يبقى محفوظاً
+  /// دائماً في [InterEntityTransfer.createdAt] فلا يُفقَد شيء.
+  Future<void> markTransferredForReport(int hotelId, String reportDate) async {
+    final pending = await getAllPendingForHotel(hotelId);
     for (final t in pending) {
-      await _dbService.updateById('inter_entity_transfers', {'is_transferred': 1}, t.id!);
+      await _dbService.updateById('inter_entity_transfers', {'is_transferred': 1, 'date': reportDate}, t.id!);
     }
   }
 

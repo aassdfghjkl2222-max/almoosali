@@ -11,6 +11,7 @@ import 'models/hotel.dart';
 import 'pages/login/security_setup_page.dart';
 import 'pages/login/pin_login_page.dart';
 import 'repositories/document_repository.dart';
+import 'repositories/trash_repository.dart';
 import 'services/document_notification_service.dart';
 import 'services/security_service.dart';
 
@@ -37,6 +38,10 @@ void main() async {
   // مزامنة شاملة صامتة لتنبيهات انتهاء المستندات عند كل إقلاع — بلا await
   // عمداً حتى لا تُؤخِّر ظهور أول شاشة.
   DocumentRepository().getAllDocuments().then(DocumentNotificationService.rescheduleAll);
+
+  // تنظيف سلة المهملات: حذف نهائي صامت لكل عنصر تجاوز 30 يوماً — بلا await
+  // عمداً (لا يؤخّر أول شاشة)، بلا مؤقّت/خدمة خلفية (راجع TrashRepository.purgeExpired).
+  TrashRepository().purgeExpired();
 }
 
 class ManazelApp extends StatelessWidget {

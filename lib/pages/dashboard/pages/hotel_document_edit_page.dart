@@ -17,6 +17,7 @@ import '../../../services/attachment_service.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/app_dialog.dart';
 import '../../../widgets/common/app_text_field.dart';
+import '../../../widgets/common/trash_confirm_dialogs.dart';
 
 /// تعبئة/تعديل بيانات نسخة الفندق من مستند مرجعي (رقم، تواريخ، جهة مصدرة،
 /// ملاحظات، مرفقات) — لا يُسمح بإنشاء نوع مستند جديد من هنا (يُدار حصراً من
@@ -120,39 +121,23 @@ class _HotelDocumentEditPageState extends State<HotelDocumentEditPage> {
     if (mounted) setState(() => _isSaving = false);
   }
 
-  /// حذف المستند نهائياً — بما في ذلك كل مرفقاته (صفوفاً وملفات فعلية على
-  /// القرص، وليس فقط الصفوف عبر ON DELETE CASCADE). إن كان المستند نسخة
-  /// فندق تلقائية مرتبطة بنوع مرجعي (owner_type='hotel')، تُعاد تزويد
-  /// الفندق فوراً بنسخة فارغة من نفس النوع بدل ترك فجوة — الحذف هنا يعني
-  /// "إعادة تعيين بيانات هذا المستند" وليس "هذا الفندق لم يعد بحاجة لهذا
-  /// النوع" (يُضبط ذلك من البيانات المرجعية فقط). لا ينطبق هذا على مستندات
-  /// موظف/مورد المرتبطة بنوع، لأنها ليست نُسخاً تلقائية للفندق أصلاً.
+  /// نقل ناعم إلى سلة المهملات (لا حذف فعلي، لا حذف ملفات — راجع
+  /// DocumentRepository.deleteDocument). إن كان المستند نسخة فندق تلقائية
+  /// مرتبطة بنوع مرجعي (owner_type='hotel')، تُعاد تزويد الفندق فوراً بنسخة
+  /// فارغة من نفس النوع بدل ترك فجوة — النقل للسلة هنا يعني "إعادة تعيين
+  /// بيانات هذا المستند" وليس "هذا الفندق لم يعد بحاجة لهذا النوع" (يُضبط
+  /// ذلك من البيانات المرجعية فقط). لا ينطبق هذا على مستندات موظف/مورد
+  /// المرتبطة بنوع، لأنها ليست نُسخاً تلقائية للفندق أصلاً.
   Future<void> _deleteDocument() async {
     final wasHotelOwnedType = _document.isLinkedToType && _document.ownerType == Document.ownerTypeHotel;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-        title: const Text("حذف المستند"),
-        content: Text(_attachments.isEmpty
-            ? "هل أنت متأكد من حذف هذا المستند نهائياً؟"
-            : "سيؤدي هذا إلى حذف المستند و${_attachments.length} مرفق(ات) مرتبط(ة) به نهائياً. هل أنت متأكد؟"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("حذف", style: TextStyle(color: AppColors.danger))),
-        ],
-      ),
-    );
-    if (confirm != true || _document.id == null) return;
-
-    for (final attachment in _attachments) {
-      await AttachmentService.deleteFile(attachment.filePath);
-    }
-    await _repository.deleteDocument(_document.id!);
-    if (wasHotelOwnedType) {
-      await _repository.reprovisionHotelDocumentTypes();
-    }
-    if (mounted) Navigator.pop(context, true);
+    if (_document.id == null) return;
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteDocument(_document);
+      if (wasHotelOwnedType) {
+        await _repository.reprovisionHotelDocumentTypes();
+      }
+      if (mounted) Navigator.pop(context, true);
+    });
   }
 
   // ---------------- المرفقات ----------------

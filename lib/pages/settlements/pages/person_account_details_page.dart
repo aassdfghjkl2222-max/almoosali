@@ -12,6 +12,7 @@ import '../../../services/pdf_service.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../models/hotel.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
+import '../../../widgets/common/trash_confirm_dialogs.dart';
 import '../../../core/hotel_visual_identity.dart';
 import 'add_person_operation_page.dart';
 
@@ -131,25 +132,11 @@ class _PersonAccountDetailsPageState extends State<PersonAccountDetailsPage> {
   }
 
   void _confirmDeleteOperation(Settlement s) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("تأكيد الحذف"),
-        content: const Text("هل أنت متأكد من حذف هذه العملية؟"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إلغاء")),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context); // close dialog
-              Navigator.pop(context); // close bottom sheet
-              await _repository.deleteSettlement(s.id!);
-              _loadData();
-            },
-            child: const Text("حذف", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+    TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteSettlement(s);
+      if (context.mounted) Navigator.pop(context); // close bottom sheet
+      _loadData();
+    });
   }
 
   Widget _buildDetailRow(String label, String value) {

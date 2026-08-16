@@ -2,6 +2,7 @@ import '../core/database/database_service.dart';
 import '../models/invoice.dart';
 import '../models/invoice_attachment.dart';
 import '../models/invoice_audit_log_entry.dart';
+import 'trash_repository.dart';
 
 /// نصّ خاص يُستخدم كقيمة فلتر "غير مصنَّف" لتصنيف المصروف — لأن null لا
 /// يمكن تمريره كقيمة داخل مجموعة Set لاختيار الفلتر في الواجهة.
@@ -41,6 +42,7 @@ class InvoicesSummary {
 
 class InvoiceRepository {
   final _dbService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   Future<List<Invoice>> getAllInvoices(int? hotelId) async {
     if (hotelId == null) return [];
@@ -72,8 +74,11 @@ class InvoiceRepository {
     return Invoice.fromMap(map);
   }
 
-  Future<int> deleteInvoice(int id) async {
-    return await _dbService.deleteById('invoices', id);
+  /// نقل ناعم إلى سلة المهملات — راجع TrashRepository. لا حذف للملفات الفعلية
+  /// هنا إطلاقاً (يبقى المرفق سليماً لو استُعيدت الفاتورة لاحقاً) — يحدث فقط
+  /// عند الحذف النهائي عبر TrashRepository._deleteAttachmentFiles.
+  Future<void> deleteInvoice(Invoice invoice) async {
+    await _trashRepository.trash('invoice', invoice.id!, invoice.invoiceNumber);
   }
 
   Future<int> updateInvoice(Invoice invoice) async {

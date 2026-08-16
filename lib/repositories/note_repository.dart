@@ -1,8 +1,10 @@
 import '../core/database/database_service.dart';
 import '../models/note.dart';
+import 'trash_repository.dart';
 
 class NoteRepository {
   final _dbService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   Future<List<Note>> getAllNotes(int? hotelId) async {
     if (hotelId == null) return [];
@@ -26,7 +28,8 @@ class NoteRepository {
     return await _dbService.updateById('notes', note.toMap(), note.id!);
   }
 
-  Future<int> deleteNote(int id) async {
-    return await _dbService.deleteById('notes', id);
+  /// نقل ناعم إلى سلة المهملات — راجع TrashRepository. لا حذف فعلي هنا إطلاقاً.
+  Future<void> deleteNote(Note note) async {
+    await _trashRepository.trash('note', note.id!, note.title);
   }
 }

@@ -16,6 +16,7 @@ import '../../../repositories/hotel_repository.dart';
 import '../../../services/pdf_service.dart';
 import '../../../services/vault_service.dart';
 import '../../../widgets/common/app_card.dart';
+import '../../../widgets/common/trash_confirm_dialogs.dart';
 import '../../../widgets/vault/amount_source_selector.dart';
 import '../../../widgets/app_button.dart';
 import '../../../core/hotel_visual_identity.dart';
@@ -75,27 +76,10 @@ class _InterEntityDebtDetailsPageState extends State<InterEntityDebtDetailsPage>
   }
 
   void _showDeleteConfirmation() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("تأكيد الحذف"),
-        content: const Text("هل أنت متأكد من حذف هذه العملية؟"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("إلغاء"),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _repository.deleteSettlement(_settlement.id!);
-              if (context.mounted) Navigator.pop(context, true);
-            },
-            child: const Text("حذف", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+    TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteSettlement(_settlement);
+      if (context.mounted) Navigator.pop(context, true);
+    });
   }
 
   Future<void> _addPayment() async {

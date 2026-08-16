@@ -10,7 +10,7 @@ import '../../models/pending_expense.dart';
 import '../../models/shared_expense.dart';
 import '../../repositories/shared_expense_distribution_repository.dart';
 import '../../widgets/common/app_card.dart';
-import '../../widgets/common/app_dialog.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import 'add_edit_shared_expense_page.dart';
 
 /// تفاصيل مصروف مشترك: رأس المصروف (بمرجعه SE-000001) + كل مصروف معلَّق
@@ -64,18 +64,11 @@ class _SharedExpenseDetailsPageState extends State<SharedExpenseDetailsPage> {
   }
 
   Future<void> _delete() async {
-    await AppDialog.confirmAction(
-      context: context,
-      title: "حذف المصروف المشترك",
-      message: "سيُحذف رأس المصروف المشترك \"${_header!.reference}\" وكل ${_rows.length} مصروف معلَّق مولَّد منه نهائياً. هذا الإجراء لا يمكن التراجع عنه.",
-      confirmLabel: "حذف نهائي",
-      isDangerous: true,
-      onConfirm: () async {
-        await _repository.deleteSharedExpense(widget.sharedExpenseId);
-        _changed = true;
-        if (mounted) Navigator.pop(context, true);
-      },
-    );
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteSharedExpense(widget.sharedExpenseId);
+      _changed = true;
+      if (mounted) Navigator.pop(context, true);
+    });
   }
 
   @override

@@ -11,6 +11,7 @@ import '../../widgets/common/app_drawer.dart';
 import '../../widgets/common/app_loading.dart';
 import '../../models/hotel.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 
 class NotesPage extends StatefulWidget {
   final Hotel hotel;
@@ -155,7 +156,7 @@ class _NotesPageState extends State<NotesPage> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      _deleteNote(note.id!);
+                      _deleteNote(note);
                     },
                     icon: const Icon(Icons.delete_outline),
                     label: const Text("حذف"),
@@ -175,23 +176,11 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
-  void _deleteNote(int id) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("حذف المذكرة"),
-        content: const Text("هل أنت متأكد من حذف هذه المذكرة؟"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("حذف", style: TextStyle(color: AppColors.danger))),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await _repository.deleteNote(id);
-      setState(() {});
-    }
+  void _deleteNote(Note note) async {
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _repository.deleteNote(note);
+      if (mounted) setState(() {});
+    });
   }
 
   void _showAddNoteDialog(BuildContext context) {

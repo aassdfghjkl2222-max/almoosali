@@ -1,12 +1,14 @@
 import '../core/database/database_service.dart';
 import '../models/pending_expense.dart';
 import '../models/pending_expense_attachment.dart';
+import 'trash_repository.dart';
 
 /// إدارة المصروفات المعلَّقة نفسها (CRUD + ترحيل + مرفقات + تحليل حسب الفئة).
 /// إدارة الفئات المالية (مصروفات/إيرادات) انتقلت بالكامل إلى
 /// FinancialCategoryRepository — راجع تعليقها لسبب توحيد المصدر.
 class ExpenseRepository {
   final _dbService = DatabaseService();
+  final _trashRepository = TrashRepository();
 
   Future<List<PendingExpense>> getPendingExpenses({int? hotelId, bool? isTransferred}) async {
     if (hotelId == null) return [];
@@ -38,12 +40,15 @@ class ExpenseRepository {
     return await _dbService.updateById('pending_expenses', expense.toMap(), expense.id!);
   }
 
-  /// نفس حماية [updatePendingExpense] — راجع تعليقها.
-  Future<int> deletePendingExpense(int id) async {
-    if (await _dbService.isPendingExpenseTransferred(id)) {
+  /// نفس حماية [updatePendingExpense] — راجع تعليقها. نقل ناعم إلى سلة
+  /// المهملات (لا حذف فعلي) — الحارس أعلاه يضمن عدم وصول أي مصروف مُرحَّل
+  /// إلى هذا المسار أصلاً، فسلة المهملات لا تشمل إلا المصروفات المعلَّقة غير
+  /// المُرحَّلة فقط، كما هو مُقرَّر.
+  Future<void> deletePendingExpense(PendingExpense expense) async {
+    if (await _dbService.isPendingExpenseTransferred(expense.id!)) {
       throw StateError('لا يمكن حذف مصروف تم ترحيله بالفعل إلى تقرير مالي مُعتمد.');
     }
-    return await _dbService.deleteById('pending_expenses', id);
+    await _trashRepository.trash('pending_expense', expense.id!, expense.statement);
   }
 
   Future<void> transferExpenses(List<int> ids) async {
@@ -87,7 +92,7 @@ class ExpenseRepository {
   }) async {
     if (hotelIds.isEmpty) return [];
     final db = await _dbService.database;
-    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})'];
+    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})', 'pe.is_deleted = 0'];
     final args = <dynamic>[...hotelIds];
     if (fromDate != null) {
       where.add('pe.date >= ?');
@@ -119,7 +124,7 @@ class ExpenseRepository {
   }) async {
     if (hotelIds.isEmpty) return [];
     final db = await _dbService.database;
-    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})', 'pe.category_id = ?'];
+    final where = <String>['pe.hotel_id IN (${List.filled(hotelIds.length, '?').join(',')})', 'pe.category_id = ?', 'pe.is_deleted = 0'];
     final args = <dynamic>[...hotelIds, categoryId];
     if (fromDate != null) {
       where.add('pe.date >= ?');

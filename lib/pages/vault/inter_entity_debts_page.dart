@@ -10,6 +10,7 @@ import '../../../repositories/hotel_repository.dart';
 import '../../../services/financial_engine.dart';
 import '../../../widgets/common/app_card.dart';
 import '../../../widgets/common/hotel_identity_title.dart';
+import 'inter_entity_transfer_history_page.dart';
 import 'settle_debt_page.dart';
 
 class InterEntityDebtsPage extends StatefulWidget {
@@ -49,6 +50,20 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
   String _hotelName(int? id) {
     if (id == null) return "منشأة أخرى";
     return _allHotels.firstWhere((h) => h.id == id, orElse: () => Hotel(id: id, arabicName: "منشأة #$id", englishName: '', city: '')).arabicName;
+  }
+
+  Hotel? _hotelById(int? id) {
+    if (id == null) return null;
+    for (final h in _allHotels) {
+      if (h.id == id) return h;
+    }
+    return null;
+  }
+
+  void _openHistory(int? otherHotelId) {
+    final otherHotel = _hotelById(otherHotelId);
+    if (otherHotel == null) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => InterEntityTransferHistoryPage(hotel: widget.hotel, otherHotel: otherHotel)));
   }
 
   Future<void> _loadData() async {
@@ -130,6 +145,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
               color: Colors.deepOrange,
               btnLabel: "سداد الآن",
               identityColor: identityColor,
+              onCardTap: () => _openHistory(_otherHotelIdFromCategory(account.category)),
               onTap: () {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => SettleDebtPage(
                   hotel: widget.hotel,
@@ -154,6 +170,7 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
               color: Colors.blue,
               btnLabel: null,
               identityColor: identityColor,
+              onCardTap: () => _openHistory(_otherHotelIdFromCategory(account.category)),
               onTap: null,
             ),
             const SizedBox(height: AppSizes.sm),
@@ -170,9 +187,11 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
     required String? btnLabel,
     required Color identityColor,
     required VoidCallback? onTap,
+    required VoidCallback onCardTap,
   }) {
     return AppCard(
       identityAccent: identityColor,
+      onTap: onCardTap,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -182,6 +201,8 @@ class _InterEntityDebtsPageState extends State<InterEntityDebtsPage> with Single
               children: [
                 Text(hotelName, style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
                 Text(_formatCurrency(amount), style: AppTextStyles.title.copyWith(color: color, fontSize: 22)),
+                const SizedBox(height: 2),
+                Text("عرض سجل التحويلات", style: AppTextStyles.caption.copyWith(fontSize: 11, color: Colors.grey)),
               ],
             ),
           ),

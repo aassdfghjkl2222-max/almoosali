@@ -22,6 +22,7 @@ import '../../pages/documents/documents_hub_page.dart';
 import '../../pages/documents/contract_documents/contract_folder_browser_page.dart';
 import '../../pages/login/pin_login_page.dart';
 import '../../pages/master_data/master_data_hub_page.dart';
+import '../../pages/trash/trash_bin_page.dart';
 
 /// القائمة الرئيسية — مخصصة للأنظمة العامة الخاصة بالتطبيق فقط. أي نظام
 /// تشغيلي خاص بفندق معيّن (التقرير اليومي، مركز التحليل، المركز المالي،
@@ -127,6 +128,14 @@ class AppDrawer extends StatelessWidget {
                   color: color,
                   onTap: () => Navigator.push(context, premiumRoute(const MasterDataHubPage())),
                 ),
+                if (PermissionService.instance.hasPermission(AppPermissions.settingsAccess))
+                  _drawerItem(
+                    context: context,
+                    icon: Icons.delete_outline_rounded,
+                    title: "سلة المهملات",
+                    color: color,
+                    onTap: () => Navigator.push(context, premiumRoute(const TrashBinPage())),
+                  ),
                 const _DrawerDivider(),
                 _drawerItem(
                   context: context,

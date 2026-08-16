@@ -14,10 +14,10 @@ import '../../models/invoice_attachment.dart';
 import '../../models/invoice_audit_log_entry.dart';
 import '../../repositories/hotel_repository.dart';
 import '../../repositories/invoice_repository.dart';
-import '../../repositories/supplier_repository.dart';
 import '../../services/attachment_service.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import '../../core/hotel_visual_identity.dart';
 import 'add_invoice_page.dart';
 import 'invoice_audit_log_page.dart';
@@ -36,7 +36,6 @@ class InvoiceDetailsPage extends StatefulWidget {
 
 class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
   final _repository = InvoiceRepository();
-  final _supplierRepository = SupplierRepository();
   final _hotelRepository = HotelRepository();
   late Invoice _currentInvoice;
 
@@ -153,53 +152,16 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
 
   Future<void> _confirmDelete() async {
     if (_currentInvoice.id == null) return;
-    final hasDebt = await _supplierRepository.hasDebtForInvoice(_currentInvoice.id!);
-    if (!mounted) return;
-
-    final impactLines = <String>["إزالة الفاتورة نهائياً من السجلات."];
-    if (_attachments.isNotEmpty) impactLines.add("إزالة ${_attachments.length} مرفق(ات) مرتبط(ة) بها.");
-    if (hasDebt) impactLines.add("إزالة المديونية المرتبطة بها من كشف حساب المورد.");
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-        title: const Text("تأكيد حذف الفاتورة"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("سيؤدي حذف هذه الفاتورة إلى:"),
-            const SizedBox(height: AppSizes.sm),
-            ...impactLines.map((line) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("• "),
-                      Expanded(child: Text(line)),
-                    ],
-                  ),
-                )),
-            const SizedBox(height: AppSizes.sm),
-            const Text("هذا الإجراء نهائي ولا يمكن التراجع عنه.", style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("حذف نهائياً", style: TextStyle(color: AppColors.danger))),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-    await _performDelete();
+    await TrashConfirmDialogs.confirmMoveToTrash(context, _performDelete);
   }
 
+  /// نقل ناعم إلى سلة المهملات — لا حذف لملفات المرفقات ولا لمديونية المورد
+  /// المرتبطة هنا إطلاقاً (كلاهما يبقى سليماً طالما الفاتورة قابلة للاستعادة؛
+  /// راجع TrashRepository.permanentlyDelete لموعد حذف الملفات الفعلية الحقيقي).
   Future<void> _performDelete() async {
     final invoiceId = _currentInvoice.id!;
 
-    // نسجّل عملية الحذف أولاً في سجل التعديلات (يبقى بعد حذف الفاتورة نفسها).
+    // نسجّل عملية النقل للسلة أولاً في سجل التعديلات (يبقى حتى لو حُذفت الفاتورة نهائياً لاحقاً).
     await _repository.logAudit(InvoiceAuditLogEntry(
       invoiceId: invoiceId,
       hotelId: widget.hotel.id!,
@@ -209,13 +171,7 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
       occurredAt: DateTime.now().toIso8601String(),
     ));
 
-    // حذف الملفات الفعلية للمرفقات (سجلاتها في قاعدة البيانات تُحذف تلقائياً
-    // مع الفاتورة عبر ON DELETE CASCADE، لكن الملفات نفسها تحتاج حذفاً يدوياً).
-    for (final attachment in _attachments) {
-      await AttachmentService.deleteFile(attachment.filePath);
-    }
-
-    await _repository.deleteInvoice(invoiceId);
+    await _repository.deleteInvoice(_currentInvoice);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }

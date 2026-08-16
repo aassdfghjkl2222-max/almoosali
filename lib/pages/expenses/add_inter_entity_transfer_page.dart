@@ -12,6 +12,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import '../common/transaction_review_page.dart';
 
 /// "التحويل بين المنشآت" — تحويل مباشر لمبلغ بين هذا الفندق وفندق آخر، بلا
@@ -160,32 +161,10 @@ class _AddInterEntityTransferPageState extends State<AddInterEntityTransferPage>
   Future<void> _delete() async {
     final edit = widget.editTransfer;
     if (edit == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-        title: const Text("حذف التحويل"),
-        content: const Text("هل أنت متأكد من حذف هذا التحويل؟ سيُعكَس أثره المحاسبي بالكامل."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("إلغاء")),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            child: const Text("حذف"),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
       await _repository.deleteTransfer(edit);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
-        Navigator.pop(context, true);
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
-    }
+      if (mounted) Navigator.pop(context, true);
+    });
   }
 
   @override

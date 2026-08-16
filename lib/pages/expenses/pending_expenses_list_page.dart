@@ -17,6 +17,7 @@ import '../../services/financial_engine.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/common/app_card.dart';
 import '../../widgets/common/hotel_identity_title.dart';
+import '../../widgets/common/trash_confirm_dialogs.dart';
 import '../dashboard/widgets/dashboard_section_card.dart';
 import 'add_edit_shared_expense_page.dart';
 import 'add_inter_entity_transfer_page.dart';
@@ -473,15 +474,11 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
   }
 
   Future<void> _deleteTransfer(InterEntityTransfer transfer) async {
-    if (!await _confirmDelete("هل أنت متأكد من حذف تحويل \"${transfer.statement}\"؟ سيُعكَس أثره المحاسبي بالكامل.")) return;
-    try {
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
       await _transferRepo.deleteTransfer(transfer);
       _changed = true;
       _loadData();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
-    }
+    });
   }
 
   Future<void> _editExpense(PendingExpense expense, {bool lockToOwnerDrawing = false, bool lockToHotelAdvance = false}) async {
@@ -797,14 +794,10 @@ class _CategoryOperationsPageState extends State<_CategoryOperationsPage> {
   }
 
   Future<void> _deletePendingExpense(PendingExpense expense) async {
-    if (!await _confirmDelete("هل أنت متأكد من حذف \"${expense.statement}\"؟")) return;
-    try {
-      await _expenseRepo.deletePendingExpense(expense.id!);
+    await TrashConfirmDialogs.confirmMoveToTrash(context, () async {
+      await _expenseRepo.deletePendingExpense(expense);
       _changed = true;
       _loadData();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم الحذف")));
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('StateError: ', '')), backgroundColor: Colors.red));
-    }
+    });
   }
 }
